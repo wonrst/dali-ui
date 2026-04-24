@@ -20,6 +20,7 @@
 #include <dali-ui-foundation/dali-ui-foundation.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 #include <dali-ui-test-suite-utils.h>
 
 using namespace Dali;
@@ -33,14 +34,12 @@ const char* const PROPERTY_NAME_FONT_FAMILY = "fontFamily";
 const char* const PROPERTY_NAME_FONT_SIZE   = "fontSize";
 const char* const PROPERTY_NAME_TEXT_COLOR  = "textColor";
 
-Dali::Ui::Internal::TextVisualizer::PreparedText CreatePreparedText(const char* text, float fontSize, uint32_t clusterCount)
+Dali::Ui::Internal::TextVisualizer::PreparedText CreatePreparedText(const char* text, float fontSize)
 {
-  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText;
-  preparedText.SetOriginalText(Dali::String(text));
-  preparedText.SetFontSize(fontSize);
-  preparedText.SetClusterCount(clusterCount);
-  preparedText.SetPrepared(true);
-  return preparedText;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = Dali::String(text);
+  input.fontSize = fontSize;
+  return Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
 }
 } // namespace
 
@@ -285,6 +284,106 @@ int UtcDaliTextVisualizerPrepareEmptyTextP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerPreparedAsciiCharacterCountP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "abc";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetClusterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetLineBreakCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetParagraphCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedKoreanCharacterCountP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "가나다";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetClusterCount(), 3u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmojiCharacterCountP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.GetCharacterCount() > 0u);
+  DALI_TEST_CHECK(preparedText.GetCharacterCount() < input.text.Size());
+  DALI_TEST_EQUALS(preparedText.GetClusterCount(), preparedText.GetCharacterCount(), TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedMixedTextP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "A가😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetCharacters().Count(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetClusterCount(), 3u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmptyTextP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.Empty());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetClusterCount(), 0u, TEST_LOCATION);
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, exclusionRegions, layoutResult);
+  DALI_TEST_CHECK(layoutResult.Empty());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedLineBreakInfoSmokeP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "abc\ndef";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.GetLineBreakCount() > 0u);
+  DALI_TEST_CHECK(preparedText.GetParagraphCount() > 0u);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPrepareSimpleAsciiTextP(void)
 {
   UiTestApplication application;
@@ -418,7 +517,7 @@ int UtcDaliTextVisualizerLayoutIntervalsFullyBlockedP(void)
 int UtcDaliTextVisualizerPlaceholderLayoutBasicP(void)
 {
   UiTestApplication application;
-  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
   Dali::Vector<Rect<float>> exclusionRegions;
   Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
 
@@ -437,7 +536,7 @@ int UtcDaliTextVisualizerPlaceholderLayoutBasicP(void)
 int UtcDaliTextVisualizerPlaceholderLayoutWithExclusionP(void)
 {
   UiTestApplication application;
-  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
   Dali::Vector<Rect<float>> exclusionRegions;
   exclusionRegions.PushBack(Rect<float>(20.0f, 0.0f, 20.0f, 12.0f));
 
@@ -471,7 +570,7 @@ int UtcDaliTextVisualizerPlaceholderLayoutEmptyTextP(void)
 int UtcDaliTextVisualizerPlaceholderLayoutWidthChangeP(void)
 {
   UiTestApplication application;
-  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
   Dali::Vector<Rect<float>> exclusionRegions;
   Dali::Ui::Internal::TextVisualizer::LayoutResult narrowLayoutResult;
   Dali::Ui::Internal::TextVisualizer::LayoutResult wideLayoutResult;
@@ -487,7 +586,7 @@ int UtcDaliTextVisualizerPlaceholderLayoutWidthChangeP(void)
 int UtcDaliTextVisualizerPlaceholderLayoutFullBlockedLineP(void)
 {
   UiTestApplication application;
-  auto              preparedText = CreatePreparedText("abcdef", 10.0f, 6u);
+  auto              preparedText = CreatePreparedText("abcdef", 10.0f);
   Dali::Vector<Rect<float>> exclusionRegions;
   exclusionRegions.PushBack(Rect<float>(0.0f, 0.0f, 30.0f, 12.0f));
 

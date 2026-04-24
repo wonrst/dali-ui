@@ -17,6 +17,8 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/character-set-conversion.h>
+#include <dali-ui-foundation/internal/text/logical-model-impl.h>
+#include <dali-ui-foundation/internal/text/segmentation.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
@@ -24,21 +26,40 @@ namespace Dali::Ui::Internal::TextVisualizer
 
 PreparedText TextPreparer::Prepare(const Input& input)
 {
-  PreparedText preparedText;
+  PreparedText                      preparedText;
+  Dali::Vector<Text::Character>     characters;
+  Dali::Vector<Text::LineBreakInfo> lineBreakInfo;
+  Dali::Vector<Text::ParagraphRun>  paragraphInfo;
 
   preparedText.SetOriginalText(input.text);
   preparedText.SetFontFamily(input.fontFamily);
   preparedText.SetFontSize(input.fontSize);
-  preparedText.SetPrepared(true);
 
   if(!input.text.Empty())
   {
-    const auto* const utf8          = reinterpret_cast<const uint8_t*>(input.text.CStr());
-    const uint32_t    utf8ByteCount = input.text.Size();
+    const auto* const utf8               = reinterpret_cast<const uint8_t*>(input.text.CStr());
+    const uint32_t    utf8ByteCount      = input.text.Size();
+    const uint32_t    numberOfCharacters = Text::GetNumberOfUtf8Characters(utf8, utf8ByteCount);
 
-    // TODO: Connect shaping/fallback using existing text infrastructure.
-    preparedText.SetClusterCount(Text::GetNumberOfUtf8Characters(utf8, utf8ByteCount));
+    characters.Resize(numberOfCharacters);
+    const uint32_t convertedCharacterCount = Text::Utf8ToUtf32(utf8, utf8ByteCount, characters.Begin());
+    characters.Resize(convertedCharacterCount);
+
+    lineBreakInfo.Resize(convertedCharacterCount, TextAbstraction::LINE_NO_BREAK);
+    TextAbstraction::Segmentation segmentation = TextAbstraction::Segmentation::Get();
+    Text::SetLineBreakInfo(segmentation, characters, 0u, convertedCharacterCount, lineBreakInfo);
+
+    Text::LogicalModelPtr logicalModel = Text::LogicalModel::New();
+    logicalModel->mLineBreakInfo       = lineBreakInfo;
+    logicalModel->CreateParagraphInfo(0u, convertedCharacterCount);
+    paragraphInfo = logicalModel->mParagraphInfo;
   }
+
+  preparedText.SetCharacters(characters);
+  preparedText.SetLineBreakInfo(lineBreakInfo);
+  preparedText.SetParagraphInfo(paragraphInfo);
+  preparedText.SetClusterCount(preparedText.GetCharacterCount());
+  preparedText.SetPrepared(true);
 
   return preparedText;
 }

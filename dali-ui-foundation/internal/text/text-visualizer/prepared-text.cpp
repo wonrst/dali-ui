@@ -26,6 +26,9 @@ PreparedText::PreparedText()
   mFontFamily(),
   mFontSize(0.0f),
   mClusterCount(0u),
+  mCharacters(),
+  mLineBreakInfo(),
+  mParagraphInfo(),
   mPrepared(false)
 {
 }
@@ -70,6 +73,51 @@ uint32_t PreparedText::GetClusterCount() const
   return mClusterCount;
 }
 
+void PreparedText::SetCharacters(const Dali::Vector<Text::Character>& characters)
+{
+  mCharacters = characters;
+}
+
+const Dali::Vector<Text::Character>& PreparedText::GetCharacters() const
+{
+  return mCharacters;
+}
+
+uint32_t PreparedText::GetCharacterCount() const
+{
+  return static_cast<uint32_t>(mCharacters.Count());
+}
+
+void PreparedText::SetLineBreakInfo(const Dali::Vector<Text::LineBreakInfo>& lineBreakInfo)
+{
+  mLineBreakInfo = lineBreakInfo;
+}
+
+const Dali::Vector<Text::LineBreakInfo>& PreparedText::GetLineBreakInfo() const
+{
+  return mLineBreakInfo;
+}
+
+uint32_t PreparedText::GetLineBreakCount() const
+{
+  return static_cast<uint32_t>(mLineBreakInfo.Count());
+}
+
+void PreparedText::SetParagraphInfo(const Dali::Vector<Text::ParagraphRun>& paragraphInfo)
+{
+  mParagraphInfo = paragraphInfo;
+}
+
+const Dali::Vector<Text::ParagraphRun>& PreparedText::GetParagraphInfo() const
+{
+  return mParagraphInfo;
+}
+
+uint32_t PreparedText::GetParagraphCount() const
+{
+  return static_cast<uint32_t>(mParagraphInfo.Count());
+}
+
 void PreparedText::SetPrepared(bool prepared)
 {
   mPrepared = prepared;
@@ -82,7 +130,7 @@ bool PreparedText::IsPrepared() const
 
 bool PreparedText::Empty() const
 {
-  return mOriginalText.Empty();
+  return mCharacters.Empty();
 }
 
 void PreparedText::Clear()
@@ -91,7 +139,10 @@ void PreparedText::Clear()
   mFontFamily.Clear();
   mFontSize     = 0.0f;
   mClusterCount = 0u;
-  mPrepared     = false;
+  mCharacters.Clear();
+  mLineBreakInfo.Clear();
+  mParagraphInfo.Clear();
+  mPrepared = false;
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

@@ -22,7 +22,10 @@
 #include <cstdint>
 
 // INTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/paragraph-run.h>
+#include <dali-ui-foundation/internal/text/text-definitions.h>
 #include <dali/public-api/common/dali-string.h>
+#include <dali/public-api/common/dali-vector.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
@@ -49,6 +52,18 @@ public:
   void     SetClusterCount(uint32_t clusterCount);
   uint32_t GetClusterCount() const;
 
+  void                                 SetCharacters(const Dali::Vector<Text::Character>& characters);
+  const Dali::Vector<Text::Character>& GetCharacters() const;
+  uint32_t                             GetCharacterCount() const;
+
+  void                                     SetLineBreakInfo(const Dali::Vector<Text::LineBreakInfo>& lineBreakInfo);
+  const Dali::Vector<Text::LineBreakInfo>& GetLineBreakInfo() const;
+  uint32_t                                 GetLineBreakCount() const;
+
+  void                                    SetParagraphInfo(const Dali::Vector<Text::ParagraphRun>& paragraphInfo);
+  const Dali::Vector<Text::ParagraphRun>& GetParagraphInfo() const;
+  uint32_t                                GetParagraphCount() const;
+
   void SetPrepared(bool prepared);
   bool IsPrepared() const;
 
@@ -56,11 +71,14 @@ public:
   void Clear();
 
 private:
-  Dali::String mOriginalText;
-  Dali::String mFontFamily;
-  float        mFontSize;
-  uint32_t     mClusterCount;
-  bool         mPrepared;
+  Dali::String                      mOriginalText;
+  Dali::String                      mFontFamily;
+  float                             mFontSize;
+  uint32_t                          mClusterCount;
+  Dali::Vector<Text::Character>     mCharacters;
+  Dali::Vector<Text::LineBreakInfo> mLineBreakInfo;
+  Dali::Vector<Text::ParagraphRun>  mParagraphInfo;
+  bool                              mPrepared;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer
