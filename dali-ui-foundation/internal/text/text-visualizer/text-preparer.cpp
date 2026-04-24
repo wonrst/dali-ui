@@ -18,11 +18,36 @@
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/character-set-conversion.h>
 #include <dali-ui-foundation/internal/text/logical-model-impl.h>
+#include <dali-ui-foundation/internal/text/multi-language-support.h>
 #include <dali-ui-foundation/internal/text/segmentation.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
+namespace
+{
+constexpr float FONT_SIZE_SCALE = 1.0f;
+
+TextAbstraction::FontDescription CreateDefaultFontDescription(const Dali::String& fontFamily)
+{
+  TextAbstraction::FontDescription defaultFontDescription;
+
+  if(!fontFamily.Empty())
+  {
+    defaultFontDescription.family = fontFamily.CStr();
+  }
+
+  return defaultFontDescription;
+}
+
+Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClient, float fontSize)
+{
+  const float effectivePointSize = (fontSize > 0.0f) ? fontSize : TextAbstraction::FontClient::DEFAULT_POINT_SIZE;
+
+  return static_cast<Text::PointSize26Dot6>(effectivePointSize * FONT_SIZE_SCALE *
+                                            fontClient.GetNumberOfPointsPerOneUnitOfPointSize());
+}
+} // unnamed namespace
 
 PreparedText TextPreparer::Prepare(const Input& input)
 {
@@ -30,6 +55,8 @@ PreparedText TextPreparer::Prepare(const Input& input)
   Dali::Vector<Text::Character>     characters;
   Dali::Vector<Text::LineBreakInfo> lineBreakInfo;
   Dali::Vector<Text::ParagraphRun>  paragraphInfo;
+  Dali::Vector<Text::ScriptRun>     scriptRuns;
+  Dali::Vector<Text::FontRun>       fontRuns;
 
   preparedText.SetOriginalText(input.text);
   preparedText.SetFontFamily(input.fontFamily);
@@ -53,11 +80,25 @@ PreparedText TextPreparer::Prepare(const Input& input)
     logicalModel->mLineBreakInfo       = lineBreakInfo;
     logicalModel->CreateParagraphInfo(0u, convertedCharacterCount);
     paragraphInfo = logicalModel->mParagraphInfo;
+
+    Text::MultilanguageSupport multilanguageSupport = Text::MultilanguageSupport::Get();
+    multilanguageSupport.SetScripts(characters, 0u, convertedCharacterCount, scriptRuns);
+
+    TextAbstraction::FontClient                  fontClient = TextAbstraction::FontClient::Get();
+    const Dali::Vector<Text::FontDescriptionRun> fontDescriptionRuns;
+    const TextAbstraction::FontDescription       defaultFontDescription = CreateDefaultFontDescription(input.fontFamily);
+    const Text::PointSize26Dot6                  defaultPointSize       = GetDefaultPointSize(fontClient, input.fontSize);
+
+    multilanguageSupport.ValidateFonts(fontClient, characters, scriptRuns, fontDescriptionRuns,
+                                       defaultFontDescription, defaultPointSize, FONT_SIZE_SCALE, 0u,
+                                       convertedCharacterCount, fontRuns, nullptr);
   }
 
   preparedText.SetCharacters(characters);
   preparedText.SetLineBreakInfo(lineBreakInfo);
   preparedText.SetParagraphInfo(paragraphInfo);
+  preparedText.SetScriptRuns(scriptRuns);
+  preparedText.SetFontRuns(fontRuns);
   preparedText.SetClusterCount(preparedText.GetCharacterCount());
   preparedText.SetPrepared(true);
 

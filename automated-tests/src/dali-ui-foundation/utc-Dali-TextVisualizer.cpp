@@ -362,6 +362,8 @@ int UtcDaliTextVisualizerPreparedEmptyTextP(void)
   DALI_TEST_CHECK(preparedText.Empty());
   DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetClusterCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetScriptRunCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetFontRunCount(), 0u, TEST_LOCATION);
 
   Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, exclusionRegions, layoutResult);
   DALI_TEST_CHECK(layoutResult.Empty());
@@ -380,6 +382,90 @@ int UtcDaliTextVisualizerPreparedLineBreakInfoSmokeP(void)
   DALI_TEST_CHECK(preparedText.IsPrepared());
   DALI_TEST_CHECK(preparedText.GetLineBreakCount() > 0u);
   DALI_TEST_CHECK(preparedText.GetParagraphCount() > 0u);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedAsciiScriptAndFontDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "abc";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(preparedText.GetScriptRunCount() > 0u);
+  DALI_TEST_EQUALS(preparedText.GetScriptRuns().Count(), preparedText.GetScriptRunCount(), TEST_LOCATION);
+
+  if(preparedText.GetScriptRunCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.GetScriptRuns()[0].characterRun.numberOfCharacters > 0u);
+  }
+
+  DALI_TEST_EQUALS(preparedText.GetFontRuns().Count(), preparedText.GetFontRunCount(), TEST_LOCATION);
+  if(preparedText.GetFontRunCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.GetFontRuns()[0].characterRun.numberOfCharacters > 0u);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedKoreanScriptAndFontDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "가나다";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(preparedText.GetScriptRunCount() > 0u);
+
+  if(preparedText.GetFontRunCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.GetFontRuns()[0].characterRun.numberOfCharacters > 0u);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmojiScriptAndFontDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.GetScriptRunCount() > 0u);
+  DALI_TEST_EQUALS(preparedText.GetScriptRuns().Count(), preparedText.GetScriptRunCount(), TEST_LOCATION);
+
+  if(preparedText.GetFontRunCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.GetFontRuns()[0].characterRun.numberOfCharacters > 0u);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedMixedScriptDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "abc가나다";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.GetScriptRunCount() > 0u);
+  DALI_TEST_EQUALS(preparedText.GetScriptRuns().Count(), preparedText.GetScriptRunCount(), TEST_LOCATION);
 
   END_TEST;
 }

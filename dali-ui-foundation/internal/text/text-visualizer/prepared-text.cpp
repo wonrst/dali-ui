@@ -29,6 +29,8 @@ PreparedText::PreparedText()
   mCharacters(),
   mLineBreakInfo(),
   mParagraphInfo(),
+  mScriptRuns(),
+  mFontRuns(),
   mPrepared(false)
 {
 }
@@ -118,6 +120,36 @@ uint32_t PreparedText::GetParagraphCount() const
   return static_cast<uint32_t>(mParagraphInfo.Count());
 }
 
+void PreparedText::SetScriptRuns(const Dali::Vector<Text::ScriptRun>& scriptRuns)
+{
+  mScriptRuns = scriptRuns;
+}
+
+const Dali::Vector<Text::ScriptRun>& PreparedText::GetScriptRuns() const
+{
+  return mScriptRuns;
+}
+
+uint32_t PreparedText::GetScriptRunCount() const
+{
+  return static_cast<uint32_t>(mScriptRuns.Count());
+}
+
+void PreparedText::SetFontRuns(const Dali::Vector<Text::FontRun>& fontRuns)
+{
+  mFontRuns = fontRuns;
+}
+
+const Dali::Vector<Text::FontRun>& PreparedText::GetFontRuns() const
+{
+  return mFontRuns;
+}
+
+uint32_t PreparedText::GetFontRunCount() const
+{
+  return static_cast<uint32_t>(mFontRuns.Count());
+}
+
 void PreparedText::SetPrepared(bool prepared)
 {
   mPrepared = prepared;
@@ -142,6 +174,8 @@ void PreparedText::Clear()
   mCharacters.Clear();
   mLineBreakInfo.Clear();
   mParagraphInfo.Clear();
+  mScriptRuns.Clear();
+  mFontRuns.Clear();
   mPrepared = false;
 }
 

@@ -22,7 +22,9 @@
 #include <cstdint>
 
 // INTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/font-run.h>
 #include <dali-ui-foundation/internal/text/paragraph-run.h>
+#include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/text-definitions.h>
 #include <dali/public-api/common/dali-string.h>
 #include <dali/public-api/common/dali-vector.h>
@@ -30,10 +32,10 @@
 namespace Dali::Ui::Internal::TextVisualizer
 {
 /**
- * @brief Minimal prepared text cache for TextVisualizer.
+ * @brief Prepared text cache for TextVisualizer.
  *
- * This skeleton stores only stable input state and a minimal count field.
- * Actual shaping, fallback and cluster mapping will be connected later.
+ * This stores stable prepare-stage data up to script/font validation.
+ * Actual shaping, glyph metrics and cluster mapping are connected later.
  */
 class PreparedText
 {
@@ -64,6 +66,14 @@ public:
   const Dali::Vector<Text::ParagraphRun>& GetParagraphInfo() const;
   uint32_t                                GetParagraphCount() const;
 
+  void                                 SetScriptRuns(const Dali::Vector<Text::ScriptRun>& scriptRuns);
+  const Dali::Vector<Text::ScriptRun>& GetScriptRuns() const;
+  uint32_t                             GetScriptRunCount() const;
+
+  void                               SetFontRuns(const Dali::Vector<Text::FontRun>& fontRuns);
+  const Dali::Vector<Text::FontRun>& GetFontRuns() const;
+  uint32_t                           GetFontRunCount() const;
+
   void SetPrepared(bool prepared);
   bool IsPrepared() const;
 
@@ -78,6 +88,8 @@ private:
   Dali::Vector<Text::Character>     mCharacters;
   Dali::Vector<Text::LineBreakInfo> mLineBreakInfo;
   Dali::Vector<Text::ParagraphRun>  mParagraphInfo;
+  Dali::Vector<Text::ScriptRun>     mScriptRuns;
+  Dali::Vector<Text::FontRun>       mFontRuns;
   bool                              mPrepared;
 };
 
