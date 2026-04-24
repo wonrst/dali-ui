@@ -173,6 +173,7 @@ private:
   bool HasRenderHost() const;
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
+  void SyncRenderStateToAdapter(const Vector2& controlSize);
 
 private:
   Dali::String                                  mText;

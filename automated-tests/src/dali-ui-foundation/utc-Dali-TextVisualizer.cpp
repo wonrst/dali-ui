@@ -1301,6 +1301,16 @@ int UtcDaliTextVisualizerViewInterfaceEmptyStateP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerViewInterfaceTextColorDefaultP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Vector4(0.0f, 0.0f, 0.0f, 1.0f), TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerViewInterfaceWithRenderableAdapterP(void)
 {
   UiTestApplication application;
@@ -1431,6 +1441,30 @@ int UtcDaliTextVisualizerViewInterfaceTextColorPassThroughP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerViewInterfaceTextColorImmediateAdapterUpdateP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult              layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter          adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetTextColor(Color::BLUE);
+  viewInterface.SetAdapter(&adapter);
+
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Color::BLUE, TEST_LOCATION);
+
+  adapter.SetTextColor(Color::GREEN);
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Color::GREEN, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerViewInterfaceClearP(void)
 {
   UiTestApplication application;
@@ -1526,6 +1560,47 @@ int UtcDaliTextVisualizerRenderCallSmokeP(void)
   application.Render();
   application.SendNotification();
   application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerTextColorRenderSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abc");
+  textVisualizer.SetFontSize(10.0f);
+  textVisualizer.SetTextColor(UiColor(Color::RED));
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  DALI_TEST_EQUALS(textVisualizer.GetTextColor().Resolve(), Color::RED, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerTextColorChangeWithoutLayoutDirtySmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abc");
+  textVisualizer.SetFontSize(10.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetTextColor(UiColor(Color::GREEN));
+  application.SendNotification();
+  application.Render();
+
+  DALI_TEST_EQUALS(textVisualizer.GetTextColor().Resolve(), Color::GREEN, TEST_LOCATION);
 
   END_TEST;
 }

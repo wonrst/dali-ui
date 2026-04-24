@@ -216,11 +216,11 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     UpdateLayout(size.x, mLayoutResult);
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
-    mAtlasViewAdapter.SetControlSize(size);
-    mAtlasViewAdapter.SetTextColor(mTextColor.Resolve());
     mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
     ClearLayoutDirty();
   }
+
+  SyncRenderStateToAdapter(size);
 
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
@@ -416,6 +416,12 @@ void TextVisualizerImpl::UpdateLayout(float layoutWidth, Internal::TextVisualize
   {
     Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, 0.0f, mExclusionRegions, result);
   }
+}
+
+void TextVisualizerImpl::SyncRenderStateToAdapter(const Vector2& controlSize)
+{
+  mAtlasViewAdapter.SetControlSize(controlSize);
+  mAtlasViewAdapter.SetTextColor(mTextColor.Resolve());
 }
 
 } // namespace Integration

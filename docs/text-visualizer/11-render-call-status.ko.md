@@ -241,6 +241,40 @@ empty / no-op 처리한 것:
 - glyph offset, RTL/Bidi visual order, combining mark / zero-advance glyph 정밀 배치는 아직 미완료다.
 - `textColor`는 `GetTextColor()` defaultColor path로만 전달되며, shader 반영 correctness는 아직 별도 확인이 필요하다.
 
+## 추가 확인: text color render path
+
+`AtlasRenderer`의 color path를 다시 확인한 결과, 현재 `TextVisualizer` 1차 구현은 단일 `textColor`만으로 충분히 연결 가능하다.
+
+- `Text::AtlasRenderer::Render()`는 `view.GetColors()`, `view.GetColorIndices()`, `view.GetTextColor()`를 읽는다.
+- `AddGlyphs()` 내부에서 `colorsBuffer == nullptr`이면 `useDefaultColor = true`가 된다.
+- 이 경우 모든 glyph vertex color는 `defaultColor`, 즉 `view.GetTextColor()` 반환값을 사용한다.
+- `GetColors()`와 `GetColorIndices()`가 모두 비어 있지 않은 경우에만 per-glyph color path가 열린다.
+- background color path는 별도 getter를 통해 처리되며, 현재 `TextVisualizer` 1차 구현 범위와는 분리되어 있다.
+
+현재 `TextVisualizer` 정책:
+
+- rich style / per-glyph color는 지원하지 않는다.
+- `TextVisualizerViewInterface::GetColors()`와 `GetColorIndices()`는 계속 `nullptr`를 반환한다.
+- `TextVisualizerViewInterface::GetTextColor()`는 `AtlasViewAdapter::GetTextColor()`를 그대로 반환한다.
+- 따라서 현재 구현은 `AtlasRenderer`의 `defaultColor` 경로만 사용한다.
+
+추가로 확인한 구현 정책:
+
+- `textColor` 변경은 여전히 `render dirty`만 세운다.
+- 다만 `OnRelayout()`에서 layout dirty 여부와 무관하게 `SyncRenderStateToAdapter()`를 호출해 최신 `controlSize`와 `textColor`를 adapter에 반영한다.
+- 즉, layout dirty가 없어도 다음 render path에서 최신 색을 `GetTextColor()`로 읽을 수 있다.
+
+중요:
+
+- 이 커밋에서도 `render dirty`는 clear하지 않는다.
+- 이유는 color path가 연결되어도 geometry correctness, baseline/bearing/offset, `animatablePropertyIndex / alignmentOffset / depth` 의미가 아직 완전히 정리되지 않았기 때문이다.
+
+확인 필요:
+
+- 실제 shader에 `textColor`가 기대한 색으로 반영되는지는 manual/sample 검증이 아직 필요하다.
+- per-glyph color 지원은 1차 범위 밖이며, 필요할 경우 `GetColors()` / `GetColorIndices()` path를 별도로 설계해야 한다.
+- color animation과 `animatablePropertyIndex`의 관계는 아직 검토 전이다.
+
 ## 6. 현재 render dirty 정책
 
 현재 정책은 다음과 같다.
