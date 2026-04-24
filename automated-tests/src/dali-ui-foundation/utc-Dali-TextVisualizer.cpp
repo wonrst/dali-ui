@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <dali.h>
 #include <dali-ui-foundation/dali-ui-foundation.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-test-suite-utils.h>
 
 using namespace Dali;
@@ -306,6 +307,99 @@ int UtcDaliTextVisualizerPrepareEmojiTextP(void)
 
   textVisualizer.SetText("Emoji 😀👨‍👩‍👧‍👦");
   textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsWithoutExclusionP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].x, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].width, 100.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsSingleExclusionP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(20.0f, 0.0f, 20.0f, 20.0f));
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].x, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].width, 20.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[1].x, 40.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[1].width, 60.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsWithoutVerticalOverlapP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(20.0f, 30.0f, 20.0f, 10.0f));
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].x, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].width, 100.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsMergeBlockedRangesP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(20.0f, 0.0f, 20.0f, 20.0f));
+  exclusionRegions.PushBack(Rect<float>(30.0f, 0.0f, 30.0f, 20.0f));
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].x, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].width, 20.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[1].x, 60.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[1].width, 40.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsClampOutsideWidthP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(-10.0f, 0.0f, 30.0f, 20.0f));
+  exclusionRegions.PushBack(Rect<float>(80.0f, 0.0f, 60.0f, 20.0f));
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].x, 20.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(availableIntervals[0].width, 60.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsFullyBlockedP(void)
+{
+  UiTestApplication         application;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(0.0f, 0.0f, 100.0f, 20.0f));
+
+  const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
+
+  DALI_TEST_EQUALS(availableIntervals.Count(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
