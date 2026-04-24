@@ -87,6 +87,8 @@ AtlasRendererBridge::AtlasRendererBridge()
   mTextControlActor(),
   mRendererOutput(),
   mRendererAttached(false),
+  mRenderCallCount(0u),
+  mAttachCallCount(0u),
   mAnimatablePropertyIndex(Property::INVALID_INDEX),
   mAlignmentOffset(0.0f),
   mDepth(0),
@@ -122,6 +124,8 @@ void AtlasRendererBridge::Clear()
   mImpl->Clear();
   mRenderHost.Reset();
   mTextControlActor.Reset();
+  mRenderCallCount = 0u;
+  mAttachCallCount = 0u;
   ResetRenderer();
 }
 
@@ -227,6 +231,16 @@ uint32_t AtlasRendererBridge::GetLastGlyphStartIndex() const
   return mViewInterface.GetDiagnostics().lastGlyphStartIndex;
 }
 
+uint32_t AtlasRendererBridge::GetRenderCallCount() const
+{
+  return mRenderCallCount;
+}
+
+uint32_t AtlasRendererBridge::GetAttachCallCount() const
+{
+  return mAttachCallCount;
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
@@ -311,18 +325,20 @@ Actor AtlasRendererBridge::GetTextControlActor() const
 
 bool AtlasRendererBridge::AttachRendererToHost()
 {
-  if(mRendererAttached)
+  if(!HasRenderHost() || !HasRenderableGlyphs() || !HasViewInterfaceAdapter())
   {
-    return true;
+    return false;
   }
 
-  if(!HasRenderHost() || !IsRendererCreated() || !HasRenderableGlyphs() || !HasViewInterfaceAdapter())
+  EnsureRenderer();
+  if(!IsRendererCreated())
   {
     return false;
   }
 
   mAlignmentOffset = 0.0f;
   mViewInterface.ResetDiagnostics();
+  ++mRenderCallCount;
 
   Actor output = mRenderer->Render(mViewInterface,
                                    HasTextControlActor() ? mTextControlActor : mRenderHost,
@@ -331,18 +347,28 @@ bool AtlasRendererBridge::AttachRendererToHost()
                                    mDepth);
   if(!output)
   {
-    mRendererOutput.Reset();
     return false;
+  }
+
+  Actor outputParent = output.GetParent();
+  if(outputParent && outputParent != mRenderHost)
+  {
+    return false;
+  }
+
+  if(mRendererOutput && mRendererOutput != output)
+  {
+    Actor previousParent = mRendererOutput.GetParent();
+    if(previousParent == mRenderHost)
+    {
+      mRendererOutput.Unparent();
+    }
   }
 
   if(!output.GetParent())
   {
     mRenderHost.Add(output);
-  }
-  else if(output.GetParent() != mRenderHost)
-  {
-    mRendererOutput = output;
-    return false;
+    ++mAttachCallCount;
   }
 
   mRendererOutput   = output;

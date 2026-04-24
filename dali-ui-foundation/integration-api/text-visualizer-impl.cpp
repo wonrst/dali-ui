@@ -219,6 +219,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   if(mLastLayoutSize != size)
   {
     MarkLayoutDirty();
+    MarkRenderDirty();
   }
 
   if(mLayoutDirty)
@@ -429,7 +430,7 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
 
   DALI_LOG_ERROR(
     "[TextVisualizer][%p] size=(%.2f,%.2f) glyphPlacements=%u hasRenderable=%d updateRenderData=%d attach=%d "
-    "renderReady=%d getGlyphsCalls=%u lastRequested=%u lastReturned=%u lastStart=%u "
+    "renderReady=%d renderCalls=%u attachCalls=%u getGlyphsCalls=%u lastRequested=%u lastReturned=%u lastStart=%u "
     "outputChildren=%u outputDescendants=%u outputRenderers=%u outputTotalRenderers=%u hasRenderableDescendant=%d "
     "outputParentedToHost=%d renderHostSize=(%.2f,%.2f,%.2f) outputSize=(%.2f,%.2f,%.2f) "
     "firstChildSize=(%.2f,%.2f,%.2f) firstChildVisible=%d\n",
@@ -441,6 +442,8 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
     updateRenderDataResult,
     attachResult,
     mAtlasRendererBridge.IsRenderReady(),
+    mAtlasRendererBridge.GetRenderCallCount(),
+    mAtlasRendererBridge.GetAttachCallCount(),
     mAtlasRendererBridge.GetViewInterfaceGetGlyphsCallCount(),
     mAtlasRendererBridge.GetLastRequestedGlyphCount(),
     mAtlasRendererBridge.GetLastReturnedGlyphCount(),

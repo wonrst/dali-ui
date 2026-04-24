@@ -714,6 +714,8 @@ flowchart TD
 - `UpdateRenderData()` 결과
 - `AttachRendererToHost()` 결과
 - `IsRenderReady()`
+- `GetRenderCallCount()`
+- `GetAttachCallCount()`
 - `GetViewInterfaceGetGlyphsCallCount()`
 - `GetLastRequestedGlyphCount()`
 - `GetLastReturnedGlyphCount()`
@@ -754,6 +756,43 @@ sample 실행 후 우선 기록해야 할 값:
 
 - 이 로그는 `render dirty clear` 판단 근거가 아니다.
 - geometry correctness, baseline/bearing/offset, 최종 visual correctness는 여전히 별도 검증 대상이다.
+
+## 추가 확인: atlas output re-render on layout changes
+
+기존 문제:
+
+- 최초 render 이후 `mRendererAttached == true`이면 `AttachRendererToHost()`가 바로 `true`를 반환하는 early return 구조였다.
+- 이 경우 exclusion region 변경이나 width 변경으로 `LayoutResult`와 glyph placement가 바뀌어도, `Renderer::Render()`가 다시 호출되지 않을 수 있었다.
+- 결과적으로 `PreparedText`와 `LayoutResult`는 최신이어도, AtlasRenderer output mesh는 이전 배치 상태로 남을 위험이 있었다.
+
+수정 정책:
+
+- attached 상태여도 `Renderer::Render()`를 다시 호출한다.
+- attach는 “output actor를 host에 처음 붙일 때만” 수행한다.
+- 즉 render update와 attach를 개념적으로 분리한다.
+
+현재 bridge diagnostics:
+
+- `GetRenderCallCount()`
+  - `Renderer::Render()`를 실제 호출할 때마다 증가한다.
+- `GetAttachCallCount()`
+  - output actor를 `mRenderHost.Add(output)`로 실제 attach할 때만 증가한다.
+
+현재 동작 의미:
+
+- relayout 이후에도 `render call count`는 증가해야 한다.
+- 이미 같은 output actor가 host에 붙어 있으면 `attach call count`는 그대로여야 한다.
+- 즉 “re-render는 반복, duplicate attach는 금지”가 현재 정책이다.
+
+추가 보강:
+
+- `TextVisualizerImpl`은 `mLastLayoutSize != size`일 때 `MarkLayoutDirty()`뿐 아니라 `MarkRenderDirty()`도 같이 호출한다.
+- size 변화는 glyph placement를 바꾸므로, render update도 다시 필요하기 때문이다.
+
+sample 확인 포인트:
+
+- key `3`으로 exclusion region을 이동했을 때 glyph가 새 blocked region을 피해서 재배치되어야 한다.
+- 높이나 영역만 바뀌고 glyph mesh가 그대로 남아 있으면 re-render가 아직 충분히 일어나지 않는 상태다.
 
 ## 12. 다음 커밋 금지 사항
 

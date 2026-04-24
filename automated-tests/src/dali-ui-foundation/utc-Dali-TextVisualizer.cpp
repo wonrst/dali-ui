@@ -894,6 +894,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
   DALI_TEST_EQUALS(bridge.GetLastRequestedGlyphCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLastReturnedGlyphCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLastGlyphStartIndex(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRenderCallCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetAttachCallCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
@@ -1390,9 +1392,21 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachDuplicateP(void)
   }
 
   const bool firstAttach  = bridge.AttachRendererToHost();
+  const uint32_t firstRenderCallCount = bridge.GetRenderCallCount();
+  const uint32_t firstAttachCallCount = bridge.GetAttachCallCount();
+  const uint32_t firstHostChildCount  = renderHost.GetChildCount();
   const bool secondAttach = bridge.AttachRendererToHost();
+
   DALI_TEST_CHECK(firstAttach == secondAttach);
   DALI_TEST_CHECK(secondAttach == bridge.IsRendererAttached());
+  DALI_TEST_CHECK(bridge.GetRenderCallCount() > firstRenderCallCount);
+
+  if(secondAttach)
+  {
+    DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
+    DALI_TEST_EQUALS(bridge.GetAttachCallCount(), firstAttachCallCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(renderHost.GetChildCount(), firstHostChildCount, TEST_LOCATION);
+  }
 
   END_TEST;
 }
@@ -1989,6 +2003,34 @@ int UtcDaliTextVisualizerRenderHostSurvivesRelayoutP(void)
   application.Render();
 
   textVisualizer.SetRequestedWidth(60.0f);
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionRelayoutTriggersRenderUpdateSmokeP(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> exclusionRegionsA;
+  Dali::Vector<Rect<float>> exclusionRegionsB;
+  DALI_TEST_CHECK(textVisualizer);
+
+  exclusionRegionsA.PushBack(Rect<float>(20.0f, 20.0f, 80.0f, 40.0f));
+  exclusionRegionsB.PushBack(Rect<float>(120.0f, 90.0f, 60.0f, 60.0f));
+
+  textVisualizer.SetText("TextVisualizer exclusion relayout render update smoke.");
+  textVisualizer.SetFontSize(14.0f);
+  textVisualizer.SetRequestedWidth(240.0f);
+  textVisualizer.SetRequestedHeight(180.0f);
+  textVisualizer.SetExclusionRegions(exclusionRegionsA);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetExclusionRegions(exclusionRegionsB);
   application.SendNotification();
   application.Render();
 

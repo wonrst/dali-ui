@@ -88,6 +88,8 @@ public:
   uint32_t GetLastRequestedGlyphCount() const;
   uint32_t GetLastReturnedGlyphCount() const;
   uint32_t GetLastGlyphStartIndex() const;
+  uint32_t GetRenderCallCount() const;
+  uint32_t GetAttachCallCount() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
@@ -108,6 +110,8 @@ private:
   Actor                       mTextControlActor;
   Actor                       mRendererOutput;
   bool                        mRendererAttached;
+  uint32_t                    mRenderCallCount;
+  uint32_t                    mAttachCallCount;
   Property::Index             mAnimatablePropertyIndex;
   float                       mAlignmentOffset;
   int                         mDepth;
