@@ -15,9 +15,9 @@
 
 #include <dali-ui-foundation/dali-ui-foundation.h>
 #include <dali-ui-foundation/devel-api/ui-foundation-pre-initialize.h>
-#include <dali/integration-api/debug.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <sstream>
@@ -32,108 +32,143 @@ namespace
 constexpr float WINDOW_WIDTH  = 1920.0f;
 constexpr float WINDOW_HEIGHT = 1080.0f;
 
-constexpr float ROOT_PADDING   = 24.0f;
-constexpr float ROOT_SPACING   = 16.0f;
-constexpr float HEADER_HEIGHT  = 92.0f;
-constexpr float STATUS_HEIGHT  = 74.0f;
-constexpr float CONTENT_WIDTH  = WINDOW_WIDTH - (ROOT_PADDING * 2.0f);
-constexpr float CONTENT_HEIGHT = WINDOW_HEIGHT - (ROOT_PADDING * 2.0f) - HEADER_HEIGHT - STATUS_HEIGHT - (ROOT_SPACING * 2.0f);
+constexpr float SIDE_MARGIN         = 86.0f;
+constexpr float TITLE_TOP           = 58.0f;
+constexpr float TITLE_HEIGHT        = 310.0f;
+constexpr float CONTENT_TOP         = 400.0f;
+constexpr float CONTENT_HEIGHT      = 620.0f;
+constexpr float CONTENT_WIDTH       = WINDOW_WIDTH - (SIDE_MARGIN * 2.0f);
+constexpr float COLUMN_GAP          = 58.0f;
+constexpr float COLUMN_WIDTH        = (CONTENT_WIDTH - (COLUMN_GAP * 2.0f)) / 3.0f;
+constexpr float COLUMN_SPLIT_WIDTH  = COLUMN_GAP;
+constexpr float STATUS_HEIGHT       = 36.0f;
+constexpr float STATUS_BOTTOM       = 16.0f;
+constexpr float TITLE_FONT_SIZE     = 104.0f;
+constexpr float BODY_FONT_SIZE      = 12.0f;
+constexpr float QUOTE_FONT_SIZE     = 12.0f;
+constexpr float BODY_LINE_HEIGHT    = 2.6f;
+constexpr float QUOTE_LINE_HEIGHT   = 2.2f;
+constexpr float MIN_FONT_SIZE       = 12.0f;
+constexpr float MAX_FONT_SIZE       = 24.0f;
+constexpr float FONT_STEP           = 2.0f;
+constexpr uint32_t MAX_ORB_COUNT    = 6u;
+constexpr uint32_t MIN_ORB_COUNT    = 2u;
+constexpr uint32_t DEFAULT_ORB_COUNT = 5u;
+constexpr uint32_t STATUS_INTERVAL  = 10u;
+constexpr uint32_t TIMER_INTERVAL_MS = 16u;
 
-constexpr float DEFAULT_FONT_SIZE = 28.0f;
-constexpr float MIN_FONT_SIZE     = 18.0f;
-constexpr float MAX_FONT_SIZE     = 40.0f;
-constexpr float FONT_STEP         = 2.0f;
-constexpr uint32_t MAX_BOUND_COUNT = 8u;
-constexpr uint32_t MIN_BOUND_COUNT = 2u;
-constexpr uint32_t DEFAULT_BOUND_COUNT = 6u;
-constexpr uint32_t STATUS_UPDATE_INTERVAL = 12u;
-constexpr uint32_t TIMER_INTERVAL_MS      = 16u;
-
-const UiColor WINDOW_BG_COLOR(0x10151C);
-const UiColor HEADER_BG_COLOR(0x1B2633);
-const UiColor STATUS_BG_COLOR(0x16212C);
-const UiColor CONTENT_BG_COLOR(0x0F1823);
-const UiColor TEXT_AREA_BG_COLOR = UiColor(0xFFFFFF).WithAlpha(0.04f);
-const UiColor HEADER_TEXT_COLOR(0xF4F7FB);
-const UiColor STATUS_TEXT_COLOR(0xD9E4EF);
+const UiColor WINDOW_BG_COLOR(0x0B0B10);
+const UiColor TITLE_COLOR(0xF4F1EC);
+const UiColor ACCENT_COLOR(0xC9A45D);
+const UiColor STATUS_TEXT_COLOR = UiColor(0xFFFFFF).WithAlpha(0.45f);
+const UiColor QUOTE_BG_COLOR = UiColor(0x16161C).WithAlpha(0.70f);
+const UiColor QUOTE_TEXT_COLOR(0xCFB06A);
 
 const UiColor TEXT_COLORS[] = {
-  UiColor(0xF3F6FA),
-  UiColor(0xFFDE59),
-  UiColor(0x7CE7DD),
-  UiColor(0x9FD1FF),
+  UiColor(0xF1E8D2),
+  UiColor(0xF2E7C6),
+  UiColor(0xEDE5D4),
+  UiColor(0xF0DEB5),
 };
 
 const char* TEXT_COLOR_NAMES[] = {
+  "Ivory",
+  "Warm",
   "Paper",
   "Amber",
-  "Mint",
-  "Sky",
 };
 
-const UiColor BOUND_COLORS[] = {
-  UiColor(0xFF6B6B).WithAlpha(0.70f),
-  UiColor(0x4ECDC4).WithAlpha(0.70f),
-  UiColor(0xFFD166).WithAlpha(0.70f),
-  UiColor(0x5A9BFF).WithAlpha(0.70f),
-  UiColor(0xC77DFF).WithAlpha(0.70f),
-  UiColor(0x8AC926).WithAlpha(0.70f),
-  UiColor(0xF72585).WithAlpha(0.70f),
-  UiColor(0x48BFE3).WithAlpha(0.70f),
+struct OrbPreset
+{
+  Vector2 position;
+  Vector2 size;
+  Vector2 velocity;
+  UiColor color;
 };
 
-Dali::String BuildSampleText()
+const OrbPreset ORB_PRESETS[MAX_ORB_COUNT] = {
+  {Vector2(168.0f, 218.0f),  Vector2(172.0f, 172.0f), Vector2(54.0f, 34.0f), UiColor(0x2D355C).WithAlpha(0.92f)},
+  {Vector2(742.0f, 92.0f),   Vector2(238.0f, 238.0f), Vector2(-42.0f, 28.0f), UiColor(0x584D35).WithAlpha(0.90f)},
+  {Vector2(1420.0f, 130.0f), Vector2(148.0f, 148.0f), Vector2(48.0f, 31.0f), UiColor(0x43315E).WithAlpha(0.92f)},
+  {Vector2(1456.0f, 428.0f), Vector2(212.0f, 212.0f), Vector2(-30.0f, -24.0f), UiColor(0x6A3846).WithAlpha(0.92f)},
+  {Vector2(108.0f, 442.0f),  Vector2(162.0f, 162.0f), Vector2(28.0f, -22.0f), UiColor(0x32524C).WithAlpha(0.90f)},
+  {Vector2(914.0f, 382.0f),  Vector2(134.0f, 134.0f), Vector2(33.0f, 38.0f), UiColor(0x6B4C2F).WithAlpha(0.88f)},
+};
+
+Dali::String BuildTitleText()
+{
+  return Dali::String("THE FUTURE OF\nTEXT LAYOUT\nIS DYNAMIC");
+}
+
+Dali::String BuildBodyText()
 {
   std::ostringstream builder;
   builder
-    << "The future of text layout is dynamic. Blocks of text should respond to objects, motion, and "
-    << "changing composition without reshaping every frame. "
-    << "텍스트는 더 이상 정적인 블록이 아니라 화면 위의 다른 요소와 함께 움직이는 유연한 재료여야 한다. "
-    << "When bounds move, exclusion regions change, and the text should reflow around them while keeping shaping work cached. "
-    << "Emoji also matters 😀🚀🌊 because mixed scripts reveal whether the render path stays stable under pressure.\n\n";
-
-  builder
-    << "This performance demo intentionally fills a large 1920x1080 canvas with long paragraphs, "
-    << "moving placeholders, and repeated relayout work. "
-    << "여기서는 여러 개의 object-like colored bounds가 계속 움직이고, TextVisualizer는 그 영역을 피해 다시 줄을 배치한다. "
-    << "We are not profiling with exact GPU counters here; the sample is meant for visual and interactive observation. "
-    << "Look for smooth movement, stable text color, and whether exclusion holes follow the moving objects consistently.\n\n";
-
-  for(int paragraph = 0; paragraph < 8; ++paragraph)
-  {
-    builder
-      << "Paragraph " << (paragraph + 1) << ". "
-      << "Dynamic layout should preserve prepared shaping data, reuse glyph information, and only recompute placement when bounds change. "
-      << "긴 문단이 화면을 가득 채울수록 exclusion region 처리와 relayout 안정성이 더 잘 드러난다. "
-      << "If the moving bounds accelerate toward the edge, the text should still wrap around them naturally instead of freezing in the previous arrangement. "
-      << "This is a synthetic editorial-style dummy text block made only for testing the TextVisualizer render pipeline and observing rough FPS, update counts, and stability over time. "
-      << "Sample controls let us change font size, color, active bound count, and exclusion enable state while animation keeps running.\n\n";
-  }
+    << "The rendering pipeline was designed for static pages, yet every modern interface asks text to respond to moving objects, live composition, and editorial pacing. "
+    << "텍스트는 더 이상 사각형 안에 갇힌 데이터가 아니라 주변 요소와 함께 리듬을 만들어내는 시각 재료다. "
+    << "When a system can prepare shaping once and then reflow around objects, it stops feeling like a rigid document engine and starts behaving like a layout instrument. "
+    << "A browser still hides the real cost of measurement behind synchronous barriers. A paragraph looks effortless only because the engine measured, broke, aligned, and painted it before the reader noticed. "
+    << "But when interactive objects move through the composition, the hidden pipeline becomes visible. The question is no longer whether text can wrap. The question is whether text can stay fluid without forcing the whole page to stall.\n\n"
+    << "Design systems often treat text as the last step: render a block, then stack objects around it. Editorial interfaces reverse the rule. "
+    << "Objects enter first, and the text must adapt in real time without losing its tone, measure, or cadence. "
+    << "That means line height, baseline placement, and the geometry passed to the renderer all matter at once. "
+    << "When the gap between lines is too tight, every moving obstacle feels heavier because more lines must be processed and more fragments must squeeze into the same height. "
+    << "Once line metrics become more natural, the paragraphs breathe. The visual change looks subtle, but the engine also gains room: fewer visible lines, fewer interval scans, and less layout churn under pressure.\n\n"
+    << "CSS taught the industry to think in rectangles, but the most interesting interfaces are rarely rectangular. Cards expand, images drift, subtitles appear, and notifications cut across the reading flow. "
+    << "Developers end up guessing text height, over-measuring the DOM, or paying for expensive relayout loops because the engine exposes too little of its own structure. "
+    << "A text visualizer should move in the opposite direction. It should prepare text once, expose stable layout inputs, and let the application reposition exclusion bounds as often as composition demands. "
+    << "The renderer then needs to update cleanly when those placements change.\n\n"
+    << "This sample keeps one large text surface and uses invisible fixed bounds to split the body into three reading lanes. "
+    << "The moving orb should feel like an inserted image or a conversation bubble that the paragraph naturally avoids. "
+    << "It is not enough for the box height to change. The glyphs must truly reflow and find a new path through the composition as the scene shifts. "
+    << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive.";
 
   const std::string text = builder.str();
   return Dali::String(text.c_str());
 }
 
-Label CreateInfoLabel(const char* text, float height, float fontSize)
+Property::Map CreateOrbShadowMap(const UiColor& color)
 {
-  return Label::New(text)
-    .SetRequestedWidth(MATCH_PARENT)
-    .SetRequestedHeight(height)
-    .SetFontSize(fontSize)
-    .SetTextColor(HEADER_TEXT_COLOR)
-    .SetMultiLine(true)
-    .SetVerticalTextAlignment(Text::Alignment::CENTER)
-    .SetPadding(Extents(16, 16, 12, 12))
-    .SetBackgroundColor(HEADER_BG_COLOR);
+  Property::Map transform;
+  transform.Add(Ui::Visual::Transform::Property::OFFSET, Vector2(14.0f, 16.0f));
+  transform.Add(Ui::Visual::Transform::Property::OFFSET_POLICY,
+                Vector2(static_cast<float>(Ui::Visual::Transform::Policy::ABSOLUTE),
+                        static_cast<float>(Ui::Visual::Transform::Policy::ABSOLUTE)));
+  transform.Add(Ui::Visual::Transform::Property::SIZE, Vector2(1.08f, 1.08f));
+  transform.Add(Ui::Visual::Transform::Property::SIZE_POLICY,
+                Vector2(static_cast<float>(Ui::Visual::Transform::Policy::RELATIVE),
+                        static_cast<float>(Ui::Visual::Transform::Policy::RELATIVE)));
+
+  Property::Map shadow;
+  shadow.Add(Ui::Visual::Property::TYPE, Ui::Visual::COLOR);
+  shadow.Add(Ui::Visual::Property::MIX_COLOR, color.Resolve());
+  shadow.Add(Ui::Visual::Property::TRANSFORM, transform);
+  return shadow;
 }
 
-struct MovingBound
+Rect<float> InflateRect(const Vector2& position, const Vector2& size, float padding)
 {
-  View    view;
+  return Rect<float>(position.x - padding,
+                     position.y - padding,
+                     size.x + (padding * 2.0f),
+                     size.y + (padding * 2.0f));
+}
+
+struct MovingOrb
+{
+  View     view;
+  Vector2  position{Vector2::ZERO};
+  Vector2  size{Vector2::ZERO};
+  Vector2  velocity{Vector2::ZERO};
+  UiColor  color;
+};
+
+struct QuoteBlock
+{
+  View    accent;
+  Label   label;
   Vector2 position{Vector2::ZERO};
   Vector2 size{Vector2::ZERO};
-  Vector2 velocity{Vector2::ZERO};
-  UiColor color;
 };
 } // namespace
 
@@ -141,9 +176,7 @@ class TextVisualizerPerformanceController : public ConnectionTracker
 {
 public:
   explicit TextVisualizerPerformanceController(Application& application)
-  : mApplication(application),
-    mSampleText(BuildSampleText()),
-    mTextLength(mSampleText.Size())
+  : mApplication(application)
   {
     mApplication.InitSignal().Connect(this, &TextVisualizerPerformanceController::OnInit);
   }
@@ -157,9 +190,11 @@ private:
     window.KeyEventSignal().Connect(this, &TextVisualizerPerformanceController::OnKeyEvent);
 
     CreateScene(window);
-    CreateMovingBounds();
+    CreateTextSurface();
+    CreateQuoteBlock();
+    CreateMovingOrbs();
     ApplyTextStyle();
-    ApplyBoundVisuals();
+    ApplyOrbVisuals();
     ApplyExclusionRegions();
     UpdateStatusText(true);
 
@@ -173,172 +208,267 @@ private:
 
   void CreateScene(Window& window)
   {
-    mStatusLabel = CreateInfoLabel("", STATUS_HEIGHT, 16.0f);
+    mRoot = View::New();
+    mRoot.SetRequestedWidth(MATCH_PARENT);
+    mRoot.SetRequestedHeight(MATCH_PARENT);
+    mRoot.SetBackgroundColor(WINDOW_BG_COLOR);
 
+    mTitleLabel = Label::New(BuildTitleText())
+                    .SetLayoutMode(LayoutMode::STANDALONE)
+                    .SetPositionX(SIDE_MARGIN - 6.0f)
+                    .SetPositionY(TITLE_TOP)
+                    .SetRequestedWidth(WINDOW_WIDTH - (SIDE_MARGIN * 2.0f))
+                    .SetRequestedHeight(TITLE_HEIGHT)
+                    .SetFontSize(TITLE_FONT_SIZE)
+                    .SetTextColor(TITLE_COLOR)
+                    .SetMultiLine(true)
+                    .SetLineHeight(0.88f)
+                    .SetHorizontalTextAlignment(Text::Alignment::START)
+                    .SetAsyncRendering(true);
+
+    mContentArea = View::New();
+    mContentArea.SetLayoutMode(LayoutMode::STANDALONE);
+    mContentArea.SetPositionX(SIDE_MARGIN);
+    mContentArea.SetPositionY(CONTENT_TOP);
+    mContentArea.SetRequestedWidth(CONTENT_WIDTH);
+    mContentArea.SetRequestedHeight(CONTENT_HEIGHT);
+    mContentArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mContentArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
+
+    mStatusLabel = Label::New("")
+                     .SetLayoutMode(LayoutMode::STANDALONE)
+                     .SetPositionX(SIDE_MARGIN)
+                     .SetPositionY(WINDOW_HEIGHT - STATUS_HEIGHT - STATUS_BOTTOM)
+                     .SetRequestedWidth(CONTENT_WIDTH)
+                     .SetRequestedHeight(STATUS_HEIGHT)
+                     .SetFontSize(15.0f)
+                     .SetTextColor(STATUS_TEXT_COLOR)
+                     .SetHorizontalTextAlignment(Text::Alignment::START)
+                     .SetVerticalTextAlignment(Text::Alignment::CENTER)
+                     .SetAsyncRendering(true);
+
+    mRoot.Add(mTitleLabel);
+    mRoot.Add(mContentArea);
+    mRoot.Add(mStatusLabel);
+    window.Add(mRoot);
+  }
+
+  void CreateTextSurface()
+  {
     mTextVisualizer = TextVisualizer::New();
     mTextVisualizer.SetLayoutMode(LayoutMode::STANDALONE);
     mTextVisualizer.SetPositionX(0.0f);
     mTextVisualizer.SetPositionY(0.0f);
     mTextVisualizer.SetRequestedWidth(MATCH_PARENT);
     mTextVisualizer.SetRequestedHeight(MATCH_PARENT);
-    mTextVisualizer.SetBackgroundColor(TEXT_AREA_BG_COLOR);
-    mTextVisualizer.SetText(mSampleText);
-    mTextVisualizer.SetFontSize(mFontSize);
+    mTextVisualizer.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mTextVisualizer.SetText(BuildBodyText());
+    mTextVisualizer.SetFontSize(mBodyFontSize);
+    mTextVisualizer.SetLineHeight(BODY_LINE_HEIGHT);
     mTextVisualizer.SetTextColor(TEXT_COLORS[mCurrentTextColorIndex]);
 
-    mContentArea = View::New();
-    mContentArea.SetRequestedWidth(CONTENT_WIDTH);
-    mContentArea.SetRequestedHeight(CONTENT_HEIGHT);
-    mContentArea.SetBackgroundColor(CONTENT_BG_COLOR);
-    mContentArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
+    mFixedColumnBounds.Clear();
+    mFixedColumnBounds.PushBack(Rect<float>(COLUMN_WIDTH, 0.0f, COLUMN_SPLIT_WIDTH, CONTENT_HEIGHT));
+    mFixedColumnBounds.PushBack(Rect<float>((COLUMN_WIDTH * 2.0f) + COLUMN_GAP, 0.0f, COLUMN_SPLIT_WIDTH, CONTENT_HEIGHT));
+
     mContentArea.Add(mTextVisualizer);
-
-    StackLayout root = StackLayout::New(StackOrientation::VERTICAL);
-    root.SetRequestedWidth(MATCH_PARENT);
-    root.SetRequestedHeight(MATCH_PARENT);
-    root.SetPadding(Extents(ROOT_PADDING, ROOT_PADDING, ROOT_PADDING, ROOT_PADDING));
-    root.SetSpacing(ROOT_SPACING);
-    root.Add(CreateInfoLabel("TextVisualizer performance demo\nSpace: Pause/Resume   1/2: Bound count -/+   3/4: Font -/+   5: Toggle exclusion   6: Change text color   ESC/BACK: Quit",
-                             HEADER_HEIGHT,
-                             18.0f));
-    root.Add(mStatusLabel);
-    root.Add(mContentArea);
-
-    window.Add(root);
   }
 
-  void CreateMovingBounds()
+  void CreateQuoteBlock()
   {
-    mBounds.clear();
-    mBounds.reserve(MAX_BOUND_COUNT);
+    mQuoteBlocks.clear();
+    mQuoteBlocks.reserve(2u);
 
-    const Vector2 initialPositions[MAX_BOUND_COUNT] = {
-      Vector2(120.0f, 80.0f),
-      Vector2(520.0f, 180.0f),
-      Vector2(920.0f, 120.0f),
-      Vector2(1320.0f, 240.0f),
-      Vector2(260.0f, 520.0f),
-      Vector2(760.0f, 610.0f),
-      Vector2(1180.0f, 500.0f),
-      Vector2(1500.0f, 700.0f),
-    };
-
-    const Vector2 sizes[MAX_BOUND_COUNT] = {
-      Vector2(180.0f, 120.0f),
-      Vector2(240.0f, 160.0f),
-      Vector2(150.0f, 220.0f),
-      Vector2(210.0f, 140.0f),
-      Vector2(260.0f, 110.0f),
-      Vector2(180.0f, 200.0f),
-      Vector2(220.0f, 150.0f),
-      Vector2(160.0f, 170.0f),
-    };
-
-    const Vector2 velocities[MAX_BOUND_COUNT] = {
-      Vector2(74.0f, 52.0f),
-      Vector2(-58.0f, 76.0f),
-      Vector2(66.0f, -62.0f),
-      Vector2(-82.0f, 48.0f),
-      Vector2(54.0f, -68.0f),
-      Vector2(-70.0f, -46.0f),
-      Vector2(62.0f, 58.0f),
-      Vector2(-48.0f, 64.0f),
-    };
-
-    for(uint32_t index = 0u; index < MAX_BOUND_COUNT; ++index)
+    auto addQuote = [&](const Dali::String& text, const Vector2& position, const Vector2& size, float accentHeight)
     {
-      MovingBound bound;
-      bound.view = View::New();
-      bound.view.SetLayoutMode(LayoutMode::STANDALONE);
-      bound.view.SetBackgroundColor(BOUND_COLORS[index]);
-      bound.view.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
-      bound.position = initialPositions[index];
-      bound.size     = sizes[index];
-      bound.velocity = velocities[index];
-      bound.color    = BOUND_COLORS[index];
+      QuoteBlock block;
+      block.position = position;
+      block.size     = size;
 
-      mContentArea.Add(bound.view);
-      mBounds.push_back(bound);
+      block.accent = View::New();
+      block.accent.SetLayoutMode(LayoutMode::STANDALONE);
+      block.accent.SetPositionX(position.x + 12.0f);
+      block.accent.SetPositionY(position.y + 12.0f);
+      block.accent.SetRequestedWidth(3.0f);
+      block.accent.SetRequestedHeight(accentHeight);
+      block.accent.SetBackgroundColor(ACCENT_COLOR.WithAlpha(0.65f));
+
+      block.label = Label::New(text)
+                      .SetLayoutMode(LayoutMode::STANDALONE)
+                      .SetPositionX(position.x)
+                      .SetPositionY(position.y)
+                      .SetRequestedWidth(size.x)
+                      .SetRequestedHeight(size.y)
+                      .SetPadding(Extents(34, 12, 8, 8))
+                      .SetFontSize(QUOTE_FONT_SIZE)
+                      .SetLineHeight(QUOTE_LINE_HEIGHT)
+                      .SetTextColor(QUOTE_TEXT_COLOR)
+                      .SetFontSlant(Text::FontSlant::ITALIC)
+                      .SetMultiLine(true)
+                      .SetHorizontalTextAlignment(Text::Alignment::START)
+                      .SetAsyncRendering(true);
+
+      mContentArea.Add(block.accent);
+      mContentArea.Add(block.label);
+      mQuoteBlocks.push_back(block);
+    };
+
+    addQuote("“Text becomes a\nfirst-class participant\nin the visual composition\n— not a static block.”",
+             Vector2(34.0f, 314.0f),
+             Vector2(250.0f, 138.0f),
+             116.0f);
+
+    addQuote("“The layout engine stops\nfeeling like a text box\nand starts behaving like\nan editorial surface.”",
+             Vector2(1456.0f, 318.0f),
+             Vector2(238.0f, 134.0f),
+             108.0f);
+  }
+
+  void CreateMovingOrbs()
+  {
+    mOrbs.clear();
+    mOrbs.reserve(MAX_ORB_COUNT);
+
+    for(uint32_t index = 0u; index < MAX_ORB_COUNT; ++index)
+    {
+      MovingOrb orb;
+      orb.position    = ORB_PRESETS[index].position;
+      orb.size        = ORB_PRESETS[index].size;
+      orb.velocity    = ORB_PRESETS[index].velocity;
+      orb.color       = ORB_PRESETS[index].color;
+
+      orb.view = View::New();
+      orb.view.SetLayoutMode(LayoutMode::STANDALONE);
+      orb.view.SetBackgroundColor(orb.color);
+      orb.view.SetCornerRadiusPolicyRelative();
+      orb.view.SetCornerRadius(0.5f);
+      orb.view.SetProperty(View::Property::SHADOW, CreateOrbShadowMap(orb.color.WithAlpha(0.28f)));
+
+      mContentArea.Add(orb.view);
+      mOrbs.push_back(orb);
     }
   }
 
   void ApplyTextStyle()
   {
-    mTextVisualizer.SetFontSize(mFontSize);
+    mTextVisualizer.SetFontSize(mBodyFontSize);
+    mTextVisualizer.SetLineHeight(BODY_LINE_HEIGHT);
     mTextVisualizer.SetTextColor(TEXT_COLORS[mCurrentTextColorIndex]);
   }
 
-  void ApplyBoundVisuals()
+  void ApplyOrbVisuals()
   {
-    for(uint32_t index = 0u; index < mBounds.size(); ++index)
+    for(uint32_t index = 0u; index < mOrbs.size(); ++index)
     {
-      const bool active = index < mActiveBoundCount;
-      mBounds[index].view.SetProperty(Actor::Property::VISIBLE, active);
+      const bool active = index < mActiveOrbCount;
+      mOrbs[index].view.SetProperty(Actor::Property::VISIBLE, active);
       if(!active)
       {
         continue;
       }
 
-      mBounds[index].view.SetPositionX(mBounds[index].position.x);
-      mBounds[index].view.SetPositionY(mBounds[index].position.y);
-      mBounds[index].view.SetRequestedWidth(mBounds[index].size.x);
-      mBounds[index].view.SetRequestedHeight(mBounds[index].size.y);
+      mOrbs[index].view.SetPositionX(mOrbs[index].position.x);
+      mOrbs[index].view.SetPositionY(mOrbs[index].position.y);
+      mOrbs[index].view.SetRequestedWidth(mOrbs[index].size.x);
+      mOrbs[index].view.SetRequestedHeight(mOrbs[index].size.y);
     }
+  }
+
+  Rect<float> GetQuoteExclusionRect(const QuoteBlock& block) const
+  {
+    const Vector3 position = block.label.GetCurrentProperty<Vector3>(Actor::Property::POSITION);
+    const Vector3 size     = block.label.GetCurrentProperty<Vector3>(Actor::Property::SIZE);
+    return InflateRect(Vector2(position.x, position.y), Vector2(size.x, size.y), 24.0f);
+  }
+
+  void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
+  {
+    const float insetX = orb.size.x * 0.18f;
+    const float topBandHeight = orb.size.y * 0.22f;
+    const float middleBandHeight = orb.size.y * 0.28f;
+    const float bottomBandHeight = orb.size.y * 0.22f;
+    const float middleStartY = orb.position.y + (orb.size.y * 0.22f);
+
+    regions.PushBack(Rect<float>(orb.position.x + insetX,
+                                 orb.position.y,
+                                 std::max(0.0f, orb.size.x - (insetX * 2.0f)),
+                                 topBandHeight));
+    regions.PushBack(Rect<float>(orb.position.x,
+                                 middleStartY,
+                                 orb.size.x,
+                                 middleBandHeight));
+    regions.PushBack(Rect<float>(orb.position.x,
+                                 middleStartY + middleBandHeight,
+                                 orb.size.x,
+                                 middleBandHeight));
+    regions.PushBack(Rect<float>(orb.position.x + insetX,
+                                 orb.position.y + orb.size.y - bottomBandHeight,
+                                 std::max(0.0f, orb.size.x - (insetX * 2.0f)),
+                                 bottomBandHeight));
   }
 
   void ApplyExclusionRegions()
   {
     if(!mExclusionEnabled)
     {
-      if(mExclusionApplied)
-      {
-        mTextVisualizer.ClearExclusionRegions();
-        mExclusionApplied = false;
-      }
+      mTextVisualizer.ClearExclusionRegions();
       return;
     }
 
     Dali::Vector<Rect<float>> regions;
-    for(uint32_t index = 0u; index < mActiveBoundCount; ++index)
+    for(uint32_t index = 0u; index < mFixedColumnBounds.Count(); ++index)
     {
-      regions.PushBack(Rect<float>(mBounds[index].position.x,
-                                   mBounds[index].position.y,
-                                   mBounds[index].size.x,
-                                   mBounds[index].size.y));
+      regions.PushBack(mFixedColumnBounds[index]);
     }
 
+    for(uint32_t orbIndex = 0u; orbIndex < std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size())); ++orbIndex)
+    {
+      const MovingOrb& orb = mOrbs[orbIndex];
+      AppendOrbExclusionRegions(regions, orb);
+    }
+
+    for(uint32_t quoteIndex = 0u; quoteIndex < mQuoteBlocks.size(); ++quoteIndex)
+    {
+      regions.PushBack(GetQuoteExclusionRect(mQuoteBlocks[quoteIndex]));
+    }
     mTextVisualizer.SetExclusionRegions(regions);
-    mExclusionApplied = true;
-    ++mRelayoutUpdateCount;
+
+    if(mExclusionEnabled)
+    {
+      ++mRelayoutUpdateCount;
+    }
   }
 
-  void UpdateBounds(float deltaSeconds)
+  void UpdateOrbPositions(float deltaSeconds)
   {
-    for(uint32_t index = 0u; index < mActiveBoundCount; ++index)
+    for(uint32_t index = 0u; index < std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size())); ++index)
     {
-      MovingBound& bound = mBounds[index];
-      bound.position += bound.velocity * deltaSeconds;
+      MovingOrb& orb = mOrbs[index];
+      orb.position += orb.velocity * deltaSeconds;
 
-      if(bound.position.x < 0.0f)
+      const float maxX = std::max(0.0f, CONTENT_WIDTH - orb.size.x);
+      const float maxY = std::max(0.0f, CONTENT_HEIGHT - orb.size.y);
+
+      if(orb.position.x < 0.0f)
       {
-        bound.position.x = 0.0f;
-        bound.velocity.x = std::abs(bound.velocity.x);
+        orb.position.x = 0.0f;
+        orb.velocity.x = std::abs(orb.velocity.x);
       }
-      else if(bound.position.x + bound.size.x > CONTENT_WIDTH)
+      else if(orb.position.x > maxX)
       {
-        bound.position.x = CONTENT_WIDTH - bound.size.x;
-        bound.velocity.x = -std::abs(bound.velocity.x);
+        orb.position.x = maxX;
+        orb.velocity.x = -std::abs(orb.velocity.x);
       }
 
-      if(bound.position.y < 0.0f)
+      if(orb.position.y < 0.0f)
       {
-        bound.position.y = 0.0f;
-        bound.velocity.y = std::abs(bound.velocity.y);
+        orb.position.y = 0.0f;
+        orb.velocity.y = std::abs(orb.velocity.y);
       }
-      else if(bound.position.y + bound.size.y > CONTENT_HEIGHT)
+      else if(orb.position.y > maxY)
       {
-        bound.position.y = CONTENT_HEIGHT - bound.size.y;
-        bound.velocity.y = -std::abs(bound.velocity.y);
+        orb.position.y = maxY;
+        orb.velocity.y = -std::abs(orb.velocity.y);
       }
     }
   }
@@ -352,12 +482,12 @@ private:
 
     if(mAnimationEnabled)
     {
-      UpdateBounds(std::max(deltaSecs, 0.001f));
-      ApplyBoundVisuals();
+      UpdateOrbPositions(std::max(deltaSecs, 0.001f));
+      ApplyOrbVisuals();
       ApplyExclusionRegions();
     }
 
-    if((mFrameCount % STATUS_UPDATE_INTERVAL) == 0u)
+    if((mFrameCount % STATUS_INTERVAL) == 0u)
     {
       UpdateStatusText(false);
     }
@@ -367,7 +497,7 @@ private:
 
   void UpdateStatusText(bool force)
   {
-    if(!force && (mFrameCount % STATUS_UPDATE_INTERVAL) != 0u)
+    if(!force && (mFrameCount % STATUS_INTERVAL) != 0u)
     {
       return;
     }
@@ -379,17 +509,15 @@ private:
     std::ostringstream builder;
     builder.setf(std::ios::fixed);
     builder.precision(1);
-    builder << "FPS: " << fps
-            << " | Frames: " << mFrameCount
-            << " | Bounds: " << mActiveBoundCount
-            << " | Updates: " << mRelayoutUpdateCount
-            << " | Text length: " << mTextLength
-            << " | Animation: " << (mAnimationEnabled ? "ON" : "OFF")
-            << " | Exclusion: " << (mExclusionEnabled ? "ON" : "OFF")
-            << " | Font: " << mFontSize
-            << " | Color: " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
-            << "\nMoving bounds use ContentArea local coordinates and are passed directly to SetExclusionRegions(). "
-            << "This is a visual performance demo, not a precise profiler.";
+    builder << "FPS " << fps
+            << "   RELOWS " << mRelayoutUpdateCount
+            << "   ORBS " << mActiveOrbCount
+            << "   FONT " << mBodyFontSize
+            << "   LINE " << BODY_LINE_HEIGHT
+            << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
+            << "   ANIM " << (mAnimationEnabled ? "ON" : "OFF")
+            << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
+            << "   Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
 
     mStatusLabel.SetText(builder.str().c_str());
   }
@@ -400,18 +528,19 @@ private:
     UpdateStatusText(true);
   }
 
-  void SetBoundCount(uint32_t count)
+  void SetOrbCount(uint32_t count)
   {
-    mActiveBoundCount = std::min(std::max(count, MIN_BOUND_COUNT), MAX_BOUND_COUNT);
-    ApplyBoundVisuals();
+    mActiveOrbCount = std::min(std::max(count, MIN_ORB_COUNT), MAX_ORB_COUNT);
+    ApplyOrbVisuals();
     ApplyExclusionRegions();
     UpdateStatusText(true);
   }
 
   void AdjustFontSize(float delta)
   {
-    mFontSize = std::min(std::max(mFontSize + delta, MIN_FONT_SIZE), MAX_FONT_SIZE);
+    mBodyFontSize = std::min(std::max(mBodyFontSize + delta, MIN_FONT_SIZE), MAX_FONT_SIZE);
     ApplyTextStyle();
+    ApplyExclusionRegions();
     UpdateStatusText(true);
   }
 
@@ -442,55 +571,57 @@ private:
       return;
     }
 
-    if(event.GetKeyName() == "space" || event.GetKeyName() == "Space")
+    const std::string keyName = event.GetKeyName().CStr();
+    if(keyName == "space" || keyName == "Space")
     {
       ToggleAnimation();
     }
-    else if(event.GetKeyName() == "1")
+    else if(keyName == "1")
     {
-      SetBoundCount(mActiveBoundCount - 1u);
+      SetOrbCount(mActiveOrbCount - 1u);
     }
-    else if(event.GetKeyName() == "2")
+    else if(keyName == "2")
     {
-      SetBoundCount(mActiveBoundCount + 1u);
+      SetOrbCount(mActiveOrbCount + 1u);
     }
-    else if(event.GetKeyName() == "3")
+    else if(keyName == "3")
     {
       AdjustFontSize(-FONT_STEP);
     }
-    else if(event.GetKeyName() == "4")
+    else if(keyName == "4")
     {
       AdjustFontSize(FONT_STEP);
     }
-    else if(event.GetKeyName() == "5")
+    else if(keyName == "5")
     {
       ToggleExclusion();
     }
-    else if(event.GetKeyName() == "6")
+    else if(keyName == "6")
     {
       CycleTextColor();
     }
   }
 
 private:
-  Application&                            mApplication;
-  Dali::String                            mSampleText;
-  size_t                                  mTextLength{0u};
-  Label                                   mStatusLabel;
-  View                                    mContentArea;
-  TextVisualizer                          mTextVisualizer;
-  Timer                                   mTimer;
-  std::vector<MovingBound>                mBounds;
-  bool                                    mAnimationEnabled{true};
-  bool                                    mExclusionEnabled{true};
-  bool                                    mExclusionApplied{false};
-  uint32_t                                mActiveBoundCount{DEFAULT_BOUND_COUNT};
-  uint32_t                                mCurrentTextColorIndex{0u};
-  float                                   mFontSize{DEFAULT_FONT_SIZE};
-  uint64_t                                mFrameCount{0u};
-  uint64_t                                mRelayoutUpdateCount{0u};
-  std::chrono::steady_clock::time_point   mStartTime;
-  std::chrono::steady_clock::time_point   mLastTickTime;
+  Application&                          mApplication;
+  View                                  mRoot;
+  Label                                 mTitleLabel;
+  Label                                 mStatusLabel;
+  View                                  mContentArea;
+  TextVisualizer                        mTextVisualizer;
+  Dali::Vector<Rect<float>>             mFixedColumnBounds;
+  std::vector<QuoteBlock>               mQuoteBlocks;
+  std::vector<MovingOrb>                mOrbs;
+  Timer                                 mTimer;
+  bool                                  mAnimationEnabled{true};
+  bool                                  mExclusionEnabled{true};
+  uint32_t                              mActiveOrbCount{DEFAULT_ORB_COUNT};
+  uint32_t                              mCurrentTextColorIndex{0u};
+  float                                 mBodyFontSize{BODY_FONT_SIZE};
+  uint64_t                              mFrameCount{0u};
+  uint64_t                              mRelayoutUpdateCount{0u};
+  std::chrono::steady_clock::time_point mStartTime;
+  std::chrono::steady_clock::time_point mLastTickTime;
 };
 
 int DALI_EXPORT_API main(int argc, char** argv)
