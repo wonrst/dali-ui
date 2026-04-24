@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-property-handler.h>
+#include <dali-ui-foundation/integration-api/view-integration.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
@@ -73,6 +74,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mLayoutResult(),
   mAtlasViewAdapter(),
   mAtlasRendererBridge(),
+  mRenderHost(),
   mLastLayoutSize(Vector2::ZERO),
   mPrepareDirty(true),
   mLayoutDirty(true),
@@ -82,6 +84,7 @@ TextVisualizerImpl::TextVisualizerImpl()
 
 TextVisualizerImpl::~TextVisualizerImpl()
 {
+  ClearRenderHost();
 }
 
 void TextVisualizerImpl::SetText(const Dali::String& text)
@@ -219,7 +222,12 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
-    mAtlasRendererBridge.UpdateRenderData();
+    if(mAtlasRendererBridge.UpdateRenderData())
+    {
+      EnsureRenderHost();
+      mAtlasRendererBridge.SetRenderHost(mRenderHost);
+      // TODO: Attach renderer output to render host.
+    }
     // TODO: Clear render dirty after renderer geometry is updated.
   }
 
@@ -336,6 +344,32 @@ void TextVisualizerImpl::ClearPrepareDirty()
 void TextVisualizerImpl::ClearLayoutDirty()
 {
   mLayoutDirty = false;
+}
+
+void TextVisualizerImpl::EnsureRenderHost()
+{
+  if(!mRenderHost)
+  {
+    mRenderHost = Actor::New();
+    mRenderHost.SetProperty(Actor::Property::PARENT_ORIGIN, ParentOrigin::TOP_LEFT);
+    mRenderHost.SetProperty(Actor::Property::PIVOT, Pivot::TOP_LEFT);
+    mRenderHost.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::ALL_DIMENSIONS);
+    IntegrationView::AddActorChild(Ui::View::DownCast(Self()), mRenderHost);
+  }
+}
+
+void TextVisualizerImpl::ClearRenderHost()
+{
+  if(mRenderHost)
+  {
+    mRenderHost.Unparent();
+    mRenderHost.Reset();
+  }
+}
+
+bool TextVisualizerImpl::HasRenderHost() const
+{
+  return static_cast<bool>(mRenderHost);
 }
 
 bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const

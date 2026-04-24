@@ -25,6 +25,7 @@
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view-impl.h>
+#include <dali/public-api/actors/actor.h>
 #include <dali/public-api/math/rect.h>
 
 namespace Dali
@@ -167,6 +168,9 @@ private:
   void MarkRenderDirty();
   void ClearPrepareDirty();
   void ClearLayoutDirty();
+  void EnsureRenderHost();
+  void ClearRenderHost();
+  bool HasRenderHost() const;
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
 
@@ -180,6 +184,7 @@ private:
   Internal::TextVisualizer::LayoutResult        mLayoutResult;
   Internal::TextVisualizer::AtlasViewAdapter    mAtlasViewAdapter;
   Internal::TextVisualizer::AtlasRendererBridge mAtlasRendererBridge;
+  Actor                                         mRenderHost;
   Vector2                                       mLastLayoutSize;
   bool                                          mPrepareDirty;
   bool                                          mLayoutDirty;

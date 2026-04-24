@@ -1086,6 +1086,94 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearAfterUpdateP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerAtlasRendererBridgeRenderHostSetterP(void)
+{
+  UiTestApplication                                                application;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  DALI_TEST_CHECK(!bridge.HasRenderHost());
+  bridge.SetRenderHost(renderHost);
+  DALI_TEST_CHECK(bridge.HasRenderHost());
+  DALI_TEST_CHECK(bridge.GetRenderHost() == renderHost);
+
+  bridge.Clear();
+  DALI_TEST_CHECK(!bridge.HasRenderHost());
+  DALI_TEST_CHECK(!bridge.GetRenderHost());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerRenderHostEmptySmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerRenderHostCreatedWithTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abc");
+  textVisualizer.SetFontSize(10.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerRenderHostSurvivesRelayoutP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abcdefghij");
+  textVisualizer.SetFontSize(10.0f);
+  textVisualizer.SetRequestedWidth(25.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetRequestedWidth(60.0f);
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerRenderHostClearPathP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abc");
+  textVisualizer.SetFontSize(10.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetText("");
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPrepareSimpleAsciiTextP(void)
 {
   UiTestApplication application;

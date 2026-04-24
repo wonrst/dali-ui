@@ -50,6 +50,7 @@ struct AtlasRendererBridge::Impl
 AtlasRendererBridge::AtlasRendererBridge()
 : mAdapter(nullptr),
   mRenderer(),
+  mRenderHost(),
   mImpl(new Impl())
 {
 }
@@ -68,6 +69,7 @@ void AtlasRendererBridge::Clear()
 {
   mAdapter = nullptr;
   mImpl->Clear();
+  mRenderHost.Reset();
   ResetRenderer();
 }
 
@@ -79,6 +81,11 @@ bool AtlasRendererBridge::HasRenderableGlyphs() const
 bool AtlasRendererBridge::IsRendererCreated() const
 {
   return static_cast<bool>(mRenderer);
+}
+
+bool AtlasRendererBridge::HasRenderHost() const
+{
+  return static_cast<bool>(mRenderHost);
 }
 
 void AtlasRendererBridge::EnsureRenderer()
@@ -135,6 +142,16 @@ bool AtlasRendererBridge::UpdateRenderData()
   }
 
   return !mImpl->mRenderData.empty();
+}
+
+void AtlasRendererBridge::SetRenderHost(Actor renderHost)
+{
+  mRenderHost = renderHost;
+}
+
+Actor AtlasRendererBridge::GetRenderHost() const
+{
+  return mRenderHost;
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

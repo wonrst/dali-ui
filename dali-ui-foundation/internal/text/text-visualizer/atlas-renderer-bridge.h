@@ -20,6 +20,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/rendering/text-renderer.h>
+#include <dali/public-api/actors/actor.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
@@ -43,16 +44,20 @@ public:
 
   bool HasRenderableGlyphs() const;
   bool IsRendererCreated() const;
+  bool HasRenderHost() const;
 
-  void EnsureRenderer();
-  void ResetRenderer();
-  bool UpdateRenderData();
+  void  EnsureRenderer();
+  void  ResetRenderer();
+  bool  UpdateRenderData();
+  void  SetRenderHost(Actor renderHost);
+  Actor GetRenderHost() const;
 
 private:
   struct Impl;
 
   const AtlasViewAdapter* mAdapter;
   Text::RendererPtr       mRenderer;
+  Actor                   mRenderHost;
   Impl*                   mImpl;
 };
 
