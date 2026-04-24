@@ -343,7 +343,7 @@ int UtcDaliTextVisualizerPreparedAsciiCharacterCountP(void)
   DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetClusterCount(), 3u, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetLineBreakCount(), 3u, TEST_LOCATION);
-  DALI_TEST_EQUALS(preparedText.GetParagraphCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetParagraphCount(), 1u, TEST_LOCATION);
 
   END_TEST;
 }
