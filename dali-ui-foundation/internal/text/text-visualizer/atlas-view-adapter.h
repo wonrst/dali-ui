@@ -48,6 +48,7 @@ public:
 
   bool GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const;
   bool GetGlyphInfo(uint32_t glyphIndex, Text::GlyphInfo& glyphInfo) const;
+  bool GetRendererGlyphPosition(uint32_t index, Vector2& position) const;
 
   bool     HasRenderableGlyphs() const;
   bool     HasValidGlyphPlacementIndices() const;
@@ -66,6 +67,8 @@ public:
   const Text::Character*                    GetTextBuffer() const;
 
 private:
+  float GetLineBaselineOffset(float lineTop) const;
+
   const PreparedText* mPreparedText;
   const LayoutResult* mLayoutResult;
   Vector2             mControlSize;

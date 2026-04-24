@@ -16,6 +16,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <stdlib.h>
 #include <dali.h>
 #include <dali-ui-foundation/dali-ui-foundation.h>
@@ -89,6 +90,32 @@ void CheckGlyphPlacementsOutsideExclusion(const Dali::Ui::Internal::TextVisualiz
     const bool overlapsVerticalBand = (it->y < regionBottom - tolerance) && ((it->y + std::max(it->height, 1.0f)) > regionTop + tolerance);
     const bool insideBlockedX       = (it->x >= regionLeft - tolerance) && (it->x < regionRight - tolerance);
     DALI_TEST_CHECK(!(overlapsVerticalBand && insideBlockedX));
+  }
+}
+
+void CheckGlyphPositionsOutsideExclusion(const Dali::Vector<Vector2>& positions,
+                                         const Rect<float>&          exclusionRegion)
+{
+  const float regionLeft   = exclusionRegion.x;
+  const float regionRight  = exclusionRegion.x + exclusionRegion.width;
+  const float regionTop    = exclusionRegion.y;
+  const float regionBottom = exclusionRegion.y + exclusionRegion.height;
+  const float tolerance    = 0.5f;
+
+  for(Dali::Vector<Vector2>::ConstIterator it = positions.Begin(), endIt = positions.End(); it != endIt; ++it)
+  {
+    const bool overlapsVerticalBand = (it->y >= regionTop + tolerance) && (it->y < regionBottom - tolerance);
+    const bool insideBlockedX       = (it->x >= regionLeft - tolerance) && (it->x < regionRight - tolerance);
+    DALI_TEST_CHECK(!(overlapsVerticalBand && insideBlockedX));
+  }
+}
+
+void CheckGlyphPositionsFinite(const Dali::Vector<Vector2>& positions)
+{
+  for(Dali::Vector<Vector2>::ConstIterator it = positions.Begin(), endIt = positions.End(); it != endIt; ++it)
+  {
+    DALI_TEST_CHECK(std::isfinite(it->x));
+    DALI_TEST_CHECK(std::isfinite(it->y));
   }
 }
 } // namespace
@@ -1308,7 +1335,98 @@ int UtcDaliTextVisualizerViewInterfaceWithRenderableAdapterP(void)
 
     DALI_TEST_EQUALS(viewInterface.GetGlyphs(glyphs.Begin(), positions.Begin(), minLineOffset, 0u, glyphCount), glyphCount, TEST_LOCATION);
     DALI_TEST_EQUALS(minLineOffset, 0.0f, TEST_LOCATION);
+    CheckGlyphPositionsFinite(positions);
   }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceGlyphPositionConsistencyP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult             layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter         adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  viewInterface.SetAdapter(&adapter);
+
+  const uint32_t glyphCount = viewInterface.GetNumberOfGlyphs();
+  if(glyphCount > 0u)
+  {
+    Dali::Vector<Dali::Ui::Text::GlyphInfo> glyphs;
+    Dali::Vector<Vector2>                   positions;
+    float                                   minLineOffset = -1.0f;
+    glyphs.Resize(glyphCount);
+    positions.Resize(glyphCount);
+
+    DALI_TEST_EQUALS(viewInterface.GetGlyphs(glyphs.Begin(), positions.Begin(), minLineOffset, 0u, glyphCount), glyphCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(positions.Count(), glyphCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphs.Count(), glyphCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(minLineOffset, 0.0f, TEST_LOCATION);
+    CheckGlyphPositionsFinite(positions);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceGlyphPositionWithExclusionP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult             layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter         adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(10.0f, 0.0f, 25.0f, 20.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 120.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  viewInterface.SetAdapter(&adapter);
+
+  const uint32_t glyphCount = viewInterface.GetNumberOfGlyphs();
+  if(glyphCount > 0u)
+  {
+    Dali::Vector<Dali::Ui::Text::GlyphInfo> glyphs;
+    Dali::Vector<Vector2>                   positions;
+    float                                   minLineOffset = -1.0f;
+    glyphs.Resize(glyphCount);
+    positions.Resize(glyphCount);
+
+    DALI_TEST_EQUALS(viewInterface.GetGlyphs(glyphs.Begin(), positions.Begin(), minLineOffset, 0u, glyphCount), glyphCount, TEST_LOCATION);
+    CheckGlyphPositionsFinite(positions);
+    CheckGlyphPositionsOutsideExclusion(positions, exclusionRegions[0]);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceTextColorPassThroughP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult             layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter         adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetTextColor(Color::BLUE);
+  viewInterface.SetAdapter(&adapter);
+
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Color::BLUE, TEST_LOCATION);
 
   END_TEST;
 }

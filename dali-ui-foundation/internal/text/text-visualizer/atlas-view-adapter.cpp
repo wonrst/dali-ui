@@ -18,6 +18,10 @@
 // CLASS HEADER
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 
+// EXTERNAL INCLUDES
+#include <algorithm>
+#include <cmath>
+
 namespace Dali::Ui::Internal::TextVisualizer
 {
 namespace
@@ -108,6 +112,24 @@ bool AtlasViewAdapter::GetGlyphInfo(uint32_t glyphIndex, Text::GlyphInfo& glyphI
   return true;
 }
 
+bool AtlasViewAdapter::GetRendererGlyphPosition(uint32_t index, Vector2& position) const
+{
+  GlyphPlacement  placement;
+  Text::GlyphInfo glyphInfo;
+
+  if(!GetGlyphPlacement(index, placement) || !GetGlyphInfo(placement.glyphIndex, glyphInfo))
+  {
+    return false;
+  }
+
+  // AtlasRenderer expects the glyph quad origin, not the pen position stored by LayoutResult.
+  const float baselineOffset = GetLineBaselineOffset(placement.y);
+  position.x                 = placement.x + glyphInfo.xBearing;
+  position.y                 = placement.y + baselineOffset - glyphInfo.yBearing;
+
+  return std::isfinite(position.x) && std::isfinite(position.y);
+}
+
 bool AtlasViewAdapter::HasRenderableGlyphs() const
 {
   return (nullptr != mPreparedText) &&
@@ -196,6 +218,40 @@ const Text::Character* AtlasViewAdapter::GetTextBuffer() const
   }
 
   return mPreparedText->GetCharacters().Begin();
+}
+
+float AtlasViewAdapter::GetLineBaselineOffset(float lineTop) const
+{
+  if((nullptr == mPreparedText) || (nullptr == mLayoutResult))
+  {
+    return 0.0f;
+  }
+
+  constexpr float LINE_TOLERANCE = 0.001f;
+
+  float baselineOffset = 0.0f;
+  bool  foundGlyph     = false;
+
+  for(Vector<GlyphPlacement>::ConstIterator placementIt = mLayoutResult->glyphPlacements.Begin(),
+                                            endIt       = mLayoutResult->glyphPlacements.End();
+      placementIt != endIt; ++placementIt)
+  {
+    if(std::fabs(placementIt->y - lineTop) > LINE_TOLERANCE)
+    {
+      continue;
+    }
+
+    Text::GlyphInfo glyphInfo;
+    if(!GetGlyphInfo(placementIt->glyphIndex, glyphInfo))
+    {
+      continue;
+    }
+
+    baselineOffset = std::max(baselineOffset, glyphInfo.yBearing);
+    foundGlyph     = true;
+  }
+
+  return foundGlyph ? baselineOffset : 0.0f;
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

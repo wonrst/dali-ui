@@ -125,8 +125,11 @@ Text::Length TextVisualizerViewInterface::GetGlyphs(Text::GlyphInfo* glyphs, Vec
       return index;
     }
 
-    glyphs[index]         = glyphInfo;
-    glyphPositions[index] = Vector2(placement.x, placement.y);
+    glyphs[index] = glyphInfo;
+    if(!mAdapter->GetRendererGlyphPosition(placementIndex, glyphPositions[index]))
+    {
+      return index;
+    }
   }
 
   return count;

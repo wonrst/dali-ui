@@ -40,6 +40,7 @@
 - `TextVisualizerViewInterface`는 존재한다.
 - `AtlasRendererBridge::AttachRendererToHost()`는 이제 실제로 `Render()`를 호출한다.
 - `Render()`가 반환한 output actor는 현재 bridge가 host에 직접 attach할 수 있다.
+- `TextVisualizerViewInterface::GetGlyphs()`는 이제 renderer가 기대하는 glyph quad origin에 더 가깝게 최소 position adjustment를 적용한다.
 - 그러나 geometry correctness, baseline/bearing/offset, textColor 정확성은 아직 미완료다.
 - 따라서 `render dirty`는 아직 clear하지 않는다.
 
@@ -197,6 +198,48 @@ empty / no-op 처리한 것:
 - `colors / color indices`는 현재 `nullptr`이다.
 - `textColor`는 `GetTextColor()` 경로로만 전달된다.
 - per-glyph color path는 아직 연결하지 않았다.
+
+## 추가 확인: glyph position adjustment
+
+`TextVisualizer`의 현재 glyph placement와 `AtlasRenderer`가 기대하는 좌표계를 다시 확인한 결과는 다음과 같다.
+
+- `Text::View::GetGlyphs()`는 기존 path에서 line alignment offset과 line ascender를 glyph position에 더한 뒤 renderer에 전달한다.
+  - 파일: `dali-ui-foundation/internal/text/text-view.cpp`
+- `Text::AtlasRenderer::AddGlyphs()`는 전달받은 `position`을 glyph mesh origin으로 사용하고, `baseLine = position.y + glyph.yBearing`로 baseline을 계산한다.
+  - 파일: `dali-ui-foundation/internal/text/rendering/atlas/text-atlas-renderer.cpp`
+- 즉 `AtlasRenderer`가 기대하는 `glyphPositions`는 baseline origin이 아니라 glyph quad의 top-left 성격에 가깝다.
+
+현재 `TextVisualizer`의 `LayoutEngine::LayoutGlyphs()`는 아래 좌표를 저장한다.
+
+- `placement.x`
+  - exclusion interval 안에서 누적 advance로 계산한 pen x 성격의 값
+- `placement.y`
+  - line top y
+
+이 좌표를 그대로 `Render()`에 넘기면 `xBearing / yBearing`가 빠져 기존 `TextView` path보다 glyph가 치우칠 수 있다.
+
+그래서 이번 단계에서는 renderer 경계에서만 최소 보정을 적용했다.
+
+- 위치:
+  - `dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.cpp`
+  - `dali-ui-foundation/internal/text/text-visualizer/text-visualizer-view-interface.cpp`
+- 적용식:
+  - `x = placement.x + glyph.xBearing`
+  - `baselineOffset = same line의 glyph들 중 max(yBearing)`
+  - `y = placement.y + baselineOffset - glyph.yBearing`
+
+현재 의미:
+
+- `LayoutResult`는 여전히 layout 좌표를 유지한다.
+- renderer-specific adjustment는 `TextVisualizerViewInterface::GetGlyphs()` 경계에서만 적용한다.
+- `minLineOffset`는 아직 alignment offset path를 구현하지 않았기 때문에 `0.0f`를 유지한다.
+
+확인 필요:
+
+- 현재 `baselineOffset = max(yBearing)`는 ascender/line metrics가 없는 상태에서 잡은 임시 규칙이다.
+- font ascender/descender 기반 line baseline을 별도로 계산하면 이 보정식은 바뀔 수 있다.
+- glyph offset, RTL/Bidi visual order, combining mark / zero-advance glyph 정밀 배치는 아직 미완료다.
+- `textColor`는 `GetTextColor()` defaultColor path로만 전달되며, shader 반영 correctness는 아직 별도 확인이 필요하다.
 
 ## 6. 현재 render dirty 정책
 
