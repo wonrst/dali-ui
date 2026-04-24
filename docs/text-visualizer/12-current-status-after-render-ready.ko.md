@@ -407,6 +407,52 @@ flowchart TD
   - 확인 결과 `Label / InputField`는 `ViewImpl::OnRelayout()`를 명시적으로 호출하지 않는다.
   - `TextVisualizer`는 현재 padding/margin 기반 child arrange에 의존하지 않으므로, 우선 size sync만 보강하고 base call 순서는 유지한다.
 
+## 추가 확인: atlas output visibility diagnosis
+
+- 현재 sample 관찰 기준:
+  - `TextVisualizer` text area background는 보인다.
+  - exclusion overlay와 relayout 반응도 보인다.
+  - 하지만 glyph text는 여전히 보이지 않는다.
+- 따라서 현재 의심 지점은 `measure/layout` 자체보다 `AtlasRenderer output actor visibility` 쪽이 더 크다.
+
+현재 조사 결과:
+
+- `Text::AtlasRenderer::Render()`는 최종적으로 `mActor`를 반환한다.
+- 이 `mActor`는 text mesh를 직접 가진 actor가 아니라, mesh renderer를 가진 child actor들을 담는 container actor다.
+- 즉 output actor 자체의 `GetRendererCount()`는 `0`일 수 있고, 실제 draw content는 child actor들에 있을 수 있다.
+- `CommonTextUtils::RenderText()`를 보면 stencil이 없는 경우에도 renderable actor를 text control에 직접 붙이는 경로가 존재한다.
+  - 따라서 “stencil이 없어서 절대 안 보인다”는 결론은 현재 코드만으로는 확정할 수 없다.
+- `InputField`는 clipping/cursor/decoration 때문에 stencil actor를 쓰지만, 이는 곧바로 glyph visibility의 필수 조건이라고 단정할 수는 없다.
+
+비교 요약:
+
+| 항목 | Label/InputField/TextView 기존 path | TextVisualizer 현재 path | 차이/위험 |
+|---|---|---|---|
+| `Renderer::Render()` 입력 actor | 기존 text control self | `RenderHost Actor` | 현재 `animatablePropertyIndex`가 `INVALID_INDEX`라 즉시 치명적이라고 단정할 수는 없지만, 후속 확인 필요 |
+| output actor 구조 | container actor + child mesh actors | 동일한 `AtlasRenderer` output actor | output actor 자체에 renderer가 없어도 이상 아님 |
+| stencil/clipping | `InputField`는 stencil 사용, `CommonTextUtils`는 stencil 없는 direct attach 경로도 보유 | 현재 stencil 없음 | stencil 필수 여부는 아직 미확정 |
+| attach 위치 | text control 또는 stencil actor | `RenderHost Actor` | attach 자체는 가능, 실제 draw 여부는 별도 검증 필요 |
+| size sync | control/stencil size를 기존 path가 맞춤 | `RenderHost` explicit size sync 추가 | host size는 보강됐지만 output actor draw 보장은 아님 |
+
+현재 진단 helper:
+
+- `HasRendererOutput()`
+- `IsRendererOutputParentedToHost()`
+- `GetRendererOutputChildCount()`
+- `GetRendererOutputRendererCount()`
+- `GetRendererOutputSize()`
+- `GetRenderHostSize()`
+- `IsRendererOutputVisible()`
+
+현재 판단:
+
+- `TextVisualizer`는 이미 output actor를 host에 붙일 수 있다.
+- 하지만 그 actor가 실제로 보이는지, child mesh actor들이 정상 geometry/atlas/shader 상태인지까지는 아직 확인되지 않았다.
+- 다음 조사 포인트는:
+  - `Render()`에 넘기는 actor를 `RenderHost`로 유지하는 것이 맞는지
+  - output actor child mesh가 실제로 생성되는지
+  - sample에서 fallback `Label`은 보이는데 `TextVisualizer`만 안 보이는지
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지

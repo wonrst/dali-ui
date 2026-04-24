@@ -882,6 +882,11 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
   DALI_TEST_CHECK(!bridge.HasRenderableGlyphs());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
   DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_EQUALS(bridge.GetRendererOutputChildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputRendererCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
   DALI_TEST_CHECK(!bridge.IsRenderReady());
 
   END_TEST;
@@ -1176,6 +1181,7 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   adapter.SetPreparedText(&preparedText);
   adapter.SetLayoutResult(&layoutResult);
   bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
   bridge.SetRenderHost(renderHost);
 
   if(adapter.HasRenderableGlyphs())
@@ -1190,6 +1196,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   {
     DALI_TEST_CHECK(bridge.HasRendererOutput());
     DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
+    DALI_TEST_CHECK(bridge.IsRendererOutputVisible());
+    DALI_TEST_CHECK(bridge.GetRendererOutputChildCount() > 0u || bridge.GetRendererOutputRendererCount() > 0u);
     DALI_TEST_CHECK(bridge.IsRenderReady());
     DALI_TEST_CHECK(bridge.GetRendererOutput());
     DALI_TEST_CHECK(bridge.GetRendererOutput().GetParent() == renderHost);
@@ -1218,6 +1226,7 @@ int UtcDaliTextVisualizerAtlasRendererBridgeOutputParentedToHostP(void)
   adapter.SetLayoutResult(&layoutResult);
   adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
   bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
   bridge.SetRenderHost(renderHost);
 
   if(adapter.HasRenderableGlyphs())
@@ -1233,6 +1242,50 @@ int UtcDaliTextVisualizerAtlasRendererBridgeOutputParentedToHostP(void)
   else
   {
     DALI_TEST_CHECK(!bridge.IsRendererOutputParentedToHost());
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeOutputDiagnosticsP(void)
+{
+  UiTestApplication                                                application;
+  const auto                                                       preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  const bool attached = bridge.AttachRendererToHost();
+  if(attached)
+  {
+    DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
+    DALI_TEST_CHECK(bridge.IsRendererOutputVisible());
+    DALI_TEST_CHECK(bridge.GetRenderHostSize() == Vector3(layoutResult.width, layoutResult.height, 0.0f));
+    DALI_TEST_CHECK(bridge.GetRendererOutputSize().x >= 0.0f);
+    DALI_TEST_CHECK(bridge.GetRendererOutputSize().y >= 0.0f);
+    DALI_TEST_CHECK(bridge.GetRendererOutputChildCount() > 0u || bridge.GetRendererOutputRendererCount() > 0u);
+    DALI_TEST_CHECK(bridge.IsRenderReady());
+  }
+  else
+  {
+    DALI_TEST_EQUALS(bridge.GetRendererOutputChildCount(), 0u, TEST_LOCATION);
+    DALI_TEST_EQUALS(bridge.GetRendererOutputRendererCount(), 0u, TEST_LOCATION);
   }
 
   END_TEST;
@@ -1327,6 +1380,11 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearAfterRenderCallP(void)
   bridge.Clear();
 
   DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_EQUALS(bridge.GetRendererOutputChildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputRendererCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
   DALI_TEST_CHECK(!bridge.IsRenderReady());
   DALI_TEST_CHECK(!bridge.IsRendererAttached());
   DALI_TEST_CHECK(!bridge.HasRenderHost());

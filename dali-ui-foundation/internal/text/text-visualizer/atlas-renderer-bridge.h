@@ -43,11 +43,31 @@ public:
   void SetAdapter(const AtlasViewAdapter* adapter);
   void Clear();
 
-  bool HasRenderableGlyphs() const;
-  bool IsRendererCreated() const;
-  bool HasRenderHost() const;
-  bool HasRendererOutput() const;
-  bool IsRendererAttached() const;
+  bool     HasRenderableGlyphs() const;
+  bool     IsRendererCreated() const;
+  bool     HasRenderHost() const;
+  bool     HasRendererOutput() const;
+  bool     IsRendererAttached() const;
+  uint32_t GetRendererOutputChildCount() const
+  {
+    return mRendererOutput ? mRendererOutput.GetChildCount() : 0u;
+  }
+  uint32_t GetRendererOutputRendererCount() const
+  {
+    return mRendererOutput ? mRendererOutput.GetRendererCount() : 0u;
+  }
+  Vector3 GetRendererOutputSize() const
+  {
+    return mRendererOutput ? mRendererOutput.GetProperty<Vector3>(Actor::Property::SIZE) : Vector3::ZERO;
+  }
+  Vector3 GetRenderHostSize() const
+  {
+    return mRenderHost ? mRenderHost.GetProperty<Vector3>(Actor::Property::SIZE) : Vector3::ZERO;
+  }
+  bool IsRendererOutputVisible() const
+  {
+    return mRendererOutput && mRendererOutput.GetProperty<bool>(Actor::Property::VISIBLE);
+  }
   bool IsRendererOutputParentedToHost() const
   {
     return mRendererOutput &&

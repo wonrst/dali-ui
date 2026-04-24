@@ -49,6 +49,7 @@ const UiColor LABEL_TEXT_COLOR(0xF3F6FA);
 const UiColor STATUS_BG_COLOR(0x202E3D);
 const UiColor OVERLAY_COLOR(0xF5528A);
 const UiColor TEXT_AREA_BG_COLOR = UiColor(0xFFFFFF).WithAlpha(0.07f);
+const UiColor FALLBACK_LABEL_BG_COLOR = UiColor(0x203040).WithAlpha(0.45f);
 
 const UiColor TEXT_COLORS[] = {
   UiColor(0xFFB000),
@@ -129,10 +130,12 @@ private:
 
     mPlainVisualizer = CreateTextVisualizer();
     mExcludedVisualizer = CreateTextVisualizer();
+    mPlainFallbackLabel = CreateFallbackLabel();
+    mExcludedFallbackLabel = CreateFallbackLabel();
     mExclusionOverlay = CreateExclusionOverlay();
 
-    View plainPanel = CreateTextPanel(mPlainVisualizer, View(), "Same text without exclusion");
-    View excludedPanel = CreateTextPanel(mExcludedVisualizer, mExclusionOverlay, "Same text with visible exclusion box");
+    View plainPanel = CreateTextPanel(mPlainVisualizer, View(), mPlainFallbackLabel, "Same text without exclusion");
+    View excludedPanel = CreateTextPanel(mExcludedVisualizer, mExclusionOverlay, mExcludedFallbackLabel, "Same text with visible exclusion box");
 
     StackLayout sections = StackLayout::New(StackOrientation::HORIZONTAL)
       .SetRequestedWidth(MATCH_PARENT)
@@ -150,7 +153,7 @@ private:
         .SetPadding(Extents(ROOT_PADDING, ROOT_PADDING, ROOT_PADDING, ROOT_PADDING))
         .SetSpacing(ROOT_SPACING)
         .Children({
-          CreateInfoLabel("TextVisualizer sample\n1: Toggle exclusion   2: Change text color   3: Move exclusion   ESC/BACK: Quit",
+          CreateInfoLabel("TextVisualizer sample\n1: Toggle exclusion   2: Change text color   3: Move exclusion   4: Toggle fallback Label   ESC/BACK: Quit",
                           INFO_HEIGHT,
                           BODY_FONT_SIZE),
           mStatusLabel,
@@ -187,7 +190,24 @@ private:
     return overlay;
   }
 
-  View CreateTextPanel(TextVisualizer visualizer, View overlay, const char* caption)
+  Label CreateFallbackLabel()
+  {
+    Label fallback = Label::New(SAMPLE_TEXT);
+    fallback.SetLayoutMode(LayoutMode::STANDALONE);
+    fallback.SetPositionX(TEXT_PADDING);
+    fallback.SetPositionY(TEXT_PADDING);
+    fallback.SetRequestedWidth(PANEL_WIDTH - (TEXT_PADDING * 2.0f));
+    fallback.SetRequestedHeight(PANEL_HEIGHT - (TEXT_PADDING * 2.0f));
+    fallback.SetFontSize(TEXT_FONT_SIZE);
+    fallback.SetTextColor(TEXT_COLORS[mCurrentColorIndex]);
+    fallback.SetMultiLine(true);
+    fallback.SetPadding(Extents(8, 8, 8, 8));
+    fallback.SetBackgroundColor(FALLBACK_LABEL_BG_COLOR);
+    fallback.SetProperty(Actor::Property::VISIBLE, false);
+    return fallback;
+  }
+
+  View CreateTextPanel(TextVisualizer visualizer, View overlay, Label fallbackLabel, const char* caption)
   {
     View panel = View::New();
     panel.SetRequestedWidth(PANEL_WIDTH);
@@ -205,6 +225,11 @@ private:
                 .SetBackgroundColor(TEXT_AREA_BG_COLOR));
 
     panel.Add(visualizer);
+
+    if(fallbackLabel)
+    {
+      panel.Add(fallbackLabel);
+    }
 
     if(overlay)
     {
@@ -249,6 +274,10 @@ private:
     const UiColor textColor = TEXT_COLORS[mCurrentColorIndex];
     mPlainVisualizer.SetTextColor(textColor);
     mExcludedVisualizer.SetTextColor(textColor);
+    mPlainFallbackLabel.SetTextColor(textColor);
+    mExcludedFallbackLabel.SetTextColor(textColor);
+    mPlainFallbackLabel.SetProperty(Actor::Property::VISIBLE, mFallbackLabelEnabled);
+    mExcludedFallbackLabel.SetProperty(Actor::Property::VISIBLE, mFallbackLabelEnabled);
 
     if(mExclusionEnabled)
     {
@@ -277,13 +306,16 @@ private:
     status += (mExclusionEnabled ? "ON" : "OFF");
     status += " | Preset: ";
     status += std::to_string(mCurrentExclusionIndex + 1u).c_str();
-    status += "\nManual check: text visible, color changed, right panel avoids the pink box, repeated relayout has no crash.";
+    status += " | Fallback Label: ";
+    status += (mFallbackLabelEnabled ? "ON" : "OFF");
+    status += "\nManual check: if Label is visible but TextVisualizer glyphs are not, the atlas output path is still the main suspect.";
     mStatusLabel.SetText(status);
 
-    DALI_LOG_ERROR("TextVisualizer sample state -> color=%s exclusion=%d preset=%u\n",
+    DALI_LOG_ERROR("TextVisualizer sample state -> color=%s exclusion=%d preset=%u fallback=%d\n",
                    TEXT_COLOR_NAMES[mCurrentColorIndex],
                    mExclusionEnabled,
-                   static_cast<unsigned int>(mCurrentExclusionIndex));
+                   static_cast<unsigned int>(mCurrentExclusionIndex),
+                   mFallbackLabelEnabled);
   }
 
   void OnKeyEvent(const KeyEvent& event)
@@ -314,15 +346,23 @@ private:
       mCurrentExclusionIndex = (mCurrentExclusionIndex + 1u) % (sizeof(EXCLUSION_PRESETS) / sizeof(EXCLUSION_PRESETS[0]));
       ApplySampleState();
     }
+    else if(event.GetKeyName() == "4")
+    {
+      mFallbackLabelEnabled = !mFallbackLabelEnabled;
+      ApplySampleState();
+    }
   }
 
 private:
   Application& mApplication;
-  Label        mStatusLabel;
+  Label          mStatusLabel;
   TextVisualizer mPlainVisualizer;
   TextVisualizer mExcludedVisualizer;
+  Label          mPlainFallbackLabel;
+  Label          mExcludedFallbackLabel;
   View           mExclusionOverlay;
   bool           mExclusionEnabled{true};
+  bool           mFallbackLabelEnabled{false};
   uint32_t       mCurrentColorIndex{0u};
   uint32_t       mCurrentExclusionIndex{0u};
 };
