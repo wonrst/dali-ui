@@ -19,6 +19,8 @@
 
 // EXTERNAL INCLUDES
 #include <dali-ui-foundation/public-api/dali-ui-common.h>
+#include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
+#include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view.h>
 
 namespace Dali
@@ -40,6 +42,23 @@ class TextVisualizerImpl;
  */
 class DALI_UI_API TextVisualizer : public View
 {
+public:
+  /**
+   * @brief Property indices for TextVisualizer.
+   *
+   * @note See Dali::Ui::Text::TextVisualizerPropertyIndex for the underlying property definitions.
+   */
+  struct Property
+  {
+    enum
+    {
+      TEXT        = Text::TextVisualizerPropertyIndex::TEXT,
+      FONT_FAMILY = Text::TextVisualizerPropertyIndex::FONT_FAMILY,
+      FONT_SIZE   = Text::TextVisualizerPropertyIndex::FONT_SIZE,
+      TEXT_COLOR  = Text::TextVisualizerPropertyIndex::TEXT_COLOR
+    };
+  };
+
 public: // Creation & Destruction
   /**
    * @brief Creates an uninitialized TextVisualizer handle.
@@ -107,6 +126,63 @@ public: // Static Methods
    * @return A handle to a TextVisualizer or an uninitialized handle
    */
   static TextVisualizer DownCast(BaseHandle handle);
+
+public: // Setters for chaining
+  /**
+   * @brief Sets the text.
+   *
+   * @param[in] text The text to display in UTF-8 format.
+   */
+  TextVisualizer& SetText(const Dali::String& text);
+
+  /**
+   * @brief Gets the text.
+   *
+   * @return The text currently set on the text visualizer in UTF-8 format.
+   */
+  Dali::String GetText() const;
+
+  /**
+   * @brief Sets the font family of the text.
+   *
+   * @param[in] fontFamily The requested font family to use.
+   */
+  TextVisualizer& SetFontFamily(const Dali::String& fontFamily);
+
+  /**
+   * @brief Gets the font family of the text.
+   *
+   * @return The font family currently set on the text visualizer.
+   */
+  Dali::String GetFontFamily() const;
+
+  /**
+   * @brief Sets the font size of the text.
+   *
+   * @param[in] fontSize The font size in pixels.
+   */
+  TextVisualizer& SetFontSize(float fontSize);
+
+  /**
+   * @brief Gets the font size of the text.
+   *
+   * @return The font size currently set on the text visualizer, in pixels.
+   */
+  float GetFontSize() const;
+
+  /**
+   * @brief Sets the color of the text.
+   *
+   * @param[in] color The required text color value.
+   */
+  TextVisualizer& SetTextColor(const UiColor& color);
+
+  /**
+   * @brief Gets the color of the text.
+   *
+   * @return The text color currently set on the text visualizer.
+   */
+  UiColor GetTextColor();
 
 public:
   explicit DALI_UI_API TextVisualizer(Integration::TextVisualizerImpl& implementation);

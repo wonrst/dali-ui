@@ -95,6 +95,54 @@ TextVisualizer TextVisualizer::DownCast(BaseHandle handle)
   return Ui::View::DownCast<TextVisualizer, Integration::TextVisualizerImpl>(handle);
 }
 
+// =============================================================================
+// Properties
+// =============================================================================
+
+TextVisualizer& TextVisualizer::SetText(const Dali::String& text)
+{
+  GetImpl(*this).SetText(text);
+  return *this;
+}
+
+Dali::String TextVisualizer::GetText() const
+{
+  return GetImpl(*this).GetText();
+}
+
+TextVisualizer& TextVisualizer::SetFontFamily(const Dali::String& fontFamily)
+{
+  GetImpl(*this).SetFontFamily(fontFamily);
+  return *this;
+}
+
+Dali::String TextVisualizer::GetFontFamily() const
+{
+  return GetImpl(*this).GetFontFamily();
+}
+
+TextVisualizer& TextVisualizer::SetFontSize(float fontSize)
+{
+  GetImpl(*this).SetFontSize(fontSize);
+  return *this;
+}
+
+float TextVisualizer::GetFontSize() const
+{
+  return GetImpl(*this).GetFontSize();
+}
+
+TextVisualizer& TextVisualizer::SetTextColor(const UiColor& color)
+{
+  GetImpl(*this).SetTextColor(color);
+  return *this;
+}
+
+UiColor TextVisualizer::GetTextColor()
+{
+  return GetImpl(*this).GetTextColor();
+}
+
 TextVisualizer::TextVisualizer(Integration::TextVisualizerImpl& implementation)
 : View(implementation)
 {

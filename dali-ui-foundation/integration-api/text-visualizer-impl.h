@@ -18,6 +18,8 @@
  */
 
 // EXTERNAL INCLUDES
+#include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
+#include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view-impl.h>
 
 namespace Dali
@@ -51,6 +53,49 @@ protected:
    */
   virtual ~TextVisualizerImpl();
 
+public:
+  // API
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetText
+   */
+  void SetText(const Dali::String& text);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetText
+   */
+  Dali::String GetText() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetFontFamily
+   */
+  void SetFontFamily(const Dali::String& fontFamily);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetFontFamily
+   */
+  Dali::String GetFontFamily() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetFontSize
+   */
+  void SetFontSize(float fontSize);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetFontSize
+   */
+  float GetFontSize() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetTextColor
+   */
+  void SetTextColor(const UiColor& color);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetTextColor
+   */
+  UiColor GetTextColor();
+
 public: // From ViewImpl
   /**
    * @copydoc ViewImpl::OnInitialize
@@ -67,6 +112,15 @@ public: // From ViewImpl
    */
   MeasuredSize OnMeasure(float widthConstraint, float heightConstraint) override;
 
+  /**
+   * @copydoc ViewImpl::OnPropertySet
+   */
+  void OnPropertySet(Dali::Property::Index index, const Dali::Property::Value& propertyValue) override;
+
+public: // Property helpers
+  static void                  SetProperty(BaseObject* object, Dali::Property::Index index, const Dali::Property::Value& value);
+  static Dali::Property::Value GetProperty(BaseObject* object, Dali::Property::Index index);
+
 protected:
   /**
    * @brief TextVisualizerImpl constructor.
@@ -79,6 +133,14 @@ private:
   TextVisualizerImpl(TextVisualizerImpl&&)                 = delete;
   TextVisualizerImpl& operator=(const TextVisualizerImpl&) = delete;
   TextVisualizerImpl& operator=(TextVisualizerImpl&&)      = delete;
+
+  struct PropertyHandler;
+
+private:
+  Dali::String mText;
+  Dali::String mFontFamily;
+  float        mFontSize;
+  UiColor      mTextColor;
 };
 
 } // namespace Integration
