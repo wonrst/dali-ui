@@ -314,13 +314,13 @@ private:
     };
 
     addQuote("“Text becomes a\nfirst-class participant\nin the visual composition\n— not a static block.”",
-             Vector2(34.0f, 314.0f),
-             Vector2(250.0f, 138.0f),
+             Vector2(384.0f, 314.0f),
+             Vector2(200.0f, 140.0f),
              116.0f);
 
     addQuote("“The layout engine stops\nfeeling like a text box\nand starts behaving like\nan editorial surface.”",
-             Vector2(1456.0f, 318.0f),
-             Vector2(238.0f, 134.0f),
+             Vector2(1186.0f, 78.0f),
+             Vector2(200.0f, 140.0f),
              108.0f);
   }
 
@@ -343,10 +343,109 @@ private:
       orb.view.SetCornerRadiusPolicyRelative();
       orb.view.SetCornerRadius(0.5f);
       orb.view.SetProperty(View::Property::SHADOW, CreateOrbShadowMap(orb.color.WithAlpha(0.28f)));
+      orb.view.TouchedSignal().Connect(this, &TextVisualizerPerformanceController::OnOrbTouched);
 
       mContentArea.Add(orb.view);
       mOrbs.push_back(orb);
     }
+  }
+
+  int32_t FindOrbIndex(const Actor& actor) const
+  {
+    for(uint32_t index = 0u; index < mOrbs.size(); ++index)
+    {
+      if(mOrbs[index].view == actor)
+      {
+        return static_cast<int32_t>(index);
+      }
+    }
+    return -1;
+  }
+
+  Vector2 ClampOrbPosition(const Vector2& position, const Vector2& size) const
+  {
+    const float maxX = std::max(0.0f, CONTENT_WIDTH - size.x);
+    const float maxY = std::max(0.0f, CONTENT_HEIGHT - size.y);
+    return Vector2(std::clamp(position.x, 0.0f, maxX),
+                   std::clamp(position.y, 0.0f, maxY));
+  }
+
+  bool GetContentLocalPosition(const TouchEvent& touch, Vector2& localPosition) const
+  {
+    if(touch.GetPointCount() < 1u)
+    {
+      return false;
+    }
+
+    const Vector2 screenPosition = touch.GetScreenPosition(0u);
+    float         localX         = 0.0f;
+    float         localY         = 0.0f;
+    if(!mContentArea.ScreenToLocal(localX, localY, screenPosition.x, screenPosition.y))
+    {
+      return false;
+    }
+
+    localPosition = Vector2(localX, localY);
+    return true;
+  }
+
+  void UpdateDraggedOrb(const Vector2& contentLocalPosition)
+  {
+    if(mDraggedOrbIndex < 0 || static_cast<uint32_t>(mDraggedOrbIndex) >= mOrbs.size())
+    {
+      return;
+    }
+
+    MovingOrb& orb = mOrbs[static_cast<uint32_t>(mDraggedOrbIndex)];
+    orb.position    = ClampOrbPosition(contentLocalPosition - mDragGrabOffset, orb.size);
+    ApplyOrbVisuals();
+    ApplyExclusionRegions();
+    UpdateStatusText(true);
+  }
+
+  bool OnOrbTouched(Actor actor, const TouchEvent& touch)
+  {
+    const int32_t orbIndex = FindOrbIndex(actor);
+    if(orbIndex < 0 || static_cast<uint32_t>(orbIndex) >= mActiveOrbCount || touch.GetPointCount() < 1u)
+    {
+      return false;
+    }
+
+    Vector2 contentLocalPosition;
+    if(!GetContentLocalPosition(touch, contentLocalPosition))
+    {
+      return false;
+    }
+
+    const PointState::Type state = touch.GetState(0u);
+    if(state == PointState::DOWN)
+    {
+      mDraggedOrbIndex = orbIndex;
+      mDragGrabOffset  = contentLocalPosition - mOrbs[static_cast<uint32_t>(orbIndex)].position;
+      UpdateDraggedOrb(contentLocalPosition);
+      return true;
+    }
+
+    if(mDraggedOrbIndex != orbIndex)
+    {
+      return false;
+    }
+
+    if(state == PointState::MOTION)
+    {
+      UpdateDraggedOrb(contentLocalPosition);
+      return true;
+    }
+
+    if(state == PointState::UP || state == PointState::INTERRUPTED || state == PointState::LEAVE)
+    {
+      UpdateDraggedOrb(contentLocalPosition);
+      mDraggedOrbIndex = -1;
+      UpdateStatusText(true);
+      return true;
+    }
+
+    return true;
   }
 
   void ApplyTextStyle()
@@ -378,33 +477,36 @@ private:
   {
     const Vector3 position = block.label.GetCurrentProperty<Vector3>(Actor::Property::POSITION);
     const Vector3 size     = block.label.GetCurrentProperty<Vector3>(Actor::Property::SIZE);
-    return InflateRect(Vector2(position.x, position.y), Vector2(size.x, size.y), 24.0f);
+    return InflateRect(Vector2(position.x, position.y), Vector2(size.x, size.y), 3.0f);
   }
 
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
   {
+    constexpr float ORB_BOUND_PADDING = 8.0f;
     const float insetX = orb.size.x * 0.18f;
     const float topBandHeight = orb.size.y * 0.22f;
     const float middleBandHeight = orb.size.y * 0.28f;
     const float bottomBandHeight = orb.size.y * 0.22f;
     const float middleStartY = orb.position.y + (orb.size.y * 0.22f);
 
-    regions.PushBack(Rect<float>(orb.position.x + insetX,
-                                 orb.position.y,
-                                 std::max(0.0f, orb.size.x - (insetX * 2.0f)),
-                                 topBandHeight));
-    regions.PushBack(Rect<float>(orb.position.x,
-                                 middleStartY,
-                                 orb.size.x,
-                                 middleBandHeight));
-    regions.PushBack(Rect<float>(orb.position.x,
-                                 middleStartY + middleBandHeight,
-                                 orb.size.x,
-                                 middleBandHeight));
-    regions.PushBack(Rect<float>(orb.position.x + insetX,
-                                 orb.position.y + orb.size.y - bottomBandHeight,
-                                 std::max(0.0f, orb.size.x - (insetX * 2.0f)),
-                                 bottomBandHeight));
+    const float insetBandWidth = std::max(0.0f, orb.size.x - (insetX * 2.0f));
+
+    regions.PushBack(Rect<float>(orb.position.x + insetX - ORB_BOUND_PADDING,
+                                 orb.position.y - ORB_BOUND_PADDING,
+                                 insetBandWidth + (ORB_BOUND_PADDING * 2.0f),
+                                 topBandHeight + (ORB_BOUND_PADDING * 2.0f)));
+    regions.PushBack(Rect<float>(orb.position.x - ORB_BOUND_PADDING,
+                                 middleStartY - ORB_BOUND_PADDING,
+                                 orb.size.x + (ORB_BOUND_PADDING * 2.0f),
+                                 middleBandHeight + (ORB_BOUND_PADDING * 2.0f)));
+    regions.PushBack(Rect<float>(orb.position.x - ORB_BOUND_PADDING,
+                                 middleStartY + middleBandHeight - ORB_BOUND_PADDING,
+                                 orb.size.x + (ORB_BOUND_PADDING * 2.0f),
+                                 middleBandHeight + (ORB_BOUND_PADDING * 2.0f)));
+    regions.PushBack(Rect<float>(orb.position.x + insetX - ORB_BOUND_PADDING,
+                                 orb.position.y + orb.size.y - bottomBandHeight - ORB_BOUND_PADDING,
+                                 insetBandWidth + (ORB_BOUND_PADDING * 2.0f),
+                                 bottomBandHeight + (ORB_BOUND_PADDING * 2.0f)));
   }
 
   void ApplyExclusionRegions()
@@ -443,33 +545,26 @@ private:
   {
     for(uint32_t index = 0u; index < std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size())); ++index)
     {
+      if(mDraggedOrbIndex == static_cast<int32_t>(index))
+      {
+        continue;
+      }
+
       MovingOrb& orb = mOrbs[index];
       orb.position += orb.velocity * deltaSeconds;
+      const Vector2 clampedPosition = ClampOrbPosition(orb.position, orb.size);
 
-      const float maxX = std::max(0.0f, CONTENT_WIDTH - orb.size.x);
-      const float maxY = std::max(0.0f, CONTENT_HEIGHT - orb.size.y);
-
-      if(orb.position.x < 0.0f)
+      if(clampedPosition.x != orb.position.x)
       {
-        orb.position.x = 0.0f;
-        orb.velocity.x = std::abs(orb.velocity.x);
-      }
-      else if(orb.position.x > maxX)
-      {
-        orb.position.x = maxX;
-        orb.velocity.x = -std::abs(orb.velocity.x);
+        orb.velocity.x = (clampedPosition.x <= 0.0f) ? std::abs(orb.velocity.x) : -std::abs(orb.velocity.x);
       }
 
-      if(orb.position.y < 0.0f)
+      if(clampedPosition.y != orb.position.y)
       {
-        orb.position.y = 0.0f;
-        orb.velocity.y = std::abs(orb.velocity.y);
+        orb.velocity.y = (clampedPosition.y <= 0.0f) ? std::abs(orb.velocity.y) : -std::abs(orb.velocity.y);
       }
-      else if(orb.position.y > maxY)
-      {
-        orb.position.y = maxY;
-        orb.velocity.y = -std::abs(orb.velocity.y);
-      }
+
+      orb.position = clampedPosition;
     }
   }
 
@@ -517,6 +612,7 @@ private:
             << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
             << "   ANIM " << (mAnimationEnabled ? "ON" : "OFF")
             << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
+            << "   DRAG ORBS"
             << "   Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
 
     mStatusLabel.SetText(builder.str().c_str());
@@ -615,6 +711,8 @@ private:
   Timer                                 mTimer;
   bool                                  mAnimationEnabled{true};
   bool                                  mExclusionEnabled{true};
+  int32_t                               mDraggedOrbIndex{-1};
+  Vector2                               mDragGrabOffset{Vector2::ZERO};
   uint32_t                              mActiveOrbCount{DEFAULT_ORB_COUNT};
   uint32_t                              mCurrentTextColorIndex{0u};
   float                                 mBodyFontSize{BODY_FONT_SIZE};
