@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-property-handler.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
@@ -69,6 +70,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mExclusionRegions(),
   mPreparedText(),
   mLayoutResult(),
+  mAtlasViewAdapter(),
   mLastLayoutSize(Vector2::ZERO),
   mPrepareDirty(true),
   mLayoutDirty(true),
@@ -151,6 +153,7 @@ void TextVisualizerImpl::Prepare()
   input.fontSize   = mFontSize;
 
   mPreparedText = Internal::TextVisualizer::TextPreparer::Prepare(input);
+  mAtlasViewAdapter.Clear();
   ClearPrepareDirty();
   MarkLayoutDirty();
   MarkRenderDirty();
@@ -205,6 +208,8 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   if(mLayoutDirty)
   {
     UpdateLayout(size.x, mLayoutResult);
+    mAtlasViewAdapter.SetPreparedText(&mPreparedText);
+    mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
     ClearLayoutDirty();
   }
 
@@ -296,6 +301,7 @@ void TextVisualizerImpl::MarkPrepareDirty()
 {
   mPreparedText.Clear();
   mLayoutResult.Clear();
+  mAtlasViewAdapter.Clear();
   mPrepareDirty = true;
   mLayoutDirty  = true;
   mRenderDirty  = true;

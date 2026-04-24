@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <dali.h>
 #include <dali-ui-foundation/dali-ui-foundation.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
@@ -746,6 +747,100 @@ int UtcDaliTextVisualizerGlyphLayoutFallbackToPlaceholderP(void)
 
   DALI_TEST_CHECK(!layoutResult.Empty());
   DALI_TEST_EQUALS(layoutResult.clusterPlacements.Count(), 6u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterEmptyStateP(void)
+{
+  UiTestApplication                                             application;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+
+  DALI_TEST_CHECK(!adapter.HasRenderableGlyphs());
+  DALI_TEST_CHECK(!adapter.HasValidGlyphPlacementIndices());
+  DALI_TEST_EQUALS(adapter.GetGlyphCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacementCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphs().Count(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacements().Count(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterWithGlyphLayoutP(void)
+{
+  UiTestApplication                                     application;
+  const auto                                            preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                             exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult      layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter  adapter;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u && !layoutResult.glyphPlacements.Empty())
+  {
+    DALI_TEST_CHECK(adapter.HasValidGlyphPlacementIndices());
+    DALI_TEST_CHECK(adapter.HasRenderableGlyphs());
+  }
+  else
+  {
+    DALI_TEST_CHECK(!adapter.HasRenderableGlyphs());
+  }
+
+  DALI_TEST_EQUALS(adapter.GetGlyphCount(), preparedText.GetGlyphCount(), TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacementCount(), layoutResult.glyphPlacements.Count(), TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphs().Count(), preparedText.GetGlyphs().Count(), TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacements().Count(), layoutResult.glyphPlacements.Count(), TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterClearP(void)
+{
+  UiTestApplication                                     application;
+  const auto                                            preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                             exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult      layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter  adapter;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.Clear();
+
+  DALI_TEST_CHECK(!adapter.HasRenderableGlyphs());
+  DALI_TEST_CHECK(!adapter.HasValidGlyphPlacementIndices());
+  DALI_TEST_EQUALS(adapter.GetGlyphCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacementCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterInvalidPlacementIndexP(void)
+{
+  UiTestApplication                                     application;
+  const auto                                            preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult      layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter  adapter;
+  Dali::Ui::Internal::TextVisualizer::GlyphPlacement    placement;
+
+  placement.glyphIndex = preparedText.GetGlyphCount() + 1u;
+  placement.x          = 0.0f;
+  placement.y          = 0.0f;
+  placement.width      = 10.0f;
+  placement.height     = 10.0f;
+  placement.advance    = 10.0f;
+  layoutResult.glyphPlacements.PushBack(placement);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  DALI_TEST_CHECK(!adapter.HasValidGlyphPlacementIndices());
+  DALI_TEST_CHECK(!adapter.HasRenderableGlyphs());
+  DALI_TEST_EQUALS(adapter.GetGlyphPlacementCount(), 1u, TEST_LOCATION);
 
   END_TEST;
 }
