@@ -51,6 +51,7 @@ AtlasRendererBridge::AtlasRendererBridge()
 : mAdapter(nullptr),
   mRenderer(),
   mRenderHost(),
+  mRendererAttached(false),
   mImpl(new Impl())
 {
 }
@@ -67,6 +68,7 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 
 void AtlasRendererBridge::Clear()
 {
+  DetachRendererFromHost();
   mAdapter = nullptr;
   mImpl->Clear();
   mRenderHost.Reset();
@@ -88,6 +90,11 @@ bool AtlasRendererBridge::HasRenderHost() const
   return static_cast<bool>(mRenderHost);
 }
 
+bool AtlasRendererBridge::IsRendererAttached() const
+{
+  return mRendererAttached;
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
@@ -99,6 +106,7 @@ void AtlasRendererBridge::EnsureRenderer()
 void AtlasRendererBridge::ResetRenderer()
 {
   mRenderer.Reset();
+  mRendererAttached = false;
 }
 
 bool AtlasRendererBridge::UpdateRenderData()
@@ -152,6 +160,30 @@ void AtlasRendererBridge::SetRenderHost(Actor renderHost)
 Actor AtlasRendererBridge::GetRenderHost() const
 {
   return mRenderHost;
+}
+
+bool AtlasRendererBridge::AttachRendererToHost()
+{
+  if(mRendererAttached)
+  {
+    return true;
+  }
+
+  if(!HasRenderHost() || !IsRendererCreated() || !HasRenderableGlyphs())
+  {
+    return false;
+  }
+
+  // AtlasRenderer currently returns its output Actor only from Renderer::Render(),
+  // and that call requires a Text::ViewInterface implementation. TextVisualizer
+  // does not provide that bridge yet, so there is no safe renderer output Actor
+  // available to attach at this stage.
+  return false;
+}
+
+void AtlasRendererBridge::DetachRendererFromHost()
+{
+  mRendererAttached = false;
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

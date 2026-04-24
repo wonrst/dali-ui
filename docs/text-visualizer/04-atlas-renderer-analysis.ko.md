@@ -513,6 +513,18 @@ flowchart LR
 3. 핵심은 `Prepare + Layout` 결과를 `ViewInterface` 형태로 노출하는 경량 adapter를 두는 것이다.
 4. 1차 구현에서는 adapter 방식이 가장 현실적이고, 장기적으로는 `AtlasRenderer`의 style-heavy 의존을 줄이는 리팩터링이 바람직하다.
 
+## 추가 확인: AtlasRenderer output attach 전제
+
+- 현재 `AtlasRenderer` output actor는 `Renderer::Render(ViewInterface& view, Actor textControl, ...)` 호출 결과로만 얻을 수 있다.
+- 즉, renderer 객체를 생성하는 것만으로는 attach 가능한 output actor가 생기지 않는다.
+- 현재 `TextVisualizer` 구현에는 `Text::ViewInterface` bridge가 없으므로, `AtlasRenderer` output attach는 직접 진행할 수 없다.
+
+다음 선택지:
+
+1. `TextVisualizer`용 최소 `Text::ViewInterface` 구현 추가
+2. `AtlasRenderer`에 minimal render data 입력 API 추가
+3. `TextVisualizer` 전용 lightweight atlas renderer 경로 검토
+
 ## AtlasRenderer 요구 데이터 표
 
 | AtlasRenderer 요구 데이터 | 현재 출처 | TextVisualizer 제공 방식 | 필수 여부 |

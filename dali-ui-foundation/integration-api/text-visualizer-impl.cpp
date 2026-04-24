@@ -226,9 +226,12 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     {
       EnsureRenderHost();
       mAtlasRendererBridge.SetRenderHost(mRenderHost);
-      // TODO: Attach renderer output to render host.
+
+      if(mAtlasRendererBridge.AttachRendererToHost())
+      {
+        // TODO: Clear render dirty only after renderer output becomes draw-ready.
+      }
     }
-    // TODO: Clear render dirty after renderer geometry is updated.
   }
 
   mLastLayoutSize = size;
@@ -360,6 +363,9 @@ void TextVisualizerImpl::EnsureRenderHost()
 
 void TextVisualizerImpl::ClearRenderHost()
 {
+  mAtlasRendererBridge.DetachRendererFromHost();
+  mAtlasRendererBridge.SetRenderHost(Actor());
+
   if(mRenderHost)
   {
     mRenderHost.Unparent();

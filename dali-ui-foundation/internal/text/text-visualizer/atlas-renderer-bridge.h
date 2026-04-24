@@ -45,12 +45,15 @@ public:
   bool HasRenderableGlyphs() const;
   bool IsRendererCreated() const;
   bool HasRenderHost() const;
+  bool IsRendererAttached() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
   bool  UpdateRenderData();
   void  SetRenderHost(Actor renderHost);
   Actor GetRenderHost() const;
+  bool  AttachRendererToHost();
+  void  DetachRendererFromHost();
 
 private:
   struct Impl;
@@ -58,6 +61,7 @@ private:
   const AtlasViewAdapter* mAdapter;
   Text::RendererPtr       mRenderer;
   Actor                   mRenderHost;
+  bool                    mRendererAttached;
   Impl*                   mImpl;
 };
 
