@@ -364,6 +364,9 @@ void TextVisualizerImpl::EnsureRenderHost()
     mRenderHost = Actor::New();
     mRenderHost.SetProperty(Actor::Property::PARENT_ORIGIN, ParentOrigin::TOP_LEFT);
     mRenderHost.SetProperty(Actor::Property::PIVOT, Pivot::TOP_LEFT);
+    mRenderHost.SetProperty(Actor::Property::POSITION, Vector3::ZERO);
+    mRenderHost.SetProperty(Actor::Property::VISIBLE, true);
+    mRenderHost.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_TO_BOUNDING_BOX);
     mRenderHost.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::ALL_DIMENSIONS);
     IntegrationView::AddActorChild(Ui::View::DownCast(Self()), mRenderHost);
   }

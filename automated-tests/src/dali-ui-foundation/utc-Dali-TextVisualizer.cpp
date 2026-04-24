@@ -1887,6 +1887,34 @@ int UtcDaliTextVisualizerRenderHostCreatedWithTextP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerRenderHostStencilLikeSmokeP(void)
+{
+  UiTestApplication          application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> exclusionRegions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  exclusionRegions.PushBack(Rect<float>(40.0f, 10.0f, 80.0f, 40.0f));
+
+  textVisualizer.SetText("TextVisualizer render host clipping smoke with exclusion region.");
+  textVisualizer.SetFontSize(14.0f);
+  textVisualizer.SetRequestedWidth(240.0f);
+  textVisualizer.SetRequestedHeight(160.0f);
+  textVisualizer.SetExclusionRegions(exclusionRegions);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+  application.SendNotification();
+  application.Render();
+
+  const Vector3 size = textVisualizer.GetProperty<Vector3>(Actor::Property::SIZE);
+  DALI_TEST_CHECK(size.x > 0.0f);
+  DALI_TEST_CHECK(size.y > 0.0f);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerRenderCallSmokeP(void)
 {
   UiTestApplication application;

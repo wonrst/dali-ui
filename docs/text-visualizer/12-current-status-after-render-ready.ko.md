@@ -637,6 +637,63 @@ flowchart TD
 - output attach parent를 계속 `RenderHost`로 둘지, self로 옮겨야 하는지
 - `render dirty` clear 시점
 
+## 추가 확인: RenderHost vs stencil actor
+
+이번 단계에서는 `TextVisualizerImpl`의 `mRenderHost`가 이미 “중간 attach host / stencil-like actor” 역할을 하고 있다는 가정 아래, 기존 `InputField` stencil actor와 설정 차이를 다시 비교했다.
+
+핵심 결론은 다음과 같다.
+
+- `mRenderHost`는 이미 별도 output actor attach parent 역할을 수행하고 있다.
+- 따라서 지금 단계에서 `StencilHost` actor를 하나 더 추가하는 것은 중복 계층만 늘릴 가능성이 크다.
+- 기존 stencil actor와 비교했을 때 안전하게 빠져 있던 설정은 주로 `CLIPPING_MODE`였다.
+- 그래서 별도 actor 추가 대신, `mRenderHost` 자체를 stencil-like host에 더 가깝게 맞추는 최소 보강만 적용했다.
+
+비교 요약은 아래와 같다.
+
+| 항목 | 기존 stencil actor | TextVisualizer `mRenderHost` | 차이 | 조치 |
+|---|---|---|---|---|
+| `ParentOrigin` | `TOP_LEFT` | `TOP_LEFT` | 없음 | 유지 |
+| `Pivot` | `TOP_LEFT` | `TOP_LEFT` | 없음 | 유지 |
+| `ResizePolicy` | `FILL_TO_PARENT` | `FILL_TO_PARENT` | 없음 | 유지 |
+| explicit size sync | relayout에서 별도 size sync 사용 | `SyncRenderHostSize()` 사용 | 의미상 유사 | 유지 |
+| attach parent | control self 아래 | control self 아래 | 없음 | 유지 |
+| `CLIPPING_MODE` | `CLIP_TO_BOUNDING_BOX` | 이전에는 없음 | 차이 있음 | `mRenderHost`에 추가 |
+| explicit position | 보통 `TOP_LEFT` 기준 | 이전에는 암묵적 | 약한 차이 | `POSITION = ZERO` 명시 |
+| visible | 기본값 의존 가능 | 기본값 의존 가능 | 약한 차이 | `VISIBLE = true` 명시 |
+
+현재 적용한 최소 보강:
+
+- `mRenderHost.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_TO_BOUNDING_BOX);`
+- `mRenderHost.SetProperty(Actor::Property::POSITION, Vector3::ZERO);`
+- `mRenderHost.SetProperty(Actor::Property::VISIBLE, true);`
+
+이번 단계에서 별도 `StencilHost`를 만들지 않은 이유:
+
+- `mRenderHost`가 이미 output actor attach parent 역할을 하고 있다.
+- 추가 actor를 하나 더 만드는 것만으로는 `GetGlyphs()` 호출 여부, output child mesh 생성 여부, renderer descendant count 같은 핵심 진단 지점이 바뀌지 않는다.
+- 지금 더 유력한 문제 후보는:
+  - `Render()` 입력 actor mismatch
+  - output child mesh / renderer 생성 조건
+  - atlas / shader / visibility 문제
+  이다.
+
+따라서 현재 방향은:
+
+- host 계층을 더 늘리지 않는다.
+- `mRenderHost`를 기존 stencil actor에 최대한 가깝게 맞춘다.
+- 그 위에서 existing diagnostics:
+  - `GetGlyphs()` call / returned count
+  - output child count
+  - descendant renderer count
+  를 계속 본다.
+
+아직 남은 문제 후보:
+
+- `Render()`에 `Self()`를 넘기는 정책이 장기적으로 맞는지
+- output child mesh actor가 실제로 생성되는지
+- descendant renderer count가 0인 runtime 원인
+- clipping 추가 후에도 glyph가 계속 안 보이면 atlas/shader/mesh generation 쪽으로 더 좁혀야 하는지
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지
