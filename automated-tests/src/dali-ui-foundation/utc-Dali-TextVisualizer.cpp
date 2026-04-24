@@ -881,9 +881,19 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
 
   DALI_TEST_CHECK(!bridge.HasRenderableGlyphs());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_CHECK(!bridge.HasTextControlActor());
   DALI_TEST_CHECK(!bridge.HasRendererOutput());
   DALI_TEST_EQUALS(bridge.GetRendererOutputChildCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRendererOutputRendererCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputDescendantCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetRendererOutputTotalRendererCount(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.HasRendererOutputRenderableDescendant());
+  DALI_TEST_EQUALS(bridge.GetFirstRendererOutputChildSize(), Vector3::ZERO, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.IsFirstRendererOutputChildVisible());
+  DALI_TEST_EQUALS(bridge.GetViewInterfaceGetGlyphsCallCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLastRequestedGlyphCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLastReturnedGlyphCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLastGlyphStartIndex(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
@@ -1139,6 +1149,24 @@ int UtcDaliTextVisualizerAtlasRendererBridgeRenderHostSetterP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerAtlasRendererBridgeTextControlActorSetterP(void)
+{
+  UiTestApplication                                       application;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge bridge;
+  Actor                                                   textControlActor = Actor::New();
+
+  DALI_TEST_CHECK(!bridge.HasTextControlActor());
+  bridge.SetTextControlActor(textControlActor);
+  DALI_TEST_CHECK(bridge.HasTextControlActor());
+  DALI_TEST_CHECK(bridge.GetTextControlActor() == textControlActor);
+
+  bridge.Clear();
+  DALI_TEST_CHECK(!bridge.HasTextControlActor());
+  DALI_TEST_CHECK(!bridge.GetTextControlActor());
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithoutHostP(void)
 {
   UiTestApplication                                                application;
@@ -1286,6 +1314,54 @@ int UtcDaliTextVisualizerAtlasRendererBridgeOutputDiagnosticsP(void)
   {
     DALI_TEST_EQUALS(bridge.GetRendererOutputChildCount(), 0u, TEST_LOCATION);
     DALI_TEST_EQUALS(bridge.GetRendererOutputRendererCount(), 0u, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeRenderDiagnosticsAfterAttachP(void)
+{
+  UiTestApplication                                       application;
+  const auto                                              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                               exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult        layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter    adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge bridge;
+  Actor                                                   renderHost        = Actor::New();
+  Actor                                                   textControlActor  = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
+  textControlActor.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
+  bridge.SetRenderHost(renderHost);
+  bridge.SetTextControlActor(textControlActor);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  const bool attached = bridge.AttachRendererToHost();
+
+  DALI_TEST_CHECK(bridge.GetRendererOutputDescendantCount() >= bridge.GetRendererOutputChildCount());
+  DALI_TEST_CHECK(bridge.GetRendererOutputTotalRendererCount() >= bridge.GetRendererOutputRendererCount());
+
+  if(attached)
+  {
+    DALI_TEST_CHECK(bridge.GetViewInterfaceGetGlyphsCallCount() > 0u);
+    DALI_TEST_EQUALS(bridge.GetLastGlyphStartIndex(), 0u, TEST_LOCATION);
+    DALI_TEST_CHECK(bridge.GetLastRequestedGlyphCount() > 0u);
+    DALI_TEST_CHECK(bridge.GetLastReturnedGlyphCount() > 0u);
+    DALI_TEST_CHECK(bridge.GetLastReturnedGlyphCount() <= bridge.GetLastRequestedGlyphCount());
+    DALI_TEST_CHECK(bridge.HasRendererOutput());
+    DALI_TEST_CHECK(bridge.IsRenderReady());
+    DALI_TEST_CHECK(bridge.GetFirstRendererOutputChildSize().x >= 0.0f);
+    DALI_TEST_CHECK(bridge.GetFirstRendererOutputChildSize().y >= 0.0f);
   }
 
   END_TEST;
@@ -1475,6 +1551,10 @@ int UtcDaliTextVisualizerViewInterfaceEmptyStateP(void)
   DALI_TEST_EQUALS(viewInterface.GetTextColor(), Vector4(0.0f, 0.0f, 0.0f, 1.0f), TEST_LOCATION);
   DALI_TEST_CHECK(nullptr == viewInterface.GetTextBuffer());
   DALI_TEST_EQUALS(viewInterface.GetGlyphsToCharacters().Count(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().getGlyphsCallCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastRequestedGlyphCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastReturnedGlyphCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastGlyphStartIndex, 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1560,6 +1640,48 @@ int UtcDaliTextVisualizerViewInterfaceGlyphPositionConsistencyP(void)
     DALI_TEST_EQUALS(minLineOffset, 0.0f, TEST_LOCATION);
     CheckGlyphPositionsFinite(positions);
   }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceGlyphDiagnosticsP(void)
+{
+  UiTestApplication                                                application;
+  auto                                                             preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface  viewInterface;
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  viewInterface.SetAdapter(&adapter);
+
+  const uint32_t glyphCount = viewInterface.GetNumberOfGlyphs();
+  if(glyphCount > 0u)
+  {
+    Dali::Vector<Dali::Ui::Text::GlyphInfo> glyphs;
+    Dali::Vector<Vector2>                   positions;
+    float                                   minLineOffset = -1.0f;
+    glyphs.Resize(glyphCount);
+    positions.Resize(glyphCount);
+
+    const uint32_t returnedGlyphCount = viewInterface.GetGlyphs(glyphs.Begin(), positions.Begin(), minLineOffset, 0u, glyphCount);
+
+    DALI_TEST_EQUALS(viewInterface.GetDiagnostics().getGlyphsCallCount, 1u, TEST_LOCATION);
+    DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastGlyphStartIndex, 0u, TEST_LOCATION);
+    DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastRequestedGlyphCount, glyphCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastReturnedGlyphCount, returnedGlyphCount, TEST_LOCATION);
+  }
+
+  viewInterface.Clear();
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().getGlyphsCallCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastRequestedGlyphCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastReturnedGlyphCount, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetDiagnostics().lastGlyphStartIndex, 0u, TEST_LOCATION);
 
   END_TEST;
 }

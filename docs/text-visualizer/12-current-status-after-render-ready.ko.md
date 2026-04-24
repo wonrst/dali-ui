@@ -594,6 +594,49 @@ flowchart TD
 - 다음 커밋에서도 `render dirty`는 clear하지 않는다.
 - `text-atlas-renderer.*`, `TextController`, `TextView` 수정은 계속 금지다.
 
+## 추가 확인: atlas glyph mesh generation trace
+
+이번 단계에서는 “stencil이 꼭 필요한가”에서 한 단계 더 나아가, 실제 `Render()` 호출 중 glyph mesh 경로가 열리는지 직접 추적하는 방향으로 진단 기준을 잡는다.
+
+추적 포인트는 다음과 같다.
+
+- `TextVisualizerViewInterface::GetGlyphs()` 호출 횟수
+- `GetGlyphs()`에 요청된 glyph count
+- `GetGlyphs()`가 실제로 반환한 glyph count
+- `Renderer Output Actor`의 direct child count
+- `Renderer Output Actor` 아래 descendant actor 수
+- `Renderer Output Actor` 아래 total renderer count
+- 첫 child actor의 size / visible 상태
+- `Render()`에 넘기는 `textControl` actor를 `RenderHost` 대신 `TextVisualizer self`로 분리해 볼 때 차이가 있는지
+
+현재 실험 정책:
+
+- output attach parent는 계속 `RenderHost Actor`로 유지한다.
+- `Render()`에 넘기는 `textControl` actor는 internal-only로 분리 가능하게 두고, 우선 `TextVisualizer self`를 전달해 본다.
+- 이 변경은 public API를 늘리지 않고, 기존 `CommonTextUtils`/`InputField` path가 “text control self”를 기준으로 동작하는 점과 맞춰 보기 위한 진단 실험이다.
+
+판단 기준은 다음과 같다.
+
+- `GetGlyphs()` 호출 0회
+  - `Render()`가 glyph path에 실제로 들어가지 못한 것이다.
+  - `ViewInterface` 상태 또는 `Render()` 호출 조건 문제 가능성이 크다.
+- `GetGlyphs()` 반환 count > 0, descendant renderer count = 0
+  - `AtlasRenderer::AddGlyphs()` 또는 mesh creation 조건 문제 가능성이 크다.
+  - `ViewInterface` data mismatch 가능성도 높다.
+- descendant renderer count > 0, 여전히 화면에 안 보임
+  - actor visibility / z-order / shader / texture / atlas upload 쪽 문제로 범위를 더 좁힐 수 있다.
+- `textControl self` 사용으로 증상이 달라짐
+  - `Render()` 입력 actor mismatch가 원인 후보가 된다.
+
+이번 추적에서 여전히 확인이 필요한 항목:
+
+- `AtlasRenderer::AddGlyphs()` 내부 mesh creation skip 조건
+- glyph atlas texture upload 성공 여부
+- output actor child renderer count가 0인 경우의 정확한 runtime 원인
+- 장기적으로 `textControl` actor를 self로 넘기는 것이 맞는지
+- output attach parent를 계속 `RenderHost`로 둘지, self로 옮겨야 하는지
+- `render dirty` clear 시점
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지

@@ -217,6 +217,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
     mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
+    mAtlasRendererBridge.SetTextControlActor(Self());
     ClearLayoutDirty();
   }
 
@@ -368,6 +369,7 @@ void TextVisualizerImpl::EnsureRenderHost()
   }
 
   mAtlasRendererBridge.SetRenderHost(mRenderHost);
+  mAtlasRendererBridge.SetTextControlActor(Self());
 }
 
 void TextVisualizerImpl::SyncRenderHostSize(const Vector2& size)
@@ -384,6 +386,7 @@ void TextVisualizerImpl::ClearRenderHost()
 {
   mAtlasRendererBridge.DetachRendererFromHost();
   mAtlasRendererBridge.SetRenderHost(Actor());
+  mAtlasRendererBridge.SetTextControlActor(Actor());
 
   if(mRenderHost)
   {

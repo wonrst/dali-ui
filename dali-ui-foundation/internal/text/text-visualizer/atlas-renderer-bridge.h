@@ -46,6 +46,7 @@ public:
   bool     HasRenderableGlyphs() const;
   bool     IsRendererCreated() const;
   bool     HasRenderHost() const;
+  bool     HasTextControlActor() const;
   bool     HasRendererOutput() const;
   bool     IsRendererAttached() const;
   uint32_t GetRendererOutputChildCount() const
@@ -75,15 +76,26 @@ public:
            mRendererOutput.GetParent() &&
            (mRendererOutput.GetParent() == mRenderHost);
   }
-  bool  IsRenderReady() const;
-  bool  HasViewInterfaceAdapter() const;
-  Actor GetRendererOutput() const;
+  bool     IsRenderReady() const;
+  bool     HasViewInterfaceAdapter() const;
+  Actor    GetRendererOutput() const;
+  uint32_t GetRendererOutputDescendantCount() const;
+  uint32_t GetRendererOutputTotalRendererCount() const;
+  bool     HasRendererOutputRenderableDescendant() const;
+  Vector3  GetFirstRendererOutputChildSize() const;
+  bool     IsFirstRendererOutputChildVisible() const;
+  uint32_t GetViewInterfaceGetGlyphsCallCount() const;
+  uint32_t GetLastRequestedGlyphCount() const;
+  uint32_t GetLastReturnedGlyphCount() const;
+  uint32_t GetLastGlyphStartIndex() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
   bool  UpdateRenderData();
   void  SetRenderHost(Actor renderHost);
   Actor GetRenderHost() const;
+  void  SetTextControlActor(Actor textControlActor);
+  Actor GetTextControlActor() const;
   bool  AttachRendererToHost();
   void  DetachRendererFromHost();
 
@@ -93,6 +105,7 @@ private:
   const AtlasViewAdapter*     mAdapter;
   Text::RendererPtr           mRenderer;
   Actor                       mRenderHost;
+  Actor                       mTextControlActor;
   Actor                       mRendererOutput;
   bool                        mRendererAttached;
   Property::Index             mAnimatablePropertyIndex;

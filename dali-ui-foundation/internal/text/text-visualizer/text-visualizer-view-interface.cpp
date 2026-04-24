@@ -69,16 +69,28 @@ TextVisualizerViewInterface::~TextVisualizerViewInterface() = default;
 void TextVisualizerViewInterface::SetAdapter(const AtlasViewAdapter* adapter)
 {
   mAdapter = adapter;
+  ResetDiagnostics();
 }
 
 void TextVisualizerViewInterface::Clear()
 {
   mAdapter = nullptr;
+  ResetDiagnostics();
 }
 
 bool TextVisualizerViewInterface::HasAdapter() const
 {
   return (nullptr != mAdapter);
+}
+
+void TextVisualizerViewInterface::ResetDiagnostics() const
+{
+  mDiagnostics = Diagnostics{};
+}
+
+const TextVisualizerViewInterface::Diagnostics& TextVisualizerViewInterface::GetDiagnostics() const
+{
+  return mDiagnostics;
 }
 
 const Vector2& TextVisualizerViewInterface::GetControlSize() const
@@ -100,6 +112,10 @@ Text::Length TextVisualizerViewInterface::GetGlyphs(Text::GlyphInfo* glyphs, Vec
                                                     Text::GlyphIndex glyphIndex, Text::Length numberOfGlyphs) const
 {
   minLineOffset = 0.0f;
+  ++mDiagnostics.getGlyphsCallCount;
+  mDiagnostics.lastGlyphStartIndex     = glyphIndex;
+  mDiagnostics.lastRequestedGlyphCount = numberOfGlyphs;
+  mDiagnostics.lastReturnedGlyphCount  = 0u;
 
   if(!HasAdapter() || !glyphs || !glyphPositions)
   {
@@ -122,16 +138,19 @@ Text::Length TextVisualizerViewInterface::GetGlyphs(Text::GlyphInfo* glyphs, Vec
     if(!mAdapter->GetGlyphPlacement(placementIndex, placement) ||
        !mAdapter->GetGlyphInfo(placement.glyphIndex, glyphInfo))
     {
+      mDiagnostics.lastReturnedGlyphCount = index;
       return index;
     }
 
     glyphs[index] = glyphInfo;
     if(!mAdapter->GetRendererGlyphPosition(placementIndex, glyphPositions[index]))
     {
+      mDiagnostics.lastReturnedGlyphCount = index;
       return index;
     }
   }
 
+  mDiagnostics.lastReturnedGlyphCount = count;
   return count;
 }
 

@@ -34,13 +34,23 @@ class AtlasViewAdapter;
 class TextVisualizerViewInterface : public Text::ViewInterface
 {
 public:
+  struct Diagnostics
+  {
+    uint32_t getGlyphsCallCount{0u};
+    uint32_t lastRequestedGlyphCount{0u};
+    uint32_t lastReturnedGlyphCount{0u};
+    uint32_t lastGlyphStartIndex{0u};
+  };
+
   TextVisualizerViewInterface();
   ~TextVisualizerViewInterface() override;
 
   void SetAdapter(const AtlasViewAdapter* adapter);
   void Clear();
+  void ResetDiagnostics() const;
 
-  bool HasAdapter() const;
+  bool               HasAdapter() const;
+  const Diagnostics& GetDiagnostics() const;
 
   const Vector2&                           GetControlSize() const override;
   const Vector2&                           GetLayoutSize() const override;
@@ -94,6 +104,7 @@ public:
 
 private:
   const AtlasViewAdapter* mAdapter;
+  mutable Diagnostics     mDiagnostics;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

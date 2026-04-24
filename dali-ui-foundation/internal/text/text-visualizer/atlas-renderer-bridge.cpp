@@ -27,6 +27,39 @@
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
+namespace
+{
+uint32_t CountDescendants(const Actor& actor)
+{
+  if(!actor)
+  {
+    return 0u;
+  }
+
+  uint32_t count = actor.GetChildCount();
+  for(uint32_t index = 0u; index < actor.GetChildCount(); ++index)
+  {
+    count += CountDescendants(actor.GetChildAt(index));
+  }
+  return count;
+}
+
+uint32_t CountRenderersRecursive(const Actor& actor)
+{
+  if(!actor)
+  {
+    return 0u;
+  }
+
+  uint32_t count = actor.GetRendererCount();
+  for(uint32_t index = 0u; index < actor.GetChildCount(); ++index)
+  {
+    count += CountRenderersRecursive(actor.GetChildAt(index));
+  }
+  return count;
+}
+} // unnamed namespace
+
 struct AtlasRendererBridge::Impl
 {
   struct AtlasGlyphRenderData
@@ -51,6 +84,7 @@ AtlasRendererBridge::AtlasRendererBridge()
 : mAdapter(nullptr),
   mRenderer(),
   mRenderHost(),
+  mTextControlActor(),
   mRendererOutput(),
   mRendererAttached(false),
   mAnimatablePropertyIndex(Property::INVALID_INDEX),
@@ -87,6 +121,7 @@ void AtlasRendererBridge::Clear()
   mViewInterface.Clear();
   mImpl->Clear();
   mRenderHost.Reset();
+  mTextControlActor.Reset();
   ResetRenderer();
 }
 
@@ -103,6 +138,11 @@ bool AtlasRendererBridge::IsRendererCreated() const
 bool AtlasRendererBridge::HasRenderHost() const
 {
   return static_cast<bool>(mRenderHost);
+}
+
+bool AtlasRendererBridge::HasTextControlActor() const
+{
+  return static_cast<bool>(mTextControlActor);
 }
 
 bool AtlasRendererBridge::HasRendererOutput() const
@@ -133,6 +173,58 @@ bool AtlasRendererBridge::HasViewInterfaceAdapter() const
 Actor AtlasRendererBridge::GetRendererOutput() const
 {
   return mRendererOutput;
+}
+
+uint32_t AtlasRendererBridge::GetRendererOutputDescendantCount() const
+{
+  return CountDescendants(mRendererOutput);
+}
+
+uint32_t AtlasRendererBridge::GetRendererOutputTotalRendererCount() const
+{
+  return CountRenderersRecursive(mRendererOutput);
+}
+
+bool AtlasRendererBridge::HasRendererOutputRenderableDescendant() const
+{
+  return GetRendererOutputTotalRendererCount() > 0u;
+}
+
+Vector3 AtlasRendererBridge::GetFirstRendererOutputChildSize() const
+{
+  if(mRendererOutput && mRendererOutput.GetChildCount() > 0u)
+  {
+    return mRendererOutput.GetChildAt(0u).GetProperty<Vector3>(Actor::Property::SIZE);
+  }
+
+  return Vector3::ZERO;
+}
+
+bool AtlasRendererBridge::IsFirstRendererOutputChildVisible() const
+{
+  return mRendererOutput &&
+         (mRendererOutput.GetChildCount() > 0u) &&
+         mRendererOutput.GetChildAt(0u).GetProperty<bool>(Actor::Property::VISIBLE);
+}
+
+uint32_t AtlasRendererBridge::GetViewInterfaceGetGlyphsCallCount() const
+{
+  return mViewInterface.GetDiagnostics().getGlyphsCallCount;
+}
+
+uint32_t AtlasRendererBridge::GetLastRequestedGlyphCount() const
+{
+  return mViewInterface.GetDiagnostics().lastRequestedGlyphCount;
+}
+
+uint32_t AtlasRendererBridge::GetLastReturnedGlyphCount() const
+{
+  return mViewInterface.GetDiagnostics().lastReturnedGlyphCount;
+}
+
+uint32_t AtlasRendererBridge::GetLastGlyphStartIndex() const
+{
+  return mViewInterface.GetDiagnostics().lastGlyphStartIndex;
 }
 
 void AtlasRendererBridge::EnsureRenderer()
@@ -207,6 +299,16 @@ Actor AtlasRendererBridge::GetRenderHost() const
   return mRenderHost;
 }
 
+void AtlasRendererBridge::SetTextControlActor(Actor textControlActor)
+{
+  mTextControlActor = textControlActor;
+}
+
+Actor AtlasRendererBridge::GetTextControlActor() const
+{
+  return mTextControlActor;
+}
+
 bool AtlasRendererBridge::AttachRendererToHost()
 {
   if(mRendererAttached)
@@ -220,8 +322,13 @@ bool AtlasRendererBridge::AttachRendererToHost()
   }
 
   mAlignmentOffset = 0.0f;
+  mViewInterface.ResetDiagnostics();
 
-  Actor output = mRenderer->Render(mViewInterface, mRenderHost, mAnimatablePropertyIndex, mAlignmentOffset, mDepth);
+  Actor output = mRenderer->Render(mViewInterface,
+                                   HasTextControlActor() ? mTextControlActor : mRenderHost,
+                                   mAnimatablePropertyIndex,
+                                   mAlignmentOffset,
+                                   mDepth);
   if(!output)
   {
     mRendererOutput.Reset();
