@@ -17,6 +17,7 @@
 
 // EXTERNAL INCLUDES
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 // INTERNAL INCLUDES
@@ -45,6 +46,66 @@ bool IsInsideLayoutWidth(const BlockedInterval& interval)
 float GetEffectiveLineHeight(const PreparedText& preparedText, float lineHeight)
 {
   return lineHeight > 0.0f ? lineHeight : LayoutEngine::GetPlaceholderLineHeight(preparedText);
+}
+
+float GetGlyphPlacementWidth(const Text::GlyphInfo& glyph)
+{
+  if(glyph.width > 0.0f)
+  {
+    return glyph.width;
+  }
+
+  return glyph.advance > 0.0f ? glyph.advance : 0.0f;
+}
+
+float GetGlyphPlacementAdvance(const Text::GlyphInfo& glyph)
+{
+  if(glyph.advance > 0.0f)
+  {
+    return glyph.advance;
+  }
+
+  return glyph.width > 0.0f ? glyph.width : 0.0f;
+}
+
+uint32_t GetEstimatedLineGuard(float lineHeight, const Dali::Vector<Rect<float>>& exclusionRegions, uint32_t glyphCount)
+{
+  float maxBlockedBottom = 0.0f;
+
+  for(uint32_t index = 0u; index < exclusionRegions.Count(); ++index)
+  {
+    const Rect<float>& region = exclusionRegions[index];
+    maxBlockedBottom          = std::max(maxBlockedBottom, region.y + region.height);
+  }
+
+  const uint32_t blockedLineCount = lineHeight > 0.0f ? static_cast<uint32_t>(std::ceil(std::max(0.0f, maxBlockedBottom) / lineHeight)) : 0u;
+  return std::max(1u, glyphCount + blockedLineCount + 2u);
+}
+
+uint32_t GetGlyphCharacterStart(const PreparedText& preparedText, uint32_t glyphIndex)
+{
+  const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap = preparedText.GetGlyphToCharacterMap();
+  if(glyphIndex < glyphToCharacterMap.Count())
+  {
+    return glyphToCharacterMap[glyphIndex];
+  }
+
+  return preparedText.GetCharacterCount();
+}
+
+uint32_t GetGlyphCharacterEnd(const PreparedText& preparedText, uint32_t glyphIndex)
+{
+  const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap = preparedText.GetGlyphToCharacterMap();
+  const Dali::Vector<Text::Length>&         charactersPerGlyph  = preparedText.GetCharactersPerGlyph();
+
+  if(glyphIndex < glyphToCharacterMap.Count())
+  {
+    const uint32_t characterStart = glyphToCharacterMap[glyphIndex];
+    const uint32_t characterSpan  = glyphIndex < charactersPerGlyph.Count() ? charactersPerGlyph[glyphIndex] : 0u;
+    return std::min(preparedText.GetCharacterCount(), characterStart + characterSpan);
+  }
+
+  return preparedText.GetCharacterCount();
 }
 } // namespace
 
@@ -230,6 +291,116 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
       currentCluster += placeCount;
       lineHasPlacement = true;
       result.width     = std::max(result.width, fragment.x + fragment.width);
+    }
+
+    if(lineHasPlacement)
+    {
+      result.lines.PushBack(textLine);
+      result.height = currentY + effectiveLineHeight;
+    }
+
+    currentY += effectiveLineHeight;
+  }
+}
+
+void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
+                                float                            layoutWidth,
+                                float                            lineHeight,
+                                const Dali::Vector<Rect<float>>& exclusionRegions,
+                                LayoutResult&                    result)
+{
+  result.Clear();
+
+  if(!preparedText.HasGlyphData() || layoutWidth <= 0.0f)
+  {
+    return;
+  }
+
+  const Dali::Vector<Text::GlyphInfo>& glyphs              = preparedText.GetGlyphs();
+  const uint32_t                       glyphCount          = glyphs.Count();
+  const float                          effectiveLineHeight = GetEffectiveLineHeight(preparedText, lineHeight);
+
+  if(glyphCount == 0u || effectiveLineHeight <= 0.0f)
+  {
+    return;
+  }
+
+  uint32_t       currentGlyph = 0u;
+  float          currentY     = 0.0f;
+  const uint32_t maxLineCount = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
+
+  for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentGlyph < glyphCount; ++lineIndex)
+  {
+    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervals(layoutWidth, currentY, effectiveLineHeight, exclusionRegions);
+
+    TextLine textLine;
+    textLine.y      = currentY;
+    textLine.height = effectiveLineHeight;
+
+    bool lineHasPlacement = false;
+
+    for(uint32_t intervalIndex = 0u; intervalIndex < availableIntervals.Count() && currentGlyph < glyphCount; ++intervalIndex)
+    {
+      const AvailableInterval& availableInterval = availableIntervals[intervalIndex];
+      const float              intervalEnd       = availableInterval.x + availableInterval.width;
+      float                    cursorX           = availableInterval.x;
+      bool                     fragmentOpen      = false;
+      TextLineFragment         fragment;
+
+      while(currentGlyph < glyphCount)
+      {
+        const Text::GlyphInfo& glyph          = glyphs[currentGlyph];
+        const float            glyphAdvance   = GetGlyphPlacementAdvance(glyph);
+        const float            glyphWidth     = GetGlyphPlacementWidth(glyph);
+        const float            requiredWidth  = std::max(glyphAdvance, glyphWidth);
+        const bool             intervalCanFit = (requiredWidth <= 0.0f) || ((cursorX + requiredWidth) <= intervalEnd);
+        const bool             allowOversized = !lineHasPlacement && !fragmentOpen;
+
+        if(!intervalCanFit && !allowOversized)
+        {
+          break;
+        }
+
+        GlyphPlacement placement;
+        placement.glyphIndex = currentGlyph;
+        placement.x          = cursorX;
+        placement.y          = currentY;
+        placement.width      = glyph.width;
+        placement.height     = glyph.height;
+        placement.advance    = glyphAdvance;
+        result.glyphPlacements.PushBack(placement);
+
+        if(!fragmentOpen)
+        {
+          fragment.clusterStart = GetGlyphCharacterStart(preparedText, currentGlyph);
+          fragment.glyphStart   = currentGlyph;
+          fragment.x            = cursorX;
+          fragment.y            = currentY;
+          fragment.width        = 0.0f;
+          fragmentOpen          = true;
+        }
+
+        fragment.clusterEnd = GetGlyphCharacterEnd(preparedText, currentGlyph);
+        fragment.glyphEnd   = currentGlyph + 1u;
+
+        const float placementRight = std::max(cursorX + glyphWidth, cursorX + glyphAdvance);
+        fragment.width             = std::max(fragment.width, placementRight - fragment.x);
+        result.width               = std::max(result.width, fragment.x + fragment.width);
+
+        cursorX += glyphAdvance;
+        ++currentGlyph;
+        lineHasPlacement = true;
+
+        if(!intervalCanFit && allowOversized)
+        {
+          break;
+        }
+      }
+
+      if(fragmentOpen)
+      {
+        textLine.fragments.PushBack(fragment);
+      }
     }
 
     if(lineHasPlacement)

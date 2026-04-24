@@ -36,6 +36,8 @@ struct TextLineFragment
 {
   uint32_t clusterStart{0u};
   uint32_t clusterEnd{0u};
+  uint32_t glyphStart{0u};
+  uint32_t glyphEnd{0u};
   float    x{0.0f};
   float    y{0.0f};
   float    width{0.0f};
@@ -68,10 +70,21 @@ struct ClusterPlacement
   float    width{0.0f};
 };
 
+struct GlyphPlacement
+{
+  uint32_t glyphIndex{0u};
+  float    x{0.0f};
+  float    y{0.0f};
+  float    width{0.0f};
+  float    height{0.0f};
+  float    advance{0.0f};
+};
+
 struct LayoutResult
 {
   Dali::Vector<TextLine>         lines;
   Dali::Vector<ClusterPlacement> clusterPlacements;
+  Dali::Vector<GlyphPlacement>   glyphPlacements;
   float                          width{0.0f};
   float                          height{0.0f};
 
@@ -79,13 +92,14 @@ struct LayoutResult
   {
     lines.Clear();
     clusterPlacements.Clear();
+    glyphPlacements.Clear();
     width  = 0.0f;
     height = 0.0f;
   }
 
   bool Empty() const
   {
-    return lines.Empty() && clusterPlacements.Empty();
+    return lines.Empty() && clusterPlacements.Empty() && glyphPlacements.Empty();
   }
 
   uint32_t GetLineCount() const

@@ -204,7 +204,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mLayoutDirty)
   {
-    UpdatePlaceholderLayout(size.x);
+    UpdateLayout(size.x, mLayoutResult);
     ClearLayoutDirty();
   }
 
@@ -228,13 +228,19 @@ MeasuredSize TextVisualizerImpl::OnMeasure(float widthConstraint, float heightCo
     return MeasuredSize(0.0f, 0.0f);
   }
 
-  const float clusterAdvance = Internal::TextVisualizer::LayoutEngine::GetPlaceholderClusterAdvance(mPreparedText);
-  const float lineHeight     = Internal::TextVisualizer::LayoutEngine::GetPlaceholderLineHeight(mPreparedText);
-  const float naturalWidth   = static_cast<float>(mPreparedText.GetClusterCount()) * clusterAdvance;
-  const float layoutWidth    = widthConstraint > 0.0f ? widthConstraint : naturalWidth;
+  const float clusterAdvance    = Internal::TextVisualizer::LayoutEngine::GetPlaceholderClusterAdvance(mPreparedText);
+  const float placeholderWidth  = static_cast<float>(mPreparedText.GetClusterCount()) * clusterAdvance;
+  const float glyphNaturalWidth = (mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics()) ? mPreparedText.GetTotalGlyphAdvance() : 0.0f;
+  const float naturalWidth      = glyphNaturalWidth > 0.0f ? glyphNaturalWidth : placeholderWidth;
+  const float layoutWidth       = widthConstraint > 0.0f ? widthConstraint : naturalWidth;
+
+  if(layoutWidth <= 0.0f)
+  {
+    return MeasuredSize(0.0f, 0.0f);
+  }
 
   Internal::TextVisualizer::LayoutResult measuredLayoutResult;
-  Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, lineHeight, mExclusionRegions, measuredLayoutResult);
+  UpdateLayout(layoutWidth, measuredLayoutResult);
 
   if(measuredLayoutResult.Empty())
   {
@@ -334,17 +340,23 @@ bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>
   return true;
 }
 
-void TextVisualizerImpl::UpdatePlaceholderLayout(float layoutWidth)
+void TextVisualizerImpl::UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result)
 {
-  mLayoutResult.Clear();
+  result.Clear();
 
   if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
   {
     return;
   }
 
-  const float lineHeight = Internal::TextVisualizer::LayoutEngine::GetPlaceholderLineHeight(mPreparedText);
-  Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, lineHeight, mExclusionRegions, mLayoutResult);
+  if(mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics())
+  {
+    Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(mPreparedText, layoutWidth, 0.0f, mExclusionRegions, result);
+  }
+  else
+  {
+    Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, 0.0f, mExclusionRegions, result);
+  }
 }
 
 } // namespace Integration

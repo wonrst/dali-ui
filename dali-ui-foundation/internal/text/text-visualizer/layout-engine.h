@@ -42,6 +42,12 @@ public:
                                 float                            lineHeight,
                                 const Dali::Vector<Rect<float>>& exclusionRegions,
                                 LayoutResult&                    result);
+
+  static void LayoutGlyphs(const PreparedText&              preparedText,
+                           float                            layoutWidth,
+                           float                            lineHeight,
+                           const Dali::Vector<Rect<float>>& exclusionRegions,
+                           LayoutResult&                    result);
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

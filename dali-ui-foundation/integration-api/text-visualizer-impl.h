@@ -166,7 +166,7 @@ private:
   void ClearPrepareDirty();
   void ClearLayoutDirty();
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
-  void UpdatePlaceholderLayout(float layoutWidth);
+  void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
 
 private:
   Dali::String                           mText;

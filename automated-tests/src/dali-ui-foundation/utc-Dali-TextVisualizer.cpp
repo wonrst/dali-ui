@@ -15,6 +15,7 @@
  *
  */
 
+#include <algorithm>
 #include <stdlib.h>
 #include <dali.h>
 #include <dali-ui-foundation/dali-ui-foundation.h>
@@ -67,6 +68,25 @@ bool HasAnyValidGlyphMetric(const Dali::Ui::Internal::TextVisualizer::PreparedTe
   }
 
   return false;
+}
+
+void CheckGlyphPlacementsOutsideExclusion(const Dali::Ui::Internal::TextVisualizer::LayoutResult& result,
+                                          const Rect<float>&                                      exclusionRegion)
+{
+  const float regionLeft   = exclusionRegion.x;
+  const float regionRight  = exclusionRegion.x + exclusionRegion.width;
+  const float regionTop    = exclusionRegion.y;
+  const float regionBottom = exclusionRegion.y + exclusionRegion.height;
+  const float tolerance    = 0.5f;
+
+  for(Dali::Vector<Dali::Ui::Internal::TextVisualizer::GlyphPlacement>::ConstIterator it = result.glyphPlacements.Begin(),
+                                                                                      endIt = result.glyphPlacements.End();
+      it != endIt; ++it)
+  {
+    const bool overlapsVerticalBand = (it->y < regionBottom - tolerance) && ((it->y + std::max(it->height, 1.0f)) > regionTop + tolerance);
+    const bool insideBlockedX       = (it->x >= regionLeft - tolerance) && (it->x < regionRight - tolerance);
+    DALI_TEST_CHECK(!(overlapsVerticalBand && insideBlockedX));
+  }
 }
 } // namespace
 
@@ -631,6 +651,101 @@ int UtcDaliTextVisualizerPreparedEmojiGlyphMetricsP(void)
     DALI_TEST_CHECK(preparedText.HasGlyphMetrics());
     DALI_TEST_CHECK(preparedText.GetTotalGlyphAdvance() >= 0.0f);
   }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutBasicAsciiP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(layoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_CHECK(layoutResult.GetLineCount() >= 1u);
+    DALI_TEST_CHECK(layoutResult.height > 0.0f);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutWrapsByWidthP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult narrowLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult wideLayoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 25.0f, 0.0f, exclusionRegions, narrowLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 100.0f, 0.0f, exclusionRegions, wideLayoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(narrowLayoutResult.GetLineCount() >= wideLayoutResult.GetLineCount());
+    DALI_TEST_EQUALS(narrowLayoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(wideLayoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutWithExclusionP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(10.0f, 0.0f, 25.0f, 20.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 120.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(layoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    CheckGlyphPlacementsOutsideExclusion(layoutResult, exclusionRegions[0]);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutEmptyTextP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText;
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 100.0f, 0.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_CHECK(layoutResult.Empty());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutFallbackToPlaceholderP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText;
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  preparedText.SetPrepared(true);
+  preparedText.SetFontSize(10.0f);
+  Dali::Vector<Dali::Ui::Text::Character> characters;
+  characters.Resize(6u);
+  preparedText.SetCharacters(characters);
+  preparedText.SetClusterCount(6u);
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 30.0f, 0.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_CHECK(!layoutResult.Empty());
+  DALI_TEST_EQUALS(layoutResult.clusterPlacements.Count(), 6u, TEST_LOCATION);
 
   END_TEST;
 }
