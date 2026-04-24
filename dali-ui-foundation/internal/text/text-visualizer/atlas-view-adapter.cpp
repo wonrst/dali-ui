@@ -123,7 +123,9 @@ bool AtlasViewAdapter::GetRendererGlyphPosition(uint32_t index, Vector2& positio
   }
 
   // AtlasRenderer expects the glyph quad origin, not the pen position stored by LayoutResult.
-  const float baselineOffset = GetLineBaselineOffset(placement.y);
+  const float baselineOffset = (nullptr != mPreparedText) && mPreparedText->HasLineMetrics()
+                                 ? mPreparedText->GetLineMetrics().baselineOffset
+                                 : GetLineBaselineOffset(placement.y);
   position.x                 = placement.x + glyphInfo.xBearing;
   position.y                 = placement.y + baselineOffset - glyphInfo.yBearing;
 

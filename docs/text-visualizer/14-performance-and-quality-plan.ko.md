@@ -450,3 +450,32 @@ flowchart LR
 
 - 다음 커밋에서 이 cache를 line height / baseline 계산에 실제로 연결한다.
 - 현재 계산은 glyph metrics 기반 fallback이며, 향후에는 `FontClient`의 ascender / descender / line gap API를 조사해 더 정확한 font metrics 기반으로 개선해야 한다.
+
+## 진행: use line metrics for layout and baseline
+
+진행 내용:
+
+- `LayoutGlyphs()`와 `LayoutPlaceholder()`가 line height를 결정할 때 `PreparedText::LineMetrics.naturalLineHeight`를 우선 사용하도록 연결했다.
+- 단, caller가 explicit `lineHeight`를 넘기면 그 값이 여전히 우선한다.
+- `AtlasViewAdapter::GetRendererGlyphPosition()`는 일반 경로에서 `PreparedText::LineMetrics.baselineOffset`을 먼저 사용한다.
+- line metrics가 없을 때는 기존 `GetLineBaselineOffset()` fallback scan을 유지한다.
+
+현재 의미:
+
+- 기본 line height가 더 이상 무조건 `fontSize * 1.2f`는 아니다.
+- glyph metrics 기반 fallback line height가 line 간격에 반영되므로 줄 간격이 조금 더 자연스러워진다.
+- renderer glyph position도 일반 경로에서는 `same line max(yBearing)` repeated scan을 줄이고, baseline 정책을 `PreparedText` cache 쪽으로 모은다.
+
+제한:
+
+- 현재는 `PreparedText` level metrics 하나만 사용하므로 line별 fallback font / emoji 혼합 정확도는 제한적이다.
+- 즉 line별 metrics cache가 따로 필요한 상황은 아직 남아 있다.
+
+확인 필요:
+
+- line별 metrics cache 필요 여부
+- fallback font / emoji가 섞인 line의 ascender / descender 계산
+- `FontClient`에서 font ascender / descender / lineGap을 직접 얻는 방법
+- `FontSize` 단위와 line metrics 관계
+- 현재 `lineGap = fontSize * 0.2f`가 적절한지
+- sample에서 visual line height가 충분한지

@@ -518,6 +518,92 @@ int UtcDaliTextVisualizerPreparedLineMetricsClearP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerLayoutGlyphsUsesLineMetricsHeightP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 300.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.HasLineMetrics() && (preparedText.GetGlyphCount() > 0u))
+  {
+    DALI_TEST_CHECK(!layoutResult.Empty());
+    DALI_TEST_CHECK(layoutResult.height >= preparedText.GetLineMetrics().naturalLineHeight);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutGlyphsExplicitLineHeightOverrideP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  constexpr float                                  explicitLineHeight = 50.0f;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 300.0f, explicitLineHeight, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(!layoutResult.Empty());
+    DALI_TEST_EQUALS(layoutResult.height, explicitLineHeight, TEST_LOCATION);
+    DALI_TEST_EQUALS(layoutResult.lines[0u].height, explicitLineHeight, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterRendererGlyphPositionUsesMetricsBaselineP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+  Vector2                                          position;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 300.0f, 0.0f, exclusionRegions, layoutResult);
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(adapter.GetRendererGlyphPosition(0u, position));
+    DALI_TEST_CHECK(std::isfinite(position.x));
+    DALI_TEST_CHECK(std::isfinite(position.y));
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterRendererGlyphPositionFallbackWithoutMetricsP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedTextWithoutMetrics(preparedText);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+  Vector2                                          position;
+
+  preparedTextWithoutMetrics.SetLineMetrics(Dali::Ui::Internal::TextVisualizer::PreparedText::LineMetrics{});
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedTextWithoutMetrics, 300.0f, 0.0f, exclusionRegions, layoutResult);
+  adapter.SetPreparedText(&preparedTextWithoutMetrics);
+  adapter.SetLayoutResult(&layoutResult);
+
+  if(preparedTextWithoutMetrics.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(adapter.GetRendererGlyphPosition(0u, position));
+    DALI_TEST_CHECK(std::isfinite(position.x));
+    DALI_TEST_CHECK(std::isfinite(position.y));
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPreparedLineBreakInfoSmokeP(void)
 {
   UiTestApplication application;

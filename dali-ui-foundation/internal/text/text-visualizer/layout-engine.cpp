@@ -45,7 +45,17 @@ bool IsInsideLayoutWidth(const BlockedInterval& interval)
 
 float GetEffectiveLineHeight(const PreparedText& preparedText, float lineHeight)
 {
-  return lineHeight > 0.0f ? lineHeight : LayoutEngine::GetPlaceholderLineHeight(preparedText);
+  if(lineHeight > 0.0f)
+  {
+    return lineHeight;
+  }
+
+  if(preparedText.HasLineMetrics() && (preparedText.GetLineMetrics().naturalLineHeight > 0.0f))
+  {
+    return preparedText.GetLineMetrics().naturalLineHeight;
+  }
+
+  return LayoutEngine::GetPlaceholderLineHeight(preparedText);
 }
 
 float GetGlyphPlacementWidth(const Text::GlyphInfo& glyph)
