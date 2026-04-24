@@ -199,6 +199,11 @@ void TextVisualizerImpl::ClearExclusionRegions()
 void TextVisualizerImpl::OnInitialize()
 {
   ViewImpl::OnInitialize();
+
+  Actor self = Self();
+
+  self.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::WIDTH);
+  self.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::HEIGHT);
 }
 
 void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
@@ -422,7 +427,7 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
   const Vector3  firstChildSize      = mAtlasRendererBridge.GetFirstRendererOutputChildSize();
   const uint32_t glyphPlacementCount = mLayoutResult.glyphPlacements.Count();
 
-  DALI_LOG_RELEASE_INFO(
+  DALI_LOG_ERROR(
     "[TextVisualizer][%p] size=(%.2f,%.2f) glyphPlacements=%u hasRenderable=%d updateRenderData=%d attach=%d "
     "renderReady=%d getGlyphsCalls=%u lastRequested=%u lastReturned=%u lastStart=%u "
     "outputChildren=%u outputDescendants=%u outputRenderers=%u outputTotalRenderers=%u hasRenderableDescendant=%d "
