@@ -219,7 +219,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
-    mAtlasRendererBridge.EnsureRenderer();
+    mAtlasRendererBridge.UpdateRenderData();
     // TODO: Clear render dirty after renderer geometry is updated.
   }
 

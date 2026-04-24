@@ -18,19 +18,46 @@
 // CLASS HEADER
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 
+// EXTERNAL INCLUDES
+#include <vector>
+
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/rendering/atlas/text-atlas-renderer.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
+struct AtlasRendererBridge::Impl
+{
+  struct AtlasGlyphRenderData
+  {
+    Text::GlyphInfo glyph;
+    GlyphPlacement  placement;
+    float           x{0.0f};
+    float           y{0.0f};
+    float           width{0.0f};
+    float           height{0.0f};
+  };
+
+  void Clear()
+  {
+    mRenderData.clear();
+  }
+
+  std::vector<AtlasGlyphRenderData> mRenderData;
+};
+
 AtlasRendererBridge::AtlasRendererBridge()
 : mAdapter(nullptr),
-  mRenderer()
+  mRenderer(),
+  mImpl(new Impl())
 {
 }
 
-AtlasRendererBridge::~AtlasRendererBridge() = default;
+AtlasRendererBridge::~AtlasRendererBridge()
+{
+  delete mImpl;
+}
 
 void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 {
@@ -40,6 +67,7 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 void AtlasRendererBridge::Clear()
 {
   mAdapter = nullptr;
+  mImpl->Clear();
   ResetRenderer();
 }
 
@@ -64,6 +92,49 @@ void AtlasRendererBridge::EnsureRenderer()
 void AtlasRendererBridge::ResetRenderer()
 {
   mRenderer.Reset();
+}
+
+bool AtlasRendererBridge::UpdateRenderData()
+{
+  if(!HasRenderableGlyphs())
+  {
+    return false;
+  }
+
+  EnsureRenderer();
+  if(!IsRendererCreated())
+  {
+    return false;
+  }
+
+  mImpl->Clear();
+
+  const uint32_t renderableGlyphCount = mAdapter->GetRenderableGlyphCount();
+  for(uint32_t index = 0u; index < renderableGlyphCount; ++index)
+  {
+    GlyphPlacement  placement;
+    Text::GlyphInfo glyph;
+
+    if(!mAdapter->GetGlyphPlacement(index, placement) ||
+       !mAdapter->GetGlyphInfo(placement.glyphIndex, glyph))
+    {
+      mImpl->Clear();
+      return false;
+    }
+
+    Impl::AtlasGlyphRenderData renderData;
+    renderData.glyph     = glyph;
+    renderData.placement = placement;
+    renderData.x         = placement.x;
+    renderData.y         = placement.y;
+    renderData.width     = placement.width;
+    renderData.height    = (placement.height > 0.0f) ? placement.height : glyph.height;
+    // TODO: Apply baseline, bearing, glyph offset, and text color during actual AtlasRenderer integration.
+
+    mImpl->mRenderData.push_back(renderData);
+  }
+
+  return !mImpl->mRenderData.empty();
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

@@ -42,10 +42,14 @@ public:
   void SetLayoutResult(const LayoutResult* layoutResult);
   void Clear();
 
+  bool GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const;
+  bool GetGlyphInfo(uint32_t glyphIndex, Text::GlyphInfo& glyphInfo) const;
+
   bool     HasRenderableGlyphs() const;
   bool     HasValidGlyphPlacementIndices() const;
   uint32_t GetGlyphCount() const;
   uint32_t GetGlyphPlacementCount() const;
+  uint32_t GetRenderableGlyphCount() const;
 
   const Dali::Vector<Text::GlyphInfo>&      GetGlyphs() const;
   const Dali::Vector<GlyphPlacement>&       GetGlyphPlacements() const;

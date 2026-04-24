@@ -69,6 +69,28 @@ void AtlasViewAdapter::Clear()
   mLayoutResult = nullptr;
 }
 
+bool AtlasViewAdapter::GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const
+{
+  if((nullptr == mLayoutResult) || (index >= mLayoutResult->glyphPlacements.Count()))
+  {
+    return false;
+  }
+
+  placement = mLayoutResult->glyphPlacements[index];
+  return true;
+}
+
+bool AtlasViewAdapter::GetGlyphInfo(uint32_t glyphIndex, Text::GlyphInfo& glyphInfo) const
+{
+  if((nullptr == mPreparedText) || (glyphIndex >= mPreparedText->GetGlyphCount()))
+  {
+    return false;
+  }
+
+  glyphInfo = mPreparedText->GetGlyphs()[glyphIndex];
+  return true;
+}
+
 bool AtlasViewAdapter::HasRenderableGlyphs() const
 {
   return (nullptr != mPreparedText) &&
@@ -107,6 +129,11 @@ uint32_t AtlasViewAdapter::GetGlyphCount() const
 uint32_t AtlasViewAdapter::GetGlyphPlacementCount() const
 {
   return (nullptr != mLayoutResult) ? mLayoutResult->glyphPlacements.Count() : 0u;
+}
+
+uint32_t AtlasViewAdapter::GetRenderableGlyphCount() const
+{
+  return HasRenderableGlyphs() ? GetGlyphPlacementCount() : 0u;
 }
 
 const Dali::Vector<Text::GlyphInfo>& AtlasViewAdapter::GetGlyphs() const

@@ -46,10 +46,14 @@ public:
 
   void EnsureRenderer();
   void ResetRenderer();
+  bool UpdateRenderData();
 
 private:
+  struct Impl;
+
   const AtlasViewAdapter* mAdapter;
   Text::RendererPtr       mRenderer;
+  Impl*                   mImpl;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer
