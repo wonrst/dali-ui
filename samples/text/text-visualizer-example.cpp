@@ -48,6 +48,7 @@ const UiColor TITLE_BG_COLOR(0x243447);
 const UiColor LABEL_TEXT_COLOR(0xF3F6FA);
 const UiColor STATUS_BG_COLOR(0x202E3D);
 const UiColor OVERLAY_COLOR(0xF5528A);
+const UiColor TEXT_AREA_BG_COLOR = UiColor(0xFFFFFF).WithAlpha(0.07f);
 
 const UiColor TEXT_COLORS[] = {
   UiColor(0xFFB000),
@@ -167,6 +168,7 @@ private:
     visualizer.SetPositionY(TEXT_PADDING);
     visualizer.SetRequestedWidth(PANEL_WIDTH - (TEXT_PADDING * 2.0f));
     visualizer.SetRequestedHeight(PANEL_HEIGHT - (TEXT_PADDING * 2.0f));
+    visualizer.SetBackgroundColor(TEXT_AREA_BG_COLOR);
     visualizer.SetText(SAMPLE_TEXT);
     visualizer.SetFontSize(TEXT_FONT_SIZE);
     visualizer.SetTextColor(TEXT_COLORS[mCurrentColorIndex]);
@@ -193,6 +195,14 @@ private:
     panel.SetBackgroundColor(PANEL_BG_COLOR);
     panel.SetPadding(Extents(0, 0, 0, 0));
     panel.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
+
+    panel.Add(View::New()
+                .SetLayoutMode(LayoutMode::STANDALONE)
+                .SetPositionX(TEXT_PADDING)
+                .SetPositionY(TEXT_PADDING)
+                .SetRequestedWidth(PANEL_WIDTH - (TEXT_PADDING * 2.0f))
+                .SetRequestedHeight(PANEL_HEIGHT - (TEXT_PADDING * 2.0f))
+                .SetBackgroundColor(TEXT_AREA_BG_COLOR));
 
     panel.Add(visualizer);
 

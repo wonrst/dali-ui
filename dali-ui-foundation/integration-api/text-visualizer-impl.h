@@ -169,6 +169,7 @@ private:
   void ClearPrepareDirty();
   void ClearLayoutDirty();
   void EnsureRenderHost();
+  void SyncRenderHostSize(const Vector2& size);
   void ClearRenderHost();
   bool HasRenderHost() const;
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;

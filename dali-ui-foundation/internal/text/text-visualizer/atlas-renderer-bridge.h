@@ -43,11 +43,18 @@ public:
   void SetAdapter(const AtlasViewAdapter* adapter);
   void Clear();
 
-  bool  HasRenderableGlyphs() const;
-  bool  IsRendererCreated() const;
-  bool  HasRenderHost() const;
-  bool  HasRendererOutput() const;
-  bool  IsRendererAttached() const;
+  bool HasRenderableGlyphs() const;
+  bool IsRendererCreated() const;
+  bool HasRenderHost() const;
+  bool HasRendererOutput() const;
+  bool IsRendererAttached() const;
+  bool IsRendererOutputParentedToHost() const
+  {
+    return mRendererOutput &&
+           mRenderHost &&
+           mRendererOutput.GetParent() &&
+           (mRendererOutput.GetParent() == mRenderHost);
+  }
   bool  IsRenderReady() const;
   bool  HasViewInterfaceAdapter() const;
   Actor GetRendererOutput() const;

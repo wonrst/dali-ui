@@ -1189,6 +1189,7 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   if(attached)
   {
     DALI_TEST_CHECK(bridge.HasRendererOutput());
+    DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
     DALI_TEST_CHECK(bridge.IsRenderReady());
     DALI_TEST_CHECK(bridge.GetRendererOutput());
     DALI_TEST_CHECK(bridge.GetRendererOutput().GetParent() == renderHost);
@@ -1196,6 +1197,42 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   else
   {
     DALI_TEST_CHECK(!bridge.IsRenderReady());
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeOutputParentedToHostP(void)
+{
+  UiTestApplication                                                application;
+  const auto                                                       preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  const bool attached = bridge.AttachRendererToHost();
+  if(attached)
+  {
+    DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
+  }
+  else
+  {
+    DALI_TEST_CHECK(!bridge.IsRendererOutputParentedToHost());
   }
 
   END_TEST;
@@ -1609,6 +1646,47 @@ int UtcDaliTextVisualizerRenderHostEmptySmokeP(void)
   application.GetScene().Add(textVisualizer);
   application.SendNotification();
   application.Render();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasureNonZeroWithExplicitWidthP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer explicit width measurement");
+  textVisualizer.SetFontSize(18.0f);
+
+  MeasuredSize measured = textVisualizer.Measure(240.0f, 0.0f);
+
+  DALI_TEST_CHECK(measured.GetWidth() > 0.0f);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+  DALI_TEST_CHECK(textVisualizer.GetMeasuredSize().GetWidth() > 0.0f);
+  DALI_TEST_CHECK(textVisualizer.GetMeasuredSize().GetHeight() > 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerRelayoutWithExplicitSizeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer explicit relayout size");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(240.0f);
+  textVisualizer.SetRequestedHeight(180.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  const Vector3 size = textVisualizer.GetProperty<Vector3>(Actor::Property::SIZE);
+  DALI_TEST_CHECK(size.x > 0.0f);
+  DALI_TEST_CHECK(size.y > 0.0f);
 
   END_TEST;
 }

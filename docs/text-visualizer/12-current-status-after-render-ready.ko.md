@@ -395,6 +395,18 @@ flowchart TD
   - pixel automated test
   - sample 기반 visual correctness 자동 검증
 
+## 추가 확인: measure / relayout visibility diagnosis
+
+- 텍스트가 보이지 않을 때는 renderer 경로만이 아니라 `measure / relayout / host size`도 함께 확인해야 한다.
+- `TextVisualizer`가 `0 x 0`으로 측정되거나 `OnRelayout()`의 `size.x`가 `0`이면 `LayoutGlyphs()` 결과가 empty가 되어 renderable glyph가 사라질 수 있다.
+- 현재 보강 정책:
+  - sample에서는 `TextVisualizer`에 explicit requested size를 준다.
+  - `TextVisualizerImpl`은 `RenderHost Actor`에 explicit size sync를 적용한다.
+- `RenderHost`는 `ResizePolicy::FILL_TO_PARENT`를 유지하되, relayout 시점에 control size를 한 번 더 명시적으로 맞춘다.
+- `OnRelayout()` base call 순서는 이번 커밋에서 바꾸지 않는다.
+  - 확인 결과 `Label / InputField`는 `ViewImpl::OnRelayout()`를 명시적으로 호출하지 않는다.
+  - `TextVisualizer`는 현재 padding/margin 기반 child arrange에 의존하지 않으므로, 우선 size sync만 보강하고 base call 순서는 유지한다.
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지

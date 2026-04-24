@@ -221,13 +221,14 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   }
 
   SyncRenderStateToAdapter(size);
+  SyncRenderHostSize(size);
 
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
     if(mAtlasRendererBridge.UpdateRenderData())
     {
       EnsureRenderHost();
-      mAtlasRendererBridge.SetRenderHost(mRenderHost);
+      SyncRenderHostSize(size);
 
       if(mAtlasRendererBridge.AttachRendererToHost())
       {
@@ -365,6 +366,18 @@ void TextVisualizerImpl::EnsureRenderHost()
     mRenderHost.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::ALL_DIMENSIONS);
     IntegrationView::AddActorChild(Ui::View::DownCast(Self()), mRenderHost);
   }
+
+  mAtlasRendererBridge.SetRenderHost(mRenderHost);
+}
+
+void TextVisualizerImpl::SyncRenderHostSize(const Vector2& size)
+{
+  if(!mRenderHost)
+  {
+    return;
+  }
+
+  mRenderHost.SetProperty(Actor::Property::SIZE, Vector3(size.x, size.y, 0.0f));
 }
 
 void TextVisualizerImpl::ClearRenderHost()
