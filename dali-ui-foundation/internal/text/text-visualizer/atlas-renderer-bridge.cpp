@@ -67,6 +67,15 @@ AtlasRendererBridge::~AtlasRendererBridge()
 
 void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 {
+  if(nullptr == adapter)
+  {
+    DetachRendererFromHost();
+    mImpl->Clear();
+    mAdapter = nullptr;
+    mViewInterface.Clear();
+    return;
+  }
+
   mAdapter = adapter;
   mViewInterface.SetAdapter(adapter);
 }
@@ -96,9 +105,24 @@ bool AtlasRendererBridge::HasRenderHost() const
   return static_cast<bool>(mRenderHost);
 }
 
+bool AtlasRendererBridge::HasRendererOutput() const
+{
+  return static_cast<bool>(mRendererOutput);
+}
+
 bool AtlasRendererBridge::IsRendererAttached() const
 {
   return mRendererAttached;
+}
+
+bool AtlasRendererBridge::IsRenderReady() const
+{
+  return IsRendererCreated() &&
+         HasRenderHost() &&
+         HasRendererOutput() &&
+         IsRendererAttached() &&
+         HasViewInterfaceAdapter() &&
+         HasRenderableGlyphs();
 }
 
 bool AtlasRendererBridge::HasViewInterfaceAdapter() const
@@ -170,6 +194,11 @@ bool AtlasRendererBridge::UpdateRenderData()
 
 void AtlasRendererBridge::SetRenderHost(Actor renderHost)
 {
+  if(!renderHost)
+  {
+    DetachRendererFromHost();
+  }
+
   mRenderHost = renderHost;
 }
 

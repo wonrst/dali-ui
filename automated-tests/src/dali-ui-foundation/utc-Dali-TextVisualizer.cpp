@@ -881,6 +881,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
 
   DALI_TEST_CHECK(!bridge.HasRenderableGlyphs());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_CHECK(!bridge.IsRenderReady());
 
   END_TEST;
 }
@@ -1186,8 +1188,14 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
 
   if(attached)
   {
+    DALI_TEST_CHECK(bridge.HasRendererOutput());
+    DALI_TEST_CHECK(bridge.IsRenderReady());
     DALI_TEST_CHECK(bridge.GetRendererOutput());
     DALI_TEST_CHECK(bridge.GetRendererOutput().GetParent() == renderHost);
+  }
+  else
+  {
+    DALI_TEST_CHECK(!bridge.IsRenderReady());
   }
 
   END_TEST;
@@ -1247,6 +1255,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeDetachClearP(void)
 
   bridge.AttachRendererToHost();
   bridge.DetachRendererFromHost();
+  DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_CHECK(!bridge.IsRenderReady());
   DALI_TEST_CHECK(!bridge.IsRendererAttached());
   DALI_TEST_CHECK(!bridge.GetRendererOutput());
 
@@ -1279,9 +1289,82 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearAfterRenderCallP(void)
   bridge.AttachRendererToHost();
   bridge.Clear();
 
+  DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_CHECK(!bridge.IsRenderReady());
   DALI_TEST_CHECK(!bridge.IsRendererAttached());
   DALI_TEST_CHECK(!bridge.HasRenderHost());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeRenderReadyAfterRenderCallP(void)
+{
+  UiTestApplication                                                application;
+  const auto                                                       preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  const bool attached = bridge.AttachRendererToHost();
+  if(attached)
+  {
+    DALI_TEST_CHECK(bridge.HasRendererOutput());
+    DALI_TEST_CHECK(bridge.IsRenderReady());
+  }
+  else
+  {
+    DALI_TEST_CHECK(!bridge.IsRenderReady());
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeSetRenderHostEmptyClearsReadinessP(void)
+{
+  UiTestApplication                                                application;
+  const auto                                                       preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  bridge.AttachRendererToHost();
+  bridge.SetRenderHost(Actor());
+
+  DALI_TEST_CHECK(!bridge.HasRenderHost());
+  DALI_TEST_CHECK(!bridge.HasRendererOutput());
+  DALI_TEST_CHECK(!bridge.IsRendererAttached());
+  DALI_TEST_CHECK(!bridge.IsRenderReady());
 
   END_TEST;
 }

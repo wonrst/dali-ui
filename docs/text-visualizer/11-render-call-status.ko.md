@@ -275,6 +275,39 @@ empty / no-op 처리한 것:
 - per-glyph color 지원은 1차 범위 밖이며, 필요할 경우 `GetColors()` / `GetColorIndices()` path를 별도로 설계해야 한다.
 - color animation과 `animatablePropertyIndex`의 관계는 아직 검토 전이다.
 
+## 추가 확인: render-ready state
+
+현재 `AtlasRendererBridge`에는 bridge 상태 일관성을 확인하기 위한 helper를 추가했다.
+
+- `HasRendererOutput()`
+  - 최근 `Render()` 호출 결과로 얻은 `mRendererOutput` handle 존재 여부를 반환한다.
+- `IsRenderReady()`
+  - 아래 조건이 모두 참일 때만 `true`를 반환한다.
+  - `IsRendererCreated()`
+  - `HasRenderHost()`
+  - `HasRendererOutput()`
+  - `IsRendererAttached()`
+  - `HasViewInterfaceAdapter()`
+  - `HasRenderableGlyphs()`
+
+현재 의미:
+
+- `Renderer::Render()` 호출이 가능했고
+- output actor handle이 존재하며
+- host attach 상태까지 bridge 내부에서 일관되게 맞아 있다는 뜻이다.
+
+현재 의미하지 않는 것:
+
+- geometry correctness가 검증되었다는 뜻이 아니다.
+- baseline / bearing / offset 보정이 끝났다는 뜻이 아니다.
+- 실제 화면 품질이 맞다는 뜻이 아니다.
+- `render dirty`를 clear해도 된다는 뜻이 아니다.
+
+중요:
+
+- 다음 단계에서도 `IsRenderReady() == true`만으로 `render dirty`를 clear하면 안 된다.
+- 여전히 geometry correctness, baseline/bearing/offset, color/shader 반영, manual/sample 검증이 남아 있다.
+
 ## 6. 현재 render dirty 정책
 
 현재 정책은 다음과 같다.

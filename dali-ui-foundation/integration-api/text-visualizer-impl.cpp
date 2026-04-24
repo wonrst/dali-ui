@@ -231,7 +231,11 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
       if(mAtlasRendererBridge.AttachRendererToHost())
       {
-        // TODO: Clear render dirty only after renderer output becomes draw-ready.
+        if(mAtlasRendererBridge.IsRenderReady())
+        {
+          // TODO: Keep render dirty until geometry correctness, baseline/bearing/offset,
+          // and render-path validation are verified.
+        }
       }
     }
   }

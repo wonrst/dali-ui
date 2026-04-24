@@ -46,7 +46,9 @@ public:
   bool  HasRenderableGlyphs() const;
   bool  IsRendererCreated() const;
   bool  HasRenderHost() const;
+  bool  HasRendererOutput() const;
   bool  IsRendererAttached() const;
+  bool  IsRenderReady() const;
   bool  HasViewInterfaceAdapter() const;
   Actor GetRendererOutput() const;
 
