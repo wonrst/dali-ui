@@ -343,6 +343,28 @@ flowchart TD
 
 즉, 다음 구현의 핵심은 `TextController`를 다시 끌어오는 것이 아니라, `PreparedText / LayoutResult / TextColor / ControlSize`만으로 위 subset을 어떻게 채울지 고정하는 것이다.
 
+## 추가 확인: Renderer::Render 호출 skeleton
+
+현재 확인된 사실:
+
+- `Text::Renderer::Render(ViewInterface&, Actor, Property::Index, float&, int)` 호출 자체는 가능하다.
+- `Text::AtlasRenderer::Render()`는 내부 `mActor`를 만들거나 재사용한 뒤 그 actor를 반환한다.
+- 반환 actor는 자동으로 `textControl`에 attach되지 않는다.
+  - 즉, caller가 parent가 없을 때 직접 host에 붙여야 한다.
+- 따라서 현재 `TextVisualizer` bridge 정책은 다음과 같다.
+  - `Render()` 호출
+  - 반환 actor가 없으면 실패
+  - parent가 없으면 `RenderHost`에 add
+  - 이미 `RenderHost`에 parented 되어 있으면 중복 add 하지 않음
+  - 다른 parent가 있으면 강제로 빼앗지 않음
+
+다음 단계에서 추가 확인이 필요한 항목:
+
+- `animatablePropertyIndex`에 실제 어떤 property index를 넣어야 하는지
+- `alignmentOffset`과 `depth`의 실제 의미
+- 반환 actor detach/reset ownership
+- geometry correctness가 확보되기 전 `render dirty` clear를 하면 안 되는지 여부
+
 ## 9. 다음 커밋에서 반드시 지킬 금지 사항
 
 - 기존 `TextController` 수정 금지

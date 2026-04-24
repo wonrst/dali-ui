@@ -51,7 +51,11 @@ AtlasRendererBridge::AtlasRendererBridge()
 : mAdapter(nullptr),
   mRenderer(),
   mRenderHost(),
+  mRendererOutput(),
   mRendererAttached(false),
+  mAnimatablePropertyIndex(Property::INVALID_INDEX),
+  mAlignmentOffset(0.0f),
+  mDepth(0),
   mImpl(new Impl())
 {
 }
@@ -102,6 +106,11 @@ bool AtlasRendererBridge::HasViewInterfaceAdapter() const
   return mViewInterface.HasAdapter();
 }
 
+Actor AtlasRendererBridge::GetRendererOutput() const
+{
+  return mRendererOutput;
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
@@ -112,8 +121,8 @@ void AtlasRendererBridge::EnsureRenderer()
 
 void AtlasRendererBridge::ResetRenderer()
 {
+  DetachRendererFromHost();
   mRenderer.Reset();
-  mRendererAttached = false;
 }
 
 bool AtlasRendererBridge::UpdateRenderData()
@@ -181,15 +190,42 @@ bool AtlasRendererBridge::AttachRendererToHost()
     return false;
   }
 
-  // AtlasRenderer currently returns its output Actor only from Renderer::Render(),
-  // and that call requires a Text::ViewInterface implementation. TextVisualizer
-  // does not provide that bridge yet, so there is no safe renderer output Actor
-  // available to attach at this stage.
-  return false;
+  mAlignmentOffset = 0.0f;
+
+  Actor output = mRenderer->Render(mViewInterface, mRenderHost, mAnimatablePropertyIndex, mAlignmentOffset, mDepth);
+  if(!output)
+  {
+    mRendererOutput.Reset();
+    return false;
+  }
+
+  if(!output.GetParent())
+  {
+    mRenderHost.Add(output);
+  }
+  else if(output.GetParent() != mRenderHost)
+  {
+    mRendererOutput = output;
+    return false;
+  }
+
+  mRendererOutput   = output;
+  mRendererAttached = true;
+  return true;
 }
 
 void AtlasRendererBridge::DetachRendererFromHost()
 {
+  if(mRendererOutput)
+  {
+    Actor parent = mRendererOutput.GetParent();
+    if(parent)
+    {
+      mRendererOutput.Unparent();
+    }
+    mRendererOutput.Reset();
+  }
+
   mRendererAttached = false;
 }
 

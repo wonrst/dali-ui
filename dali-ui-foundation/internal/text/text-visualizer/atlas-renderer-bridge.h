@@ -43,11 +43,12 @@ public:
   void SetAdapter(const AtlasViewAdapter* adapter);
   void Clear();
 
-  bool HasRenderableGlyphs() const;
-  bool IsRendererCreated() const;
-  bool HasRenderHost() const;
-  bool IsRendererAttached() const;
-  bool HasViewInterfaceAdapter() const;
+  bool  HasRenderableGlyphs() const;
+  bool  IsRendererCreated() const;
+  bool  HasRenderHost() const;
+  bool  IsRendererAttached() const;
+  bool  HasViewInterfaceAdapter() const;
+  Actor GetRendererOutput() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
@@ -63,7 +64,11 @@ private:
   const AtlasViewAdapter*     mAdapter;
   Text::RendererPtr           mRenderer;
   Actor                       mRenderHost;
+  Actor                       mRendererOutput;
   bool                        mRendererAttached;
+  Property::Index             mAnimatablePropertyIndex;
+  float                       mAlignmentOffset;
+  int                         mDepth;
   TextVisualizerViewInterface mViewInterface;
   Impl*                       mImpl;
 };
