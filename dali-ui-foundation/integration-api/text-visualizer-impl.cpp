@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-property-handler.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
@@ -71,6 +72,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mPreparedText(),
   mLayoutResult(),
   mAtlasViewAdapter(),
+  mAtlasRendererBridge(),
   mLastLayoutSize(Vector2::ZERO),
   mPrepareDirty(true),
   mLayoutDirty(true),
@@ -154,6 +156,7 @@ void TextVisualizerImpl::Prepare()
 
   mPreparedText = Internal::TextVisualizer::TextPreparer::Prepare(input);
   mAtlasViewAdapter.Clear();
+  mAtlasRendererBridge.Clear();
   ClearPrepareDirty();
   MarkLayoutDirty();
   MarkRenderDirty();
@@ -210,7 +213,14 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     UpdateLayout(size.x, mLayoutResult);
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
+    mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
     ClearLayoutDirty();
+  }
+
+  if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
+  {
+    mAtlasRendererBridge.EnsureRenderer();
+    // TODO: Clear render dirty after renderer geometry is updated.
   }
 
   mLastLayoutSize = size;
@@ -302,6 +312,7 @@ void TextVisualizerImpl::MarkPrepareDirty()
   mPreparedText.Clear();
   mLayoutResult.Clear();
   mAtlasViewAdapter.Clear();
+  mAtlasRendererBridge.Clear();
   mPrepareDirty = true;
   mLayoutDirty  = true;
   mRenderDirty  = true;

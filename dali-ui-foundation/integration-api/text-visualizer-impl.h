@@ -18,6 +18,7 @@
  */
 
 // EXTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
@@ -170,18 +171,19 @@ private:
   void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
 
 private:
-  Dali::String                               mText;
-  Dali::String                               mFontFamily;
-  float                                      mFontSize;
-  UiColor                                    mTextColor;
-  Dali::Vector<Rect<float>>                  mExclusionRegions;
-  Internal::TextVisualizer::PreparedText     mPreparedText;
-  Internal::TextVisualizer::LayoutResult     mLayoutResult;
-  Internal::TextVisualizer::AtlasViewAdapter mAtlasViewAdapter;
-  Vector2                                    mLastLayoutSize;
-  bool                                       mPrepareDirty;
-  bool                                       mLayoutDirty;
-  bool                                       mRenderDirty;
+  Dali::String                                  mText;
+  Dali::String                                  mFontFamily;
+  float                                         mFontSize;
+  UiColor                                       mTextColor;
+  Dali::Vector<Rect<float>>                     mExclusionRegions;
+  Internal::TextVisualizer::PreparedText        mPreparedText;
+  Internal::TextVisualizer::LayoutResult        mLayoutResult;
+  Internal::TextVisualizer::AtlasViewAdapter    mAtlasViewAdapter;
+  Internal::TextVisualizer::AtlasRendererBridge mAtlasRendererBridge;
+  Vector2                                       mLastLayoutSize;
+  bool                                          mPrepareDirty;
+  bool                                          mLayoutDirty;
+  bool                                          mRenderDirty;
 };
 
 } // namespace Integration
