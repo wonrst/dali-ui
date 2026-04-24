@@ -377,6 +377,24 @@ flowchart TD
 - 단, sample은 별도 커밋으로 작게 진행한다.
 - `render dirty clear`는 sample/manual 확인 이후로 미룬다.
 
+## 추가 확인: visual verification sample
+
+- sample 파일:
+  - `samples/text/text-visualizer-example.cpp`
+- sample 목적:
+  - 실제 화면에 `TextVisualizer`가 보이는지 수동 확인
+  - `TEXT_COLOR`가 defaultColor path로 반영되는지 수동 확인
+  - exclusion region이 시각적으로 비워지는지 수동 확인
+  - repeated relayout에서 crash가 없는지 수동 확인
+- 수동 확인 항목:
+  - 기본 텍스트 표시 여부
+  - 키 입력에 따른 text color 변경 여부
+  - 오른쪽 패널의 exclusion overlay 위치와 실제 text 회피 여부
+  - exclusion on/off 및 이동 반복 시 crash 여부
+- 아직 없는 것:
+  - pixel automated test
+  - sample 기반 visual correctness 자동 검증
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지
