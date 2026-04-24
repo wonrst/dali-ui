@@ -479,3 +479,118 @@ flowchart LR
 - `FontSize` 단위와 line metrics 관계
 - 현재 `lineGap = fontSize * 0.2f`가 적절한지
 - sample에서 visual line height가 충분한지
+
+## 현재 관찰 결과
+
+- line metrics 적용 후 line height가 더 자연스러워졌다.
+- 텍스트가 이전보다 덜 빡빡하게 보인다.
+- 같은 영역에 들어가는 visible line 수가 줄어든 것으로 보인다.
+- moving bounds가 움직일 때 relayout 체감 성능도 함께 개선됐다.
+- 즉, 이번 변경은 line height 품질 개선이면서 동시에 layout 성능에도 긍정적으로 작용한 사례다.
+
+## line metrics가 성능에도 영향을 준 이유
+
+이번 개선의 성능 효과는 아래 흐름으로 설명할 수 있다.
+
+```mermaid
+flowchart LR
+  A[line height 증가] --> B[visible line count 감소]
+  B --> C[per-line BuildAvailableIntervals 호출 감소]
+  C --> D[exclusion region scan 감소]
+  D --> E[LayoutGlyphs loop 감소]
+  E --> F[render/update data 크기 감소 가능]
+  F --> G[FPS 개선]
+```
+
+정리하면:
+
+- line height가 커지면 같은 높이에 들어가는 line 수가 줄어든다.
+- line 수가 줄면 `BuildAvailableIntervals()`가 호출되는 횟수도 줄어든다.
+- 각 line에서 모든 exclusion bounds를 훑는 현재 구조상, line 수 감소는 곧 exclusion scan 감소로 이어진다.
+- 그 결과 `LayoutGlyphs()` 전체 loop 양도 줄고, relayout 뒤 render/update 경로의 입력 크기도 완화될 수 있다.
+- 즉 이번 line metrics 적용은 “품질 개선”으로 시작했지만, 현재 구조에서는 자연스럽게 성능 개선 효과도 낳는다.
+
+## 현재 line metrics 정책
+
+현재 정책은 다음과 같다.
+
+- `PreparedText::LineMetrics`를 사용한다.
+- `naturalLineHeight`가 있으면 layout line height에서 우선 사용한다.
+- explicit `lineHeight`가 전달되면 그 값이 override한다.
+- renderer glyph position 계산에서는 `baselineOffset`을 우선 사용한다.
+- line metrics가 없으면 기존 fallback을 유지한다.
+
+현재 의미:
+
+- 기본 line height는 더 이상 무조건 `fontSize * 1.2f`가 아니다.
+- baseline도 일반 경로에서는 `PreparedText`에 저장된 정책을 먼저 따른다.
+- fallback path는 남겨 두었기 때문에 metrics가 없는 경우 기존 동작은 깨지지 않는다.
+
+## 남은 제한
+
+아직 남아 있는 제한은 다음과 같다.
+
+- `PreparedText` level metrics 하나만 사용 중이다.
+- line별 fallback font / emoji 혼합 정확도는 아직 제한적이다.
+- `lineGap = fontSize * 0.2f`는 임시 fallback이다.
+- `FontSize` 단위 / pixel size 해석은 아직 정리되지 않았다.
+
+즉, 이번 단계는 “placeholder 규칙보다 낫다” 수준의 개선이지, font-system 수준의 최종 정답은 아니다.
+
+## 다음 권장 작업 재정렬
+
+현재 기준 추천 순서는 다음과 같다.
+
+### A. Clarify FontSize unit and conversion
+
+이유:
+
+- 현재 사용자가 가장 어색하게 느끼는 지점이 실제 pixel size 감각과 `FontSize` 해석이다.
+- line metrics를 더 정교하게 다듬기 전에, 입력 단위부터 명확히 해야 후속 품질 작업의 기준이 선다.
+
+### B. Add line-level metrics if needed
+
+이유:
+
+- 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
+- 단, `FontSize` 단위 정리를 먼저 한 뒤에 보는 편이 안전하다.
+
+### C. Improve word/cluster line break
+
+이유:
+
+- 현재는 line height는 나아졌지만 line break 품질은 여전히 glyph advance 순차 배치에 가깝다.
+
+### D. Optimize exclusion interval scanning
+
+이유:
+
+- line metrics 적용으로 line 수는 줄었지만, 현재 구조는 여전히 line마다 모든 bounds를 훑는다.
+
+### E. Add render dirty clear condition
+
+이유:
+
+- render correctness와 update 정책이 더 안정화된 뒤에 별도 커밋으로 다루는 것이 안전하다.
+
+### F. Reserve / preallocate layout and render buffers
+
+이유:
+
+- 구조는 단순하지만 긴 텍스트와 moving bounds가 많을 때 allocation 비용이 쌓일 수 있다.
+
+현재 우선순위 재정렬의 핵심은 다음과 같다.
+
+- line height 품질은 이제 한 단계 올라왔다.
+- 다음 핵심은 `FontSize` 단위 정리다.
+- line-level metrics는 그 다음 단계에서 보는 것이 맞다.
+
+## 금지 사항
+
+다음 원칙은 계속 유지한다.
+
+- 기존 `TextController` 수정 금지
+- 기존 `TextView` 수정 금지
+- `text-atlas-renderer.*` 수정 금지
+- `render dirty clear`는 별도 커밋에서만
+- `FontSize` 단위 정리와 line break 개선을 한 커밋에 섞지 않기
