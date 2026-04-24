@@ -49,7 +49,10 @@ const Dali::Vector<Text::CharacterIndex>& EmptyCharacterIndices()
 
 AtlasViewAdapter::AtlasViewAdapter()
 : mPreparedText(nullptr),
-  mLayoutResult(nullptr)
+  mLayoutResult(nullptr),
+  mControlSize(Vector2::ZERO),
+  mLayoutSize(Vector2::ZERO),
+  mTextColor(0.0f, 0.0f, 0.0f, 1.0f)
 {
 }
 
@@ -61,12 +64,26 @@ void AtlasViewAdapter::SetPreparedText(const PreparedText* preparedText)
 void AtlasViewAdapter::SetLayoutResult(const LayoutResult* layoutResult)
 {
   mLayoutResult = layoutResult;
+  mLayoutSize   = (nullptr != layoutResult) ? Vector2(layoutResult->width, layoutResult->height) : Vector2::ZERO;
+}
+
+void AtlasViewAdapter::SetControlSize(const Vector2& controlSize)
+{
+  mControlSize = controlSize;
+}
+
+void AtlasViewAdapter::SetTextColor(const Vector4& textColor)
+{
+  mTextColor = textColor;
 }
 
 void AtlasViewAdapter::Clear()
 {
   mPreparedText = nullptr;
   mLayoutResult = nullptr;
+  mControlSize  = Vector2::ZERO;
+  mLayoutSize   = Vector2::ZERO;
+  mTextColor    = Vector4(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 bool AtlasViewAdapter::GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const
@@ -136,6 +153,21 @@ uint32_t AtlasViewAdapter::GetRenderableGlyphCount() const
   return HasRenderableGlyphs() ? GetGlyphPlacementCount() : 0u;
 }
 
+const Vector2& AtlasViewAdapter::GetControlSize() const
+{
+  return (mControlSize != Vector2::ZERO) ? mControlSize : mLayoutSize;
+}
+
+const Vector2& AtlasViewAdapter::GetLayoutSize() const
+{
+  return mLayoutSize;
+}
+
+const Vector4& AtlasViewAdapter::GetTextColor() const
+{
+  return mTextColor;
+}
+
 const Dali::Vector<Text::GlyphInfo>& AtlasViewAdapter::GetGlyphs() const
 {
   return (nullptr != mPreparedText) ? mPreparedText->GetGlyphs() : EmptyGlyphs();
@@ -154,6 +186,16 @@ const Dali::Vector<Text::GlyphIndex>& AtlasViewAdapter::GetNewParagraphGlyphs() 
 const Dali::Vector<Text::CharacterIndex>& AtlasViewAdapter::GetGlyphToCharacterMap() const
 {
   return (nullptr != mPreparedText) ? mPreparedText->GetGlyphToCharacterMap() : EmptyCharacterIndices();
+}
+
+const Text::Character* AtlasViewAdapter::GetTextBuffer() const
+{
+  if((nullptr == mPreparedText) || mPreparedText->GetCharacters().Empty())
+  {
+    return nullptr;
+  }
+
+  return mPreparedText->GetCharacters().Begin();
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

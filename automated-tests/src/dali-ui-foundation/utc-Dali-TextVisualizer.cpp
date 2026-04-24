@@ -24,6 +24,7 @@
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/text-visualizer-view-interface.h>
 #include <dali-ui-test-suite-utils.h>
 
 using namespace Dali;
@@ -1217,6 +1218,112 @@ int UtcDaliTextVisualizerAtlasRendererBridgeDetachClearP(void)
   DALI_TEST_CHECK(!bridge.IsRendererAttached());
   DALI_TEST_CHECK(!bridge.HasRenderHost());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceEmptyStateP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  DALI_TEST_CHECK(!viewInterface.HasAdapter());
+  DALI_TEST_EQUALS(viewInterface.GetNumberOfGlyphs(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetControlSize(), Vector2::ZERO, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetLayoutSize(), Vector2::ZERO, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Vector4(0.0f, 0.0f, 0.0f, 1.0f), TEST_LOCATION);
+  DALI_TEST_CHECK(nullptr == viewInterface.GetTextBuffer());
+  DALI_TEST_EQUALS(viewInterface.GetGlyphsToCharacters().Count(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceWithRenderableAdapterP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult       layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter   adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  adapter.SetTextColor(Color::BLUE);
+  viewInterface.SetAdapter(&adapter);
+
+  DALI_TEST_CHECK(viewInterface.HasAdapter());
+  DALI_TEST_EQUALS(viewInterface.GetLayoutSize(), Vector2(layoutResult.width, layoutResult.height), TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetControlSize(), Vector2(layoutResult.width, layoutResult.height), TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetTextColor(), Color::BLUE, TEST_LOCATION);
+  DALI_TEST_EQUALS(viewInterface.GetNumberOfGlyphs(), adapter.GetRenderableGlyphCount(), TEST_LOCATION);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    const uint32_t glyphCount = adapter.GetRenderableGlyphCount();
+    Dali::Vector<Dali::Ui::Text::GlyphInfo> glyphs;
+    Dali::Vector<Vector2>                   positions;
+    float                                   minLineOffset = -1.0f;
+    glyphs.Resize(glyphCount);
+    positions.Resize(glyphCount);
+
+    DALI_TEST_EQUALS(viewInterface.GetGlyphs(glyphs.Begin(), positions.Begin(), minLineOffset, 0u, glyphCount), glyphCount, TEST_LOCATION);
+    DALI_TEST_EQUALS(minLineOffset, 0.0f, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerViewInterfaceClearP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult       layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter   adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerViewInterface viewInterface;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  viewInterface.SetAdapter(&adapter);
+  viewInterface.Clear();
+
+  DALI_TEST_CHECK(!viewInterface.HasAdapter());
+  DALI_TEST_EQUALS(viewInterface.GetNumberOfGlyphs(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(nullptr == viewInterface.GetTextBuffer());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasRendererBridgeOwnsViewInterfaceSmokeP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult       layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter   adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge bridge;
+  Dali::Vector<Rect<float>> exclusionRegions;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  bridge.SetAdapter(&adapter);
+
+  DALI_TEST_CHECK(bridge.HasViewInterfaceAdapter());
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+  }
+
+  DALI_TEST_CHECK(!bridge.IsRendererAttached());
+  bridge.Clear();
+  DALI_TEST_CHECK(!bridge.HasViewInterfaceAdapter());
 
   END_TEST;
 }

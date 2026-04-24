@@ -21,6 +21,8 @@
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
+#include <dali/public-api/math/vector2.h>
+#include <dali/public-api/math/vector4.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
@@ -40,6 +42,8 @@ public:
 
   void SetPreparedText(const PreparedText* preparedText);
   void SetLayoutResult(const LayoutResult* layoutResult);
+  void SetControlSize(const Vector2& controlSize);
+  void SetTextColor(const Vector4& textColor);
   void Clear();
 
   bool GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const;
@@ -51,14 +55,22 @@ public:
   uint32_t GetGlyphPlacementCount() const;
   uint32_t GetRenderableGlyphCount() const;
 
+  const Vector2& GetControlSize() const;
+  const Vector2& GetLayoutSize() const;
+  const Vector4& GetTextColor() const;
+
   const Dali::Vector<Text::GlyphInfo>&      GetGlyphs() const;
   const Dali::Vector<GlyphPlacement>&       GetGlyphPlacements() const;
   const Dali::Vector<Text::GlyphIndex>&     GetNewParagraphGlyphs() const;
   const Dali::Vector<Text::CharacterIndex>& GetGlyphToCharacterMap() const;
+  const Text::Character*                    GetTextBuffer() const;
 
 private:
   const PreparedText* mPreparedText;
   const LayoutResult* mLayoutResult;
+  Vector2             mControlSize;
+  Vector2             mLayoutSize;
+  Vector4             mTextColor;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

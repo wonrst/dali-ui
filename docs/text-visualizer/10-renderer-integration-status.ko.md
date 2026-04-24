@@ -320,6 +320,29 @@ flowchart TD
 
 - `Add TextVisualizer minimal ViewInterface adapter skeleton`
 
+## 추가 확인: minimal ViewInterface skeleton
+
+`Text::ViewInterface`는 method 수가 많지만, 현재 `AtlasRenderer::Render()`와 `AddGlyphs()`가 직접 읽는 핵심 subset은 아래와 같다.
+
+- 반드시 실제 값을 연결해야 할 가능성이 큰 method
+  - `GetNumberOfGlyphs()`
+  - `GetGlyphs(...)`
+  - `GetColors()`
+  - `GetColorIndices()`
+  - `GetTextColor()`
+  - `GetLayoutSize()`
+  - `GetTextBuffer()`
+  - `GetGlyphsToCharacters()`
+- 현재 `TextVisualizer` 1차 범위에서 `no-op / false / empty`로 닫아도 되는 method
+  - underline / shadow / outline
+  - strikethrough
+  - hyphen insertion
+  - ellipsis
+  - bounded paragraph runs
+  - cutout
+
+즉, 다음 구현의 핵심은 `TextController`를 다시 끌어오는 것이 아니라, `PreparedText / LayoutResult / TextColor / ControlSize`만으로 위 subset을 어떻게 채울지 고정하는 것이다.
+
 ## 9. 다음 커밋에서 반드시 지킬 금지 사항
 
 - 기존 `TextController` 수정 금지

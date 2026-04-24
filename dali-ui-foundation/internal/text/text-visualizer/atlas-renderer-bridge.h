@@ -20,6 +20,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/rendering/text-renderer.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/text-visualizer-view-interface.h>
 #include <dali/public-api/actors/actor.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
@@ -46,6 +47,7 @@ public:
   bool IsRendererCreated() const;
   bool HasRenderHost() const;
   bool IsRendererAttached() const;
+  bool HasViewInterfaceAdapter() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
@@ -58,11 +60,12 @@ public:
 private:
   struct Impl;
 
-  const AtlasViewAdapter* mAdapter;
-  Text::RendererPtr       mRenderer;
-  Actor                   mRenderHost;
-  bool                    mRendererAttached;
-  Impl*                   mImpl;
+  const AtlasViewAdapter*     mAdapter;
+  Text::RendererPtr           mRenderer;
+  Actor                       mRenderHost;
+  bool                        mRendererAttached;
+  TextVisualizerViewInterface mViewInterface;
+  Impl*                       mImpl;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

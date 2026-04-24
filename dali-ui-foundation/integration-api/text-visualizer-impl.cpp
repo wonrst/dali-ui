@@ -216,6 +216,8 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     UpdateLayout(size.x, mLayoutResult);
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
+    mAtlasViewAdapter.SetControlSize(size);
+    mAtlasViewAdapter.SetTextColor(mTextColor.Resolve());
     mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
     ClearLayoutDirty();
   }
