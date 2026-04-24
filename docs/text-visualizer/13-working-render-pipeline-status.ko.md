@@ -313,3 +313,36 @@ sample에서 아직 확인할 것:
 - 필요한 diagnostics는 유지하되 error log 대신 debug log나 compile-time condition으로 낮추는 편이 안전하다.
 - 그 다음 baseline/line-break 품질 개선으로 넘어가는 흐름이 가장 자연스럽다.
 
+## 추가 확인: performance demo sample
+
+성능/안정성 관찰용 sample이 추가되었다.
+
+- 파일: `samples/text/text-visualizer-performance-example.cpp`
+- target: `text-visualizer-performance.example`
+
+목적:
+
+- 1920 x 1080 큰 화면 기준으로 긴 텍스트와 여러 moving bounds를 동시에 표시한다.
+- `TextVisualizer`가 moving exclusion region에 따라 계속 relayout/re-render 되는 상황을 수동으로 관찰한다.
+- rough FPS, frame count, bounds count, update count, text length 같은 관찰용 상태를 화면에 표시한다.
+
+조작 키:
+
+- `Space`: animation pause/resume
+- `1 / 2`: bound count 줄이기 / 늘리기
+- `3 / 4`: font size 줄이기 / 늘리기
+- `5`: exclusion on/off
+- `6`: text color 변경
+- `ESC / BACK`: 종료
+
+확인할 항목:
+
+- moving bounds를 text가 계속 피해 배치하는지
+- bound count와 font size가 바뀌어도 안정적으로 다시 그려지는지
+- exclusion off 시 text가 overlay bounds를 무시하고 통과하는지
+- rough FPS가 큰 폭으로 흔들리지 않는지
+
+주의:
+
+- 이 sample은 profiler 수준의 정확한 성능 측정 도구가 아니다.
+- `TextVisualizer` core 구현은 바꾸지 않고 sample만 추가해 관찰 경로를 만든 것이다.
