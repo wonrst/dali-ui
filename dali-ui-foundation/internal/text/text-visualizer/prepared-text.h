@@ -34,8 +34,8 @@ namespace Dali::Ui::Internal::TextVisualizer
 /**
  * @brief Prepared text cache for TextVisualizer.
  *
- * This stores stable prepare-stage data up to script/font validation.
- * Actual shaping, glyph metrics and cluster mapping are connected later.
+ * This stores stable prepare-stage data up to shaping and basic glyph mapping.
+ * Actual glyph metrics and layout placement are connected later.
  */
 class PreparedText
 {
@@ -74,6 +74,25 @@ public:
   const Dali::Vector<Text::FontRun>& GetFontRuns() const;
   uint32_t                           GetFontRunCount() const;
 
+  void                                 SetGlyphs(const Dali::Vector<Text::GlyphInfo>& glyphs);
+  const Dali::Vector<Text::GlyphInfo>& GetGlyphs() const;
+  uint32_t                             GetGlyphCount() const;
+
+  void                                      SetGlyphToCharacterMap(const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap);
+  const Dali::Vector<Text::CharacterIndex>& GetGlyphToCharacterMap() const;
+
+  void                              SetCharactersPerGlyph(const Dali::Vector<Text::Length>& charactersPerGlyph);
+  const Dali::Vector<Text::Length>& GetCharactersPerGlyph() const;
+
+  void                                  SetCharacterToGlyphTable(const Dali::Vector<Text::GlyphIndex>& characterToGlyphTable);
+  const Dali::Vector<Text::GlyphIndex>& GetCharacterToGlyphTable() const;
+
+  void                              SetGlyphsPerCharacterTable(const Dali::Vector<Text::Length>& glyphsPerCharacterTable);
+  const Dali::Vector<Text::Length>& GetGlyphsPerCharacterTable() const;
+
+  void                                  SetNewParagraphGlyphs(const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs);
+  const Dali::Vector<Text::GlyphIndex>& GetNewParagraphGlyphs() const;
+
   void SetPrepared(bool prepared);
   bool IsPrepared() const;
 
@@ -81,16 +100,22 @@ public:
   void Clear();
 
 private:
-  Dali::String                      mOriginalText;
-  Dali::String                      mFontFamily;
-  float                             mFontSize;
-  uint32_t                          mClusterCount;
-  Dali::Vector<Text::Character>     mCharacters;
-  Dali::Vector<Text::LineBreakInfo> mLineBreakInfo;
-  Dali::Vector<Text::ParagraphRun>  mParagraphInfo;
-  Dali::Vector<Text::ScriptRun>     mScriptRuns;
-  Dali::Vector<Text::FontRun>       mFontRuns;
-  bool                              mPrepared;
+  Dali::String                       mOriginalText;
+  Dali::String                       mFontFamily;
+  float                              mFontSize;
+  uint32_t                           mClusterCount;
+  Dali::Vector<Text::Character>      mCharacters;
+  Dali::Vector<Text::LineBreakInfo>  mLineBreakInfo;
+  Dali::Vector<Text::ParagraphRun>   mParagraphInfo;
+  Dali::Vector<Text::ScriptRun>      mScriptRuns;
+  Dali::Vector<Text::FontRun>        mFontRuns;
+  Dali::Vector<Text::GlyphInfo>      mGlyphs;
+  Dali::Vector<Text::CharacterIndex> mGlyphToCharacterMap;
+  Dali::Vector<Text::Length>         mCharactersPerGlyph;
+  Dali::Vector<Text::GlyphIndex>     mCharacterToGlyphTable;
+  Dali::Vector<Text::Length>         mGlyphsPerCharacterTable;
+  Dali::Vector<Text::GlyphIndex>     mNewParagraphGlyphs;
+  bool                               mPrepared;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

@@ -31,6 +31,12 @@ PreparedText::PreparedText()
   mParagraphInfo(),
   mScriptRuns(),
   mFontRuns(),
+  mGlyphs(),
+  mGlyphToCharacterMap(),
+  mCharactersPerGlyph(),
+  mCharacterToGlyphTable(),
+  mGlyphsPerCharacterTable(),
+  mNewParagraphGlyphs(),
   mPrepared(false)
 {
 }
@@ -150,6 +156,71 @@ uint32_t PreparedText::GetFontRunCount() const
   return static_cast<uint32_t>(mFontRuns.Count());
 }
 
+void PreparedText::SetGlyphs(const Dali::Vector<Text::GlyphInfo>& glyphs)
+{
+  mGlyphs = glyphs;
+}
+
+const Dali::Vector<Text::GlyphInfo>& PreparedText::GetGlyphs() const
+{
+  return mGlyphs;
+}
+
+uint32_t PreparedText::GetGlyphCount() const
+{
+  return static_cast<uint32_t>(mGlyphs.Count());
+}
+
+void PreparedText::SetGlyphToCharacterMap(const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap)
+{
+  mGlyphToCharacterMap = glyphToCharacterMap;
+}
+
+const Dali::Vector<Text::CharacterIndex>& PreparedText::GetGlyphToCharacterMap() const
+{
+  return mGlyphToCharacterMap;
+}
+
+void PreparedText::SetCharactersPerGlyph(const Dali::Vector<Text::Length>& charactersPerGlyph)
+{
+  mCharactersPerGlyph = charactersPerGlyph;
+}
+
+const Dali::Vector<Text::Length>& PreparedText::GetCharactersPerGlyph() const
+{
+  return mCharactersPerGlyph;
+}
+
+void PreparedText::SetCharacterToGlyphTable(const Dali::Vector<Text::GlyphIndex>& characterToGlyphTable)
+{
+  mCharacterToGlyphTable = characterToGlyphTable;
+}
+
+const Dali::Vector<Text::GlyphIndex>& PreparedText::GetCharacterToGlyphTable() const
+{
+  return mCharacterToGlyphTable;
+}
+
+void PreparedText::SetGlyphsPerCharacterTable(const Dali::Vector<Text::Length>& glyphsPerCharacterTable)
+{
+  mGlyphsPerCharacterTable = glyphsPerCharacterTable;
+}
+
+const Dali::Vector<Text::Length>& PreparedText::GetGlyphsPerCharacterTable() const
+{
+  return mGlyphsPerCharacterTable;
+}
+
+void PreparedText::SetNewParagraphGlyphs(const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs)
+{
+  mNewParagraphGlyphs = newParagraphGlyphs;
+}
+
+const Dali::Vector<Text::GlyphIndex>& PreparedText::GetNewParagraphGlyphs() const
+{
+  return mNewParagraphGlyphs;
+}
+
 void PreparedText::SetPrepared(bool prepared)
 {
   mPrepared = prepared;
@@ -176,6 +247,12 @@ void PreparedText::Clear()
   mParagraphInfo.Clear();
   mScriptRuns.Clear();
   mFontRuns.Clear();
+  mGlyphs.Clear();
+  mGlyphToCharacterMap.Clear();
+  mCharactersPerGlyph.Clear();
+  mCharacterToGlyphTable.Clear();
+  mGlyphsPerCharacterTable.Clear();
+  mNewParagraphGlyphs.Clear();
   mPrepared = false;
 }
 

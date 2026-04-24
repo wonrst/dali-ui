@@ -41,6 +41,18 @@ Dali::Ui::Internal::TextVisualizer::PreparedText CreatePreparedText(const char* 
   input.fontSize = fontSize;
   return Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
 }
+
+void CheckGlyphMappingConsistency(const Dali::Ui::Internal::TextVisualizer::PreparedText& preparedText)
+{
+  const uint32_t glyphCount     = preparedText.GetGlyphCount();
+  const uint32_t characterCount = preparedText.GetCharacterCount();
+
+  DALI_TEST_EQUALS(preparedText.GetGlyphs().Count(), glyphCount, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetGlyphToCharacterMap().Count(), glyphCount, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetCharactersPerGlyph().Count(), glyphCount, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetCharacterToGlyphTable().Count(), characterCount, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetGlyphsPerCharacterTable().Count(), characterCount, TEST_LOCATION);
+}
 } // namespace
 
 void utc_dali_text_visualizer_startup(void)
@@ -364,6 +376,8 @@ int UtcDaliTextVisualizerPreparedEmptyTextP(void)
   DALI_TEST_EQUALS(preparedText.GetClusterCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetScriptRunCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetFontRunCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetGlyphCount(), 0u, TEST_LOCATION);
+  CheckGlyphMappingConsistency(preparedText);
 
   Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, exclusionRegions, layoutResult);
   DALI_TEST_CHECK(layoutResult.Empty());
@@ -466,6 +480,79 @@ int UtcDaliTextVisualizerPreparedMixedScriptDataP(void)
   DALI_TEST_CHECK(preparedText.IsPrepared());
   DALI_TEST_CHECK(preparedText.GetScriptRunCount() > 0u);
   DALI_TEST_EQUALS(preparedText.GetScriptRuns().Count(), preparedText.GetScriptRunCount(), TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedAsciiShapedGlyphDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "abc";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(preparedText.GetGlyphCount() > 0u);
+  CheckGlyphMappingConsistency(preparedText);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedKoreanShapedGlyphDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "가나다";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetCharacterCount(), 3u, TEST_LOCATION);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmojiShapedGlyphDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedMixedShapedGlyphDataP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "A가😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+  }
 
   END_TEST;
 }

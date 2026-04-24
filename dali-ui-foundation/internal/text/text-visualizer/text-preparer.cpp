@@ -20,7 +20,9 @@
 #include <dali-ui-foundation/internal/text/logical-model-impl.h>
 #include <dali-ui-foundation/internal/text/multi-language-support.h>
 #include <dali-ui-foundation/internal/text/segmentation.h>
+#include <dali-ui-foundation/internal/text/shaper.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
+#include <dali-ui-foundation/internal/text/visual-model-impl.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
@@ -51,12 +53,18 @@ Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClien
 
 PreparedText TextPreparer::Prepare(const Input& input)
 {
-  PreparedText                      preparedText;
-  Dali::Vector<Text::Character>     characters;
-  Dali::Vector<Text::LineBreakInfo> lineBreakInfo;
-  Dali::Vector<Text::ParagraphRun>  paragraphInfo;
-  Dali::Vector<Text::ScriptRun>     scriptRuns;
-  Dali::Vector<Text::FontRun>       fontRuns;
+  PreparedText                       preparedText;
+  Dali::Vector<Text::Character>      characters;
+  Dali::Vector<Text::LineBreakInfo>  lineBreakInfo;
+  Dali::Vector<Text::ParagraphRun>   paragraphInfo;
+  Dali::Vector<Text::ScriptRun>      scriptRuns;
+  Dali::Vector<Text::FontRun>        fontRuns;
+  Dali::Vector<Text::GlyphInfo>      glyphs;
+  Dali::Vector<Text::CharacterIndex> glyphToCharacterMap;
+  Dali::Vector<Text::Length>         charactersPerGlyph;
+  Dali::Vector<Text::GlyphIndex>     characterToGlyphTable;
+  Dali::Vector<Text::Length>         glyphsPerCharacterTable;
+  Dali::Vector<Text::GlyphIndex>     newParagraphGlyphs;
 
   preparedText.SetOriginalText(input.text);
   preparedText.SetFontFamily(input.fontFamily);
@@ -92,6 +100,23 @@ PreparedText TextPreparer::Prepare(const Input& input)
     multilanguageSupport.ValidateFonts(fontClient, characters, scriptRuns, fontDescriptionRuns,
                                        defaultFontDescription, defaultPointSize, FONT_SIZE_SCALE, 0u,
                                        convertedCharacterCount, fontRuns, nullptr);
+
+    if(!scriptRuns.Empty() && !fontRuns.Empty())
+    {
+      TextAbstraction::Shaping shaping = TextAbstraction::Shaping::Get();
+      Text::ShapeText(shaping, fontClient, characters, lineBreakInfo, scriptRuns, fontRuns, 0u, 0u,
+                      convertedCharacterCount, glyphs, glyphToCharacterMap, charactersPerGlyph, newParagraphGlyphs);
+
+      Text::VisualModelPtr visualModel = Text::VisualModel::New();
+      visualModel->mGlyphs             = glyphs;
+      visualModel->mGlyphsToCharacters = glyphToCharacterMap;
+      visualModel->mCharactersPerGlyph = charactersPerGlyph;
+      visualModel->CreateGlyphsPerCharacterTable(0u, 0u, convertedCharacterCount);
+      visualModel->CreateCharacterToGlyphTable(0u, 0u, convertedCharacterCount);
+
+      glyphsPerCharacterTable = visualModel->mGlyphsPerCharacter;
+      characterToGlyphTable   = visualModel->mCharactersToGlyph;
+    }
   }
 
   preparedText.SetCharacters(characters);
@@ -99,6 +124,12 @@ PreparedText TextPreparer::Prepare(const Input& input)
   preparedText.SetParagraphInfo(paragraphInfo);
   preparedText.SetScriptRuns(scriptRuns);
   preparedText.SetFontRuns(fontRuns);
+  preparedText.SetGlyphs(glyphs);
+  preparedText.SetGlyphToCharacterMap(glyphToCharacterMap);
+  preparedText.SetCharactersPerGlyph(charactersPerGlyph);
+  preparedText.SetCharacterToGlyphTable(characterToGlyphTable);
+  preparedText.SetGlyphsPerCharacterTable(glyphsPerCharacterTable);
+  preparedText.SetNewParagraphGlyphs(newParagraphGlyphs);
   preparedText.SetClusterCount(preparedText.GetCharacterCount());
   preparedText.SetPrepared(true);
 
