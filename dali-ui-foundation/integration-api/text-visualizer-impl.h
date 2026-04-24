@@ -18,6 +18,7 @@
  */
 
 // EXTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view-impl.h>
@@ -165,14 +166,15 @@ private:
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
 
 private:
-  Dali::String              mText;
-  Dali::String              mFontFamily;
-  float                     mFontSize;
-  UiColor                   mTextColor;
-  Dali::Vector<Rect<float>> mExclusionRegions;
-  bool                      mPrepareDirty;
-  bool                      mLayoutDirty;
-  bool                      mRenderDirty;
+  Dali::String                           mText;
+  Dali::String                           mFontFamily;
+  float                                  mFontSize;
+  UiColor                                mTextColor;
+  Dali::Vector<Rect<float>>              mExclusionRegions;
+  Internal::TextVisualizer::PreparedText mPreparedText;
+  bool                                   mPrepareDirty;
+  bool                                   mLayoutDirty;
+  bool                                   mRenderDirty;
 };
 
 } // namespace Integration

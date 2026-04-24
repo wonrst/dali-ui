@@ -260,3 +260,52 @@ int UtcDaliTextVisualizerExclusionRegionsWithoutPrepareP(void)
 
   END_TEST;
 }
+
+int UtcDaliTextVisualizerPrepareEmptyTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("");
+  textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPrepareSimpleAsciiTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("Simple ASCII text");
+  textVisualizer.Prepare();
+  textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPrepareKoreanTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("한글 테스트 문장");
+  textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPrepareEmojiTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("Emoji 😀👨‍👩‍👧‍👦");
+  textVisualizer.Prepare();
+
+  END_TEST;
+}

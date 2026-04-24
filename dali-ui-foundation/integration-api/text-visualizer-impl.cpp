@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-property-handler.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
 namespace Dali
 {
@@ -65,6 +66,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mFontSize(0.0f),
   mTextColor(Color::BLACK),
   mExclusionRegions(),
+  mPreparedText(),
   mPrepareDirty(true),
   mLayoutDirty(true),
   mRenderDirty(true)
@@ -81,6 +83,7 @@ void TextVisualizerImpl::SetText(const Dali::String& text)
   {
     mText = text;
     MarkPrepareDirty();
+    RelayoutRequest();
   }
 }
 
@@ -95,6 +98,7 @@ void TextVisualizerImpl::SetFontFamily(const Dali::String& fontFamily)
   {
     mFontFamily = fontFamily;
     MarkPrepareDirty();
+    RelayoutRequest();
   }
 }
 
@@ -109,6 +113,7 @@ void TextVisualizerImpl::SetFontSize(float fontSize)
   {
     mFontSize = fontSize;
     MarkPrepareDirty();
+    RelayoutRequest();
   }
 }
 
@@ -123,6 +128,7 @@ void TextVisualizerImpl::SetTextColor(const UiColor& color)
   {
     mTextColor = color;
     MarkRenderDirty();
+    RelayoutRequest();
   }
 }
 
@@ -133,6 +139,12 @@ UiColor TextVisualizerImpl::GetTextColor()
 
 void TextVisualizerImpl::Prepare()
 {
+  Internal::TextVisualizer::TextPreparer::Input input;
+  input.text       = mText;
+  input.fontFamily = mFontFamily;
+  input.fontSize   = mFontSize;
+
+  mPreparedText = Internal::TextVisualizer::TextPreparer::Prepare(input);
   ClearPrepareDirty();
   MarkLayoutDirty();
   MarkRenderDirty();
@@ -145,6 +157,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
     mExclusionRegions = regions;
     MarkLayoutDirty();
     MarkRenderDirty();
+    RelayoutRequest();
   }
 }
 
@@ -160,6 +173,7 @@ void TextVisualizerImpl::ClearExclusionRegions()
     mExclusionRegions.Clear();
     MarkLayoutDirty();
     MarkRenderDirty();
+    RelayoutRequest();
   }
 }
 
@@ -170,11 +184,19 @@ void TextVisualizerImpl::OnInitialize()
 
 void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
 {
+  if(mPrepareDirty)
+  {
+    Prepare();
+  }
   ViewImpl::OnRelayout(size, container);
 }
 
 MeasuredSize TextVisualizerImpl::OnMeasure(float widthConstraint, float heightConstraint)
 {
+  if(mPrepareDirty)
+  {
+    Prepare();
+  }
   return ViewImpl::OnMeasure(widthConstraint, heightConstraint);
 }
 
@@ -221,6 +243,7 @@ Dali::Property::Value TextVisualizerImpl::GetProperty(BaseObject* object, Dali::
 
 void TextVisualizerImpl::MarkPrepareDirty()
 {
+  mPreparedText.Clear();
   mPrepareDirty = true;
   mLayoutDirty  = true;
   mRenderDirty  = true;
