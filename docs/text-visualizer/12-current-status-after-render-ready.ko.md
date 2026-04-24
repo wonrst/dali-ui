@@ -453,6 +453,147 @@ flowchart TD
   - output actor child mesh가 실제로 생성되는지
   - sample에서 fallback `Label`은 보이는데 `TextVisualizer`만 안 보이는지
 
+## 추가 확인: stencil requirement verification
+
+이번 단계에서는 “`TextVisualizer`에 stencil이 없어서 glyph가 안 보인다”는 가정을 기존 구현 기준으로 다시 검증했다.
+
+핵심 결론부터 적으면 다음과 같다.
+
+- 결론: **B. stencil은 현재 코드 근거만으로 필수라고 볼 수 없고, 더 가능성이 큰 문제는 output child mesh 생성 또는 `ViewInterface`/`Render()` 입력 mismatch 쪽이다.**
+
+근거는 아래와 같다.
+
+### 1. `CommonTextUtils::RenderText()`는 stencil 없는 direct attach 경로를 실제로 가진다
+
+`CommonTextUtils::RenderText()`를 보면 `stencil` actor를 인자로 받지만, `stencil == nullptr`인 경우에도 별도 direct attach 경로가 존재한다.
+
+- `stencil`이 있으면:
+  - `self = stencil`
+  - `renderableActor`를 stencil 아래에 붙인다.
+- `stencil`이 없으면:
+  - `self = textActor`
+  - `IntegrationView::AddActorChild(Ui::View::DownCast(self), child)`로 text control에 직접 붙인다.
+
+즉 기존 공용 text rendering helper 자체는 “stencil이 없으면 glyph visibility가 불가능하다”는 전제를 갖고 있지 않다.
+
+아래는 현재 코드 의미를 정리한 표다.
+
+| 조건 | parent actor | renderable actor attach 위치 | stencil 사용 여부 | 실제 glyph visibility 전제 |
+|---|---|---|---|---|
+| `stencil != nullptr` | stencil actor | stencil actor 아래 | 사용 | clipping/scroll/decorator 합성이 필요한 경우 |
+| `stencil == nullptr` | text control actor | text control 아래 direct attach | 미사용 | direct renderable actor path가 유효하다는 전제 |
+
+### 2. `AtlasRenderer` 자체는 stencil을 전혀 알지 못한다
+
+`Text::AtlasRenderer::Render()`와 `AddGlyphs()`를 보면 stencil/clipping/render task를 직접 다루지 않는다.
+
+- `Render()`는:
+  - `view.GetNumberOfGlyphs()`
+  - `view.GetGlyphs()`
+  - `view.GetTextColor()` 등에서 데이터만 읽는다.
+  - 이후 `AddGlyphs()`로 mesh를 만들고 output actor를 반환한다.
+- `CreateActors()` / `CreateMeshActor()`는:
+  - container actor `mActor`
+  - child mesh actor들
+  - geometry / renderer / shader / texture
+  만 생성한다.
+- stencil actor, clipping actor, render task 생성 코드는 없다.
+
+즉 `AtlasRenderer`는 “어떤 parent 아래에 attach될지”는 외부가 결정하지만, 자체적으로 stencil을 요구하는 구조는 아니다.
+
+### 3. `InputField`의 stencil 사용은 glyph visibility 자체보다 clipping/composition 요구와 더 강하게 연결돼 있다
+
+`InputFieldImpl`은 `EnableClipping()`에서 stencil actor를 만들고:
+
+- `CLIP_TO_BOUNDING_BOX`
+- `FILL_TO_PARENT`
+- cursor layer / decoration / selection / scroll offset
+
+과 함께 사용한다.
+
+`OnRelayout()`에서도 stencil과 cursor layer size/position을 별도로 맞춘다.
+
+즉 `InputField`의 stencil 사용 이유는:
+
+- scrolling text
+- cursor clipping
+- selection / highlight / decoration composition
+
+같은 input-specific 요구가 강하다. 이것만으로 “glyph text 자체가 stencil 없이는 절대 보이지 않는다”고 결론내리기는 어렵다.
+
+### 4. `Label`은 현재 direct `AtlasRenderer` + stencil 경로의 기준 사례가 아니다
+
+현재 `LabelImpl`은 `TextVisual` 기반 path를 사용한다.
+
+- visual 생성 / 등록
+- async renderer update
+- cutout / mask effect
+
+등이 얽혀 있고, `InputField`처럼 `CommonTextUtils::RenderText()` + direct `Text::Renderer` 경로를 기준 사례로 삼기 어렵다.
+
+즉 `Label`은 “stencil이 있어야 atlas glyph가 보인다”는 주장을 뒷받침하는 직접 비교군이 아니다.
+
+### 5. 현재 `TextVisualizer`와 기존 path 비교
+
+| 항목 | 기존 Label/InputField/TextView | TextVisualizer 현재 | 차이 | 위험도 |
+|---|---|---|---|---|
+| `textControl` actor | 기존 text control self를 주는 경향이 강함 (`InputField`, `CommonTextUtils`) | `RenderHost Actor`를 `Render()`에 전달 | control self가 아님 | 높음 |
+| stencil actor | `InputField`는 사용, `CommonTextUtils`는 optional | 없음 | stencil direct path 사용 중 | 중간 |
+| renderable actor parent | stencil 또는 text control | `RenderHost Actor` | parent가 별도 host | 중간 |
+| clipping mode | `InputField`는 stencil clipping | host 자체는 별도 stencil 없음 | clipping setup 단순 | 낮음~중간 |
+| render task | 명시적 text-only render task는 현재 조사 범위에서 없음 | 없음 | 큰 차이 미확정 | 낮음 |
+| output actor size | renderer/container actor가 `view.GetLayoutSize()` 기반 size를 가짐 | host size sync는 있음, output size는 renderer 내부 | 직접 mismatch 여부 미확정 | 중간 |
+| child mesh actor 생성 | `AtlasRenderer` 내부 child mesh actor 생성 | 동일 renderer 사용 | child mesh 생성 여부 runtime 확인 필요 | 높음 |
+| parent origin/pivot | `TOP_LEFT` 정렬 | host/output 모두 `TOP_LEFT` 지향 | 큰 차이 없음 | 낮음 |
+| depth/z-order | renderer depth index 사용 | 동일 renderer 사용 | 값 자체는 후속 검토 필요 | 낮음~중간 |
+| actor color/opacity | renderer child actor가 `USE_OWN_MULTIPLY_PARENT_COLOR` | 동일 | 큰 차이 없음 | 낮음 |
+| renderer count | output actor는 0일 수 있고 child mesh actor가 renderer를 가질 수 있음 | 동일 | output actor만 보고 판단하면 오진 가능 | 높음 |
+
+### 6. direct attach path의 실제 의미
+
+이번 조사 기준으로 direct attach path는 “legacy/no-op fallback”이 아니라, 현재 공용 text helper 안에 실제로 남아 있는 정상 경로다.
+
+다만 이것이 자동으로 현재 `TextVisualizer`에서도 잘 보인다는 뜻은 아니다.
+
+현재 더 유력한 문제 후보는 다음이다.
+
+1. `Render()`에 넘기는 `textControl` actor가 `RenderHost`인 점
+2. `ViewInterface`가 제공하는 glyph/layout/control data가 기존 path 기대와 미세하게 어긋나는 점
+3. output actor는 붙었지만 child mesh actor가 실제로 생성되지 않거나 renderer count가 0인 점
+4. glyph atlas upload / mesh generation 조건이 runtime에서 충족되지 않는 점
+
+### 7. 최종 결론
+
+결론은 다음과 같다.
+
+- **B. stencil은 필요 없고, 문제는 output child mesh 생성 또는 `ViewInterface` data mismatch다.**
+
+이 결론을 택한 이유:
+
+- `CommonTextUtils`에 stencil 없는 direct attach path가 실제로 존재한다.
+- `AtlasRenderer` 자체는 stencil을 모른다.
+- `InputField`의 stencil은 input/decorator/clipping 요구와 강하게 결합돼 있다.
+- 따라서 현재 `TextVisualizer` 미표시 문제를 stencil 부재 하나로 단정하는 것은 코드 근거상 과도하다.
+
+### 8. 다음 커밋 계획
+
+다음 권장 커밋:
+
+- `Commit 26: Trace TextVisualizer AtlasRenderer glyph mesh generation`
+
+포함할 내용:
+
+- `Render()` 직후 output actor child count / child renderer count를 더 강하게 확인
+- `ViewInterface::GetGlyphs()` return count와 `Render()` 입력 glyph count 비교
+- `Render()`에 넘기는 actor를 `RenderHost` 대신 `Self()`로 바꿔 보는 제한적 실험 여부 검토
+- output child mesh actor의 renderer/size/visibility/runtime parent 상태 확인
+- atlas glyph upload가 실제로 일어나는지 간접 확인
+
+주의:
+
+- 다음 커밋에서도 `render dirty`는 clear하지 않는다.
+- `text-atlas-renderer.*`, `TextController`, `TextView` 수정은 계속 금지다.
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지
