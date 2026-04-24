@@ -40,6 +40,7 @@ namespace Integration
 
 namespace
 {
+constexpr bool ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS = false;
 
 BaseHandle Create()
 {
@@ -418,7 +419,7 @@ void TextVisualizerImpl::ClearRenderHost()
 
 void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const
 {
-  if(mRenderDiagnosticsLogged)
+  if(!ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS || mRenderDiagnosticsLogged)
   {
     return;
   }
@@ -428,7 +429,7 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
   const Vector3  firstChildSize      = mAtlasRendererBridge.GetFirstRendererOutputChildSize();
   const uint32_t glyphPlacementCount = mLayoutResult.glyphPlacements.Count();
 
-  DALI_LOG_ERROR(
+  DALI_LOG_RELEASE_INFO(
     "[TextVisualizer][%p] size=(%.2f,%.2f) glyphPlacements=%u hasRenderable=%d updateRenderData=%d attach=%d "
     "renderReady=%d renderCalls=%u attachCalls=%u getGlyphsCalls=%u lastRequested=%u lastReturned=%u lastStart=%u "
     "outputChildren=%u outputDescendants=%u outputRenderers=%u outputTotalRenderers=%u hasRenderableDescendant=%d "

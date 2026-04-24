@@ -398,3 +398,22 @@ flowchart LR
   - font size, line metrics, baseline, line break 품질을 기존 text system 기대치에 가깝게 끌어올리는 것
 
 즉 다음 단계는 “동작 여부 확인”이 아니라 “비용과 품질을 다듬는 단계”다.
+
+## 진행: temporary diagnostics cleanup
+
+진행 내용:
+
+- `OnMeasure()`에 남아 있던 임시 `DALI_LOG_ERROR`를 제거했다.
+- `LogRenderDiagnostics()`는 기본적으로 꺼진 compile-time 상수 guard 뒤로 이동했다.
+- diagnostics getter / counter 자체는 유지한다.
+
+현재 정책:
+
+- 기본 빌드에서는 render diagnostics log가 출력되지 않는다.
+- 필요 시 guard만 켜서 기존 bridge / view interface diagnostics를 다시 활용할 수 있다.
+- 즉, future debugging용 관찰 지점은 유지하되 일반 실행 path의 log overhead는 줄인 상태다.
+
+의미:
+
+- performance sample 측정 전에 logging overhead를 먼저 낮췄다.
+- 다음 단계의 성능 측정은 이 상태를 baseline으로 삼는 것이 적절하다.
