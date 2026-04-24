@@ -40,6 +40,15 @@ namespace Dali::Ui::Internal::TextVisualizer
 class PreparedText
 {
 public:
+  struct LineMetrics
+  {
+    float ascender{0.0f};
+    float descender{0.0f};
+    float lineGap{0.0f};
+    float naturalLineHeight{0.0f};
+    float baselineOffset{0.0f};
+  };
+
   PreparedText();
 
   void                SetOriginalText(const Dali::String& text);
@@ -97,6 +106,10 @@ public:
   bool  HasGlyphMetrics() const;
   float GetTotalGlyphAdvance() const;
 
+  void               SetLineMetrics(const LineMetrics& metrics);
+  const LineMetrics& GetLineMetrics() const;
+  bool               HasLineMetrics() const;
+
   void SetPrepared(bool prepared);
   bool IsPrepared() const;
 
@@ -119,6 +132,8 @@ private:
   Dali::Vector<Text::GlyphIndex>     mCharacterToGlyphTable;
   Dali::Vector<Text::Length>         mGlyphsPerCharacterTable;
   Dali::Vector<Text::GlyphIndex>     mNewParagraphGlyphs;
+  LineMetrics                        mLineMetrics;
+  bool                               mHasLineMetrics;
   bool                               mPrepared;
 };
 

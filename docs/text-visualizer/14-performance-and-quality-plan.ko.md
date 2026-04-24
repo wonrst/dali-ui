@@ -417,3 +417,36 @@ flowchart LR
 
 - performance sample 측정 전에 logging overhead를 먼저 낮췄다.
 - 다음 단계의 성능 측정은 이 상태를 baseline으로 삼는 것이 적절하다.
+
+## 진행: line metrics cache
+
+추가 내용:
+
+- `PreparedText`에 `LineMetrics` cache를 저장할 수 있도록 구조를 추가했다.
+- 현재 cache 항목:
+  - `ascender`
+  - `descender`
+  - `lineGap`
+  - `naturalLineHeight`
+  - `baselineOffset`
+
+현재 계산 정책:
+
+- `TextPreparer`가 glyph metrics를 얻은 뒤 fallback line metrics를 계산한다.
+- 1차 계산은 glyph metrics 기반이다.
+  - `ascender = max(yBearing)`
+  - `descender = max(height - yBearing)`
+  - `lineGap = fontSize * 0.2f` fallback
+  - `naturalLineHeight = ascender + descender + lineGap`
+  - `baselineOffset = ascender`
+- glyph가 없으면 line metrics cache는 비어 있는 상태로 둔다.
+
+중요:
+
+- 이번 단계에서는 line metrics를 저장만 하고, 아직 layout line height나 renderer baseline 계산에는 사용하지 않는다.
+- 즉 기존 `LayoutEngine::GetPlaceholderLineHeight()`와 `GetLineBaselineOffset()` 동작은 그대로 유지한다.
+
+다음 계획:
+
+- 다음 커밋에서 이 cache를 line height / baseline 계산에 실제로 연결한다.
+- 현재 계산은 glyph metrics 기반 fallback이며, 향후에는 `FontClient`의 ascender / descender / line gap API를 조사해 더 정확한 font metrics 기반으로 개선해야 한다.

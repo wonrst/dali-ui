@@ -37,6 +37,8 @@ PreparedText::PreparedText()
   mCharacterToGlyphTable(),
   mGlyphsPerCharacterTable(),
   mNewParagraphGlyphs(),
+  mLineMetrics(),
+  mHasLineMetrics(false),
   mPrepared(false)
 {
 }
@@ -252,6 +254,26 @@ float PreparedText::GetTotalGlyphAdvance() const
   return totalGlyphAdvance;
 }
 
+void PreparedText::SetLineMetrics(const LineMetrics& metrics)
+{
+  mLineMetrics    = metrics;
+  mHasLineMetrics = (metrics.ascender > 0.0f) ||
+                    (metrics.descender > 0.0f) ||
+                    (metrics.lineGap > 0.0f) ||
+                    (metrics.naturalLineHeight > 0.0f) ||
+                    (metrics.baselineOffset > 0.0f);
+}
+
+const PreparedText::LineMetrics& PreparedText::GetLineMetrics() const
+{
+  return mLineMetrics;
+}
+
+bool PreparedText::HasLineMetrics() const
+{
+  return mHasLineMetrics;
+}
+
 void PreparedText::SetPrepared(bool prepared)
 {
   mPrepared = prepared;
@@ -284,7 +306,9 @@ void PreparedText::Clear()
   mCharacterToGlyphTable.Clear();
   mGlyphsPerCharacterTable.Clear();
   mNewParagraphGlyphs.Clear();
-  mPrepared = false;
+  mLineMetrics    = LineMetrics{};
+  mHasLineMetrics = false;
+  mPrepared       = false;
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

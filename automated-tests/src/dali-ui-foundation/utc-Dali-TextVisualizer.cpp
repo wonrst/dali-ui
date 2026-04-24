@@ -450,6 +450,74 @@ int UtcDaliTextVisualizerPreparedEmptyTextP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerPreparedAsciiLineMetricsP(void)
+{
+  UiTestApplication application;
+  const auto        preparedText = CreatePreparedText("abc", 20.0f);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.HasLineMetrics());
+    DALI_TEST_CHECK(preparedText.GetLineMetrics().naturalLineHeight > 0.0f);
+    DALI_TEST_CHECK(preparedText.GetLineMetrics().baselineOffset >= 0.0f);
+  }
+  else
+  {
+    DALI_TEST_CHECK(!preparedText.HasLineMetrics());
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedKoreanLineMetricsP(void)
+{
+  UiTestApplication application;
+  const auto        preparedText = CreatePreparedText("가나다", 20.0f);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.HasLineMetrics());
+    DALI_TEST_CHECK(preparedText.GetLineMetrics().naturalLineHeight > 0.0f);
+    DALI_TEST_CHECK(preparedText.GetLineMetrics().baselineOffset >= 0.0f);
+  }
+  else
+  {
+    DALI_TEST_CHECK(!preparedText.HasLineMetrics());
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmptyLineMetricsP(void)
+{
+  UiTestApplication application;
+  const auto        preparedText = CreatePreparedText("", 20.0f);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(!preparedText.HasLineMetrics());
+  DALI_TEST_EQUALS(preparedText.GetLineMetrics().naturalLineHeight, 0.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedLineMetricsClearP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+
+  preparedText.Clear();
+
+  DALI_TEST_CHECK(!preparedText.HasLineMetrics());
+  DALI_TEST_EQUALS(preparedText.GetLineMetrics().naturalLineHeight, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(preparedText.GetLineMetrics().baselineOffset, 0.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPreparedLineBreakInfoSmokeP(void)
 {
   UiTestApplication application;

@@ -15,6 +15,9 @@
  *
  */
 
+// EXTERNAL INCLUDES
+#include <algorithm>
+
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/character-set-conversion.h>
 #include <dali-ui-foundation/internal/text/logical-model-impl.h>
@@ -49,6 +52,75 @@ Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClien
 
   return static_cast<Text::PointSize26Dot6>(effectivePointSize * FONT_SIZE_SCALE *
                                             fontClient.GetNumberOfPointsPerOneUnitOfPointSize());
+}
+
+bool IsNewParagraphGlyph(Text::GlyphIndex glyphIndex, const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs)
+{
+  for(Vector<Text::GlyphIndex>::ConstIterator it = newParagraphGlyphs.Begin(), endIt = newParagraphGlyphs.End(); it != endIt; ++it)
+  {
+    if(*it == glyphIndex)
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+PreparedText::LineMetrics CalculateLineMetrics(const Dali::Vector<Text::GlyphInfo>&  glyphs,
+                                               const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs,
+                                               float                                 fontSize)
+{
+  PreparedText::LineMetrics lineMetrics;
+
+  bool hasMeasuredGlyph = false;
+  for(uint32_t glyphIndex = 0u; glyphIndex < glyphs.Count(); ++glyphIndex)
+  {
+    if(IsNewParagraphGlyph(glyphIndex, newParagraphGlyphs))
+    {
+      continue;
+    }
+
+    const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+    if((glyph.advance <= 0.0f) && (glyph.width <= 0.0f) && (glyph.height <= 0.0f))
+    {
+      continue;
+    }
+
+    lineMetrics.ascender  = std::max(lineMetrics.ascender, glyph.yBearing);
+    lineMetrics.descender = std::max(lineMetrics.descender, std::max(0.0f, glyph.height - glyph.yBearing));
+    hasMeasuredGlyph      = true;
+  }
+
+  const float fallbackLineGap    = std::max(fontSize * 0.2f, 0.0f);
+  const float fallbackLineHeight = (fontSize > 0.0f) ? (fontSize * 1.2f) : 0.0f;
+
+  lineMetrics.lineGap = fallbackLineGap;
+
+  if(hasMeasuredGlyph)
+  {
+    lineMetrics.naturalLineHeight = lineMetrics.ascender + lineMetrics.descender + lineMetrics.lineGap;
+  }
+  else if(fontSize > 0.0f)
+  {
+    lineMetrics.ascender          = fontSize;
+    lineMetrics.descender         = 0.0f;
+    lineMetrics.naturalLineHeight = fallbackLineHeight;
+  }
+
+  if((lineMetrics.naturalLineHeight <= 0.0f) && (fallbackLineHeight > 0.0f))
+  {
+    lineMetrics.naturalLineHeight = fallbackLineHeight;
+  }
+
+  lineMetrics.baselineOffset = std::max(lineMetrics.ascender, 0.0f);
+
+  if(lineMetrics.naturalLineHeight < (lineMetrics.baselineOffset + lineMetrics.descender))
+  {
+    lineMetrics.naturalLineHeight = lineMetrics.baselineOffset + lineMetrics.descender + lineMetrics.lineGap;
+  }
+
+  return lineMetrics;
 }
 } // unnamed namespace
 
@@ -152,6 +224,12 @@ PreparedText TextPreparer::Prepare(const Input& input)
   preparedText.SetCharacterToGlyphTable(characterToGlyphTable);
   preparedText.SetGlyphsPerCharacterTable(glyphsPerCharacterTable);
   preparedText.SetNewParagraphGlyphs(newParagraphGlyphs);
+
+  if(!glyphs.Empty())
+  {
+    preparedText.SetLineMetrics(CalculateLineMetrics(glyphs, newParagraphGlyphs, input.fontSize));
+  }
+
   preparedText.SetClusterCount(preparedText.GetCharacterCount());
   preparedText.SetPrepared(true);
 
