@@ -48,6 +48,10 @@ TextAbstraction::FontDescription CreateDefaultFontDescription(const Dali::String
 
 Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClient, float fontSize)
 {
+  // TextVisualizer public FontSize is defined as a pixel size.
+  // The shaping/font client path still expects the internal point-size representation,
+  // so the public pixel size is converted here using the same font-client scale helper
+  // that the existing text stack relies on.
   const float effectivePointSize = (fontSize > 0.0f) ? fontSize : TextAbstraction::FontClient::DEFAULT_POINT_SIZE;
 
   return static_cast<Text::PointSize26Dot6>(effectivePointSize * FONT_SIZE_SCALE *

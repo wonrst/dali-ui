@@ -47,6 +47,11 @@ void TextVisualizerImpl::PropertyHandler::SetProperty(Ui::View view, Property::I
       impl.SetTextColor(UiColor(value.Get<Vector4>()));
       break;
     }
+    case Text::TextVisualizerPropertyIndex::LINE_HEIGHT:
+    {
+      impl.SetLineHeight(value.Get<float>());
+      break;
+    }
   }
 }
 
@@ -75,6 +80,11 @@ Property::Value TextVisualizerImpl::PropertyHandler::GetProperty(Ui::View view, 
     case Text::TextVisualizerPropertyIndex::TEXT_COLOR:
     {
       value = impl.GetTextColor().Resolve();
+      break;
+    }
+    case Text::TextVisualizerPropertyIndex::LINE_HEIGHT:
+    {
+      value = impl.GetLineHeight();
       break;
     }
   }

@@ -19,6 +19,7 @@
 
 // EXTERNAL INCLUDES
 #include <dali-ui-foundation/public-api/dali-ui-common.h>
+#include <dali-ui-foundation/public-api/text/text-enumerations.h>
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view.h>
@@ -56,7 +57,8 @@ public:
       TEXT        = Text::TextVisualizerPropertyIndex::TEXT,
       FONT_FAMILY = Text::TextVisualizerPropertyIndex::FONT_FAMILY,
       FONT_SIZE   = Text::TextVisualizerPropertyIndex::FONT_SIZE,
-      TEXT_COLOR  = Text::TextVisualizerPropertyIndex::TEXT_COLOR
+      TEXT_COLOR  = Text::TextVisualizerPropertyIndex::TEXT_COLOR,
+      LINE_HEIGHT = Text::TextVisualizerPropertyIndex::LINE_HEIGHT
     };
   };
 
@@ -160,16 +162,43 @@ public: // Setters for chaining
   /**
    * @brief Sets the font size of the text.
    *
-   * @param[in] fontSize The font size in pixels.
+   * @param[in] fontSize The font pixel size.
    */
   TextVisualizer& SetFontSize(float fontSize);
 
   /**
    * @brief Gets the font size of the text.
    *
-   * @return The font size currently set on the text visualizer, in pixels.
+   * @return The font pixel size currently set on the text visualizer.
    */
   float GetFontSize() const;
+
+  /**
+   * @brief Sets the relative line height multiplier.
+   *
+   * If the line height is positive, it is calculated as a multiplier of the font pixel size:
+   *
+   * `CalculatedLineHeight(px) = FontSize(px) * lineHeight`
+   *
+   * If the line height is -1.0f, natural line height is used.
+   *
+   * Only relative line height is supported by TextVisualizer in this revision.
+   *
+   * @param[in] lineHeight The relative line height multiplier, or -1.0f for automatic line height.
+   */
+  TextVisualizer& SetLineHeight(float lineHeight);
+
+  /**
+   * @brief Gets the current line height multiplier.
+   *
+   * @return The relative line height multiplier, or -1.0f when natural line height is used.
+   */
+  float GetLineHeight() const;
+
+  /**
+   * @brief Clears the line height override and restores natural line height.
+   */
+  void ClearLineHeight();
 
   /**
    * @brief Sets the color of the text.

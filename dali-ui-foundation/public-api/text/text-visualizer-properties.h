@@ -71,7 +71,16 @@ struct TextVisualizerPropertyIndex
      * @details Name "textColor", type Property::VECTOR4.
      * @see TextVisualizer::SetTextColor(), TextVisualizer::GetTextColor().
      */
-    TEXT_COLOR
+    TEXT_COLOR,
+
+    /**
+     * @brief The relative line height multiplier.
+     * @details Name "lineHeight", type Property::FLOAT.
+     * A positive value is interpreted as a multiplier of the font pixel size.
+     * A value of -1.0f uses the natural line height.
+     * @see TextVisualizer::SetLineHeight(), TextVisualizer::GetLineHeight(), TextVisualizer::ClearLineHeight().
+     */
+    LINE_HEIGHT
   };
 };
 

@@ -132,6 +132,22 @@ float TextVisualizer::GetFontSize() const
   return GetImpl(*this).GetFontSize();
 }
 
+TextVisualizer& TextVisualizer::SetLineHeight(float lineHeight)
+{
+  GetImpl(*this).SetLineHeight(lineHeight);
+  return *this;
+}
+
+float TextVisualizer::GetLineHeight() const
+{
+  return GetImpl(*this).GetLineHeight();
+}
+
+void TextVisualizer::ClearLineHeight()
+{
+  GetImpl(*this).ClearLineHeight();
+}
+
 TextVisualizer& TextVisualizer::SetTextColor(const UiColor& color)
 {
   GetImpl(*this).SetTextColor(color);

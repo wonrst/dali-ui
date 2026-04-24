@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
+#include <dali-ui-foundation/public-api/text/text-enumerations.h>
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view-impl.h>
@@ -91,6 +92,21 @@ public:
    * @copydoc Dali::Ui::TextVisualizer::GetFontSize
    */
   float GetFontSize() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetLineHeight
+   */
+  void SetLineHeight(float lineHeight);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetLineHeight
+   */
+  float GetLineHeight() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::ClearLineHeight
+   */
+  void ClearLineHeight();
 
   /**
    * @copydoc Dali::Ui::TextVisualizer::SetTextColor
@@ -163,24 +179,26 @@ private:
   struct PropertyHandler;
 
 private:
-  void MarkPrepareDirty();
-  void MarkLayoutDirty();
-  void MarkRenderDirty();
-  void ClearPrepareDirty();
-  void ClearLayoutDirty();
-  void EnsureRenderHost();
-  void SyncRenderHostSize(const Vector2& size);
-  void ClearRenderHost();
-  void LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const;
-  bool HasRenderHost() const;
-  bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
-  void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
-  void SyncRenderStateToAdapter(const Vector2& controlSize);
+  void  MarkPrepareDirty();
+  void  MarkLayoutDirty();
+  void  MarkRenderDirty();
+  void  ClearPrepareDirty();
+  void  ClearLayoutDirty();
+  void  EnsureRenderHost();
+  void  SyncRenderHostSize(const Vector2& size);
+  void  ClearRenderHost();
+  void  LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const;
+  float CalculateEffectiveLineHeight() const;
+  bool  HasRenderHost() const;
+  bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
+  void  UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
+  void  SyncRenderStateToAdapter(const Vector2& controlSize);
 
 private:
   Dali::String                                  mText;
   Dali::String                                  mFontFamily;
   float                                         mFontSize;
+  float                                         mLineHeight;
   UiColor                                       mTextColor;
   Dali::Vector<Rect<float>>                     mExclusionRegions;
   Internal::TextVisualizer::PreparedText        mPreparedText;

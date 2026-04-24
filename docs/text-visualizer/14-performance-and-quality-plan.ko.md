@@ -480,6 +480,44 @@ flowchart LR
 - 현재 `lineGap = fontSize * 0.2f`가 적절한지
 - sample에서 visual line height가 충분한지
 
+## 진행: pixel font size and relative line height
+
+이번 단계에서는 `TextVisualizer`의 `FontSize` 의미와 `LineHeight` 정책을 명시적으로 고정했다.
+
+핵심 정책:
+
+- `TextVisualizer::FontSize`는 pixel size로 정의한다.
+- `LineHeight`는 relative multiplier만 지원한다.
+- absolute line height는 제공하지 않는다.
+- `lineHeight == -1.0f`이면 auto / natural line height를 사용한다.
+- `lineHeight > 0.0f`이면 아래 공식을 사용한다.
+
+```text
+CalculatedLineHeight(px) = FontSize(px) * lineHeight
+```
+
+현재 구현 의미:
+
+- public API에는 `SetLineHeight()`, `GetLineHeight()`, `ClearLineHeight()`가 추가된다.
+- property `"lineHeight"`가 추가되며 초기값은 `-1.0f`다.
+- `TextVisualizerImpl`은 relative line height를 직접 pixel line height로 계산해서 `LayoutEngine`에 넘긴다.
+- `lineHeight == -1.0f`이면 `LayoutEngine`이 기존처럼 `PreparedText::LineMetrics.naturalLineHeight`를 우선 사용한다.
+- `lineHeight` 변경은 prepare dirty가 아니라 layout dirty + render dirty만 발생시킨다.
+
+기존 `Label`과의 관계:
+
+- 개념적으로는 `Label`의 `LineHeightMode::RELATIVE` 공식과 같은 의미를 따른다.
+- 단, `TextVisualizer`는 아직 `LineHeightMode` public API를 제공하지 않는다.
+- absolute mode도 이번 범위에 포함하지 않는다.
+
+확인 필요:
+
+- `FontSize` pixel 정의와 기존 `Label` 단위가 완전히 같은지
+- DPI / font scale / system scale 반영 위치
+- `FontClient` point-size conversion의 정확한 의미
+- `lineHeight <= 0.0f` invalid 값 정책을 계속 auto fallback으로 둘지
+- 이후 absolute line height를 추가할 필요가 있는지
+
 ## 현재 관찰 결과
 
 - line metrics 적용 후 line height가 더 자연스러워졌다.
@@ -541,19 +579,19 @@ flowchart LR
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Clarify FontSize unit and conversion
-
-이유:
-
-- 현재 사용자가 가장 어색하게 느끼는 지점이 실제 pixel size 감각과 `FontSize` 해석이다.
-- line metrics를 더 정교하게 다듬기 전에, 입력 단위부터 명확히 해야 후속 품질 작업의 기준이 선다.
-
-### B. Add line-level metrics if needed
+### A. Add line-level metrics if needed
 
 이유:
 
 - 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
-- 단, `FontSize` 단위 정리를 먼저 한 뒤에 보는 편이 안전하다.
+- `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
+
+### B. Clarify FontSize unit and conversion
+
+이유:
+
+- public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
+- line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
 
 ### C. Improve word/cluster line break
 
@@ -582,8 +620,8 @@ flowchart LR
 현재 우선순위 재정렬의 핵심은 다음과 같다.
 
 - line height 품질은 이제 한 단계 올라왔다.
-- 다음 핵심은 `FontSize` 단위 정리다.
-- line-level metrics는 그 다음 단계에서 보는 것이 맞다.
+- `FontSize` pixel size와 relative line height 정책은 고정됐다.
+- 다음 핵심은 line-level metrics 필요성 확인과 conversion 의미 보강이다.
 
 ## 금지 사항
 

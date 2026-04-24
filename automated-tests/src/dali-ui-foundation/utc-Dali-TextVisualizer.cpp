@@ -38,6 +38,7 @@ const char* const PROPERTY_NAME_TEXT        = "text";
 const char* const PROPERTY_NAME_FONT_FAMILY = "fontFamily";
 const char* const PROPERTY_NAME_FONT_SIZE   = "fontSize";
 const char* const PROPERTY_NAME_TEXT_COLOR  = "textColor";
+const char* const PROPERTY_NAME_LINE_HEIGHT = "lineHeight";
 
 Dali::Ui::Internal::TextVisualizer::PreparedText CreatePreparedText(const char* text, float fontSize)
 {
@@ -220,6 +221,26 @@ int UtcDaliTextVisualizerTextColor(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerLineHeight(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), Text::LINE_HEIGHT_AUTO, TEST_LOCATION);
+
+  textVisualizer.SetLineHeight(1.5f);
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), 1.5f, TEST_LOCATION);
+
+  textVisualizer.SetLineHeight(0.0f);
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), Text::LINE_HEIGHT_AUTO, TEST_LOCATION);
+
+  textVisualizer.ClearLineHeight();
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), Text::LINE_HEIGHT_AUTO, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerSetProperty(void)
 {
   UiTestApplication application;
@@ -238,6 +259,9 @@ int UtcDaliTextVisualizerSetProperty(void)
   textVisualizer.SetProperty(TextVisualizer::Property::TEXT_COLOR, Color::GREEN);
   DALI_TEST_EQUALS(textVisualizer.GetTextColor().Resolve(), Color::GREEN, TEST_LOCATION);
 
+  textVisualizer.SetProperty(TextVisualizer::Property::LINE_HEIGHT, 1.4f);
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), 1.4f, TEST_LOCATION);
+
   END_TEST;
 }
 
@@ -251,16 +275,33 @@ int UtcDaliTextVisualizerGetProperty(void)
   DALI_TEST_CHECK(textVisualizer.GetPropertyIndex(PROPERTY_NAME_FONT_FAMILY) == TextVisualizer::Property::FONT_FAMILY);
   DALI_TEST_CHECK(textVisualizer.GetPropertyIndex(PROPERTY_NAME_FONT_SIZE) == TextVisualizer::Property::FONT_SIZE);
   DALI_TEST_CHECK(textVisualizer.GetPropertyIndex(PROPERTY_NAME_TEXT_COLOR) == TextVisualizer::Property::TEXT_COLOR);
+  DALI_TEST_CHECK(textVisualizer.GetPropertyIndex(PROPERTY_NAME_LINE_HEIGHT) == TextVisualizer::Property::LINE_HEIGHT);
 
   textVisualizer.SetText("Property value");
   textVisualizer.SetFontFamily("Serif");
   textVisualizer.SetFontSize(24.0f);
   textVisualizer.SetTextColor(UiColor(Color::MAGENTA));
+  textVisualizer.SetLineHeight(1.3f);
 
   DALI_TEST_EQUALS(textVisualizer.GetProperty<Dali::String>(TextVisualizer::Property::TEXT), Dali::String("Property value"), TEST_LOCATION);
   DALI_TEST_EQUALS(textVisualizer.GetProperty<Dali::String>(TextVisualizer::Property::FONT_FAMILY), Dali::String("Serif"), TEST_LOCATION);
   DALI_TEST_EQUALS(textVisualizer.GetProperty<float>(TextVisualizer::Property::FONT_SIZE), 24.0f, TEST_LOCATION);
   DALI_TEST_EQUALS(textVisualizer.GetProperty<Vector4>(TextVisualizer::Property::TEXT_COLOR), Color::MAGENTA, TEST_LOCATION);
+  DALI_TEST_EQUALS(textVisualizer.GetProperty<float>(TextVisualizer::Property::LINE_HEIGHT), 1.3f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLineHeightPropertyAutoP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+
+  textVisualizer.SetProperty(TextVisualizer::Property::LINE_HEIGHT, -1.0f);
+  DALI_TEST_EQUALS(textVisualizer.GetProperty<float>(TextVisualizer::Property::LINE_HEIGHT), Text::LINE_HEIGHT_AUTO, TEST_LOCATION);
+
+  textVisualizer.SetProperty(TextVisualizer::Property::LINE_HEIGHT, -3.0f);
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), Text::LINE_HEIGHT_AUTO, TEST_LOCATION);
 
   END_TEST;
 }
@@ -552,6 +593,47 @@ int UtcDaliTextVisualizerLayoutGlyphsExplicitLineHeightOverrideP(void)
     DALI_TEST_EQUALS(layoutResult.height, explicitLineHeight, TEST_LOCATION);
     DALI_TEST_EQUALS(layoutResult.lines[0u].height, explicitLineHeight, TEST_LOCATION);
   }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutGlyphsRelativeLineHeightFormulaP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  constexpr float                                  fontSize              = 20.0f;
+  constexpr float                                  relativeLineHeight    = 1.5f;
+  constexpr float                                  calculatedLineHeight  = fontSize * relativeLineHeight;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 300.0f, calculatedLineHeight, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(!layoutResult.Empty());
+    DALI_TEST_EQUALS(layoutResult.height, calculatedLineHeight, TEST_LOCATION);
+    DALI_TEST_EQUALS(layoutResult.lines[0u].height, calculatedLineHeight, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLineHeightChangeSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  textVisualizer.SetText("Line height smoke");
+  textVisualizer.SetFontSize(20.0f);
+  textVisualizer.SetLineHeight(1.25f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetLineHeight(Text::LINE_HEIGHT_AUTO);
+  application.SendNotification();
+  application.Render();
 
   END_TEST;
 }

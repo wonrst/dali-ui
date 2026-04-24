@@ -33,7 +33,10 @@ public:
   {
     Dali::String text;
     Dali::String fontFamily;
-    float        fontSize{0.0f};
+    // TextVisualizer public FontSize is defined in pixels.
+    // Prepare converts this pixel size into the internal point-size representation
+    // required by the shaping/font client path.
+    float fontSize{0.0f};
   };
 
 public:

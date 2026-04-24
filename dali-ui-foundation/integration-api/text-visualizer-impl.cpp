@@ -56,6 +56,7 @@ TEXT_VISUALIZER_PROPERTY_REGISTRATION("text", STRING, TEXT)
 TEXT_VISUALIZER_PROPERTY_REGISTRATION("fontFamily", STRING, FONT_FAMILY)
 TEXT_VISUALIZER_PROPERTY_REGISTRATION("fontSize", FLOAT, FONT_SIZE)
 TEXT_VISUALIZER_PROPERTY_REGISTRATION("textColor", VECTOR4, TEXT_COLOR)
+TEXT_VISUALIZER_PROPERTY_REGISTRATION("lineHeight", FLOAT, LINE_HEIGHT)
 DALI_TYPE_REGISTRATION_END()
 
 } // namespace
@@ -70,6 +71,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mText(),
   mFontFamily(),
   mFontSize(0.0f),
+  mLineHeight(Text::LINE_HEIGHT_AUTO),
   mTextColor(Color::BLACK),
   mExclusionRegions(),
   mPreparedText(),
@@ -136,6 +138,30 @@ void TextVisualizerImpl::SetFontSize(float fontSize)
 float TextVisualizerImpl::GetFontSize() const
 {
   return mFontSize;
+}
+
+void TextVisualizerImpl::SetLineHeight(float lineHeight)
+{
+  const float normalizedLineHeight = (lineHeight > 0.0f) ? lineHeight : Text::LINE_HEIGHT_AUTO;
+
+  if(mLineHeight != normalizedLineHeight)
+  {
+    mLineHeight = normalizedLineHeight;
+    MarkLayoutDirty();
+    MarkRenderDirty();
+    RelayoutRequest();
+    InvalidateMeasure();
+  }
+}
+
+float TextVisualizerImpl::GetLineHeight() const
+{
+  return mLineHeight;
+}
+
+void TextVisualizerImpl::ClearLineHeight()
+{
+  SetLineHeight(Text::LINE_HEIGHT_AUTO);
 }
 
 void TextVisualizerImpl::SetTextColor(const UiColor& color)
@@ -311,6 +337,7 @@ void TextVisualizerImpl::OnPropertySet(Dali::Property::Index index, const Dali::
     case Text::TextVisualizerPropertyIndex::FONT_FAMILY:
     case Text::TextVisualizerPropertyIndex::FONT_SIZE:
     case Text::TextVisualizerPropertyIndex::TEXT_COLOR:
+    case Text::TextVisualizerPropertyIndex::LINE_HEIGHT:
     {
       break;
     }
@@ -474,6 +501,16 @@ bool TextVisualizerImpl::HasRenderHost() const
   return static_cast<bool>(mRenderHost);
 }
 
+float TextVisualizerImpl::CalculateEffectiveLineHeight() const
+{
+  if(mLineHeight > 0.0f && mFontSize > 0.0f)
+  {
+    return mFontSize * mLineHeight;
+  }
+
+  return 0.0f;
+}
+
 bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const
 {
   if(mExclusionRegions.Count() != regions.Count())
@@ -502,13 +539,15 @@ void TextVisualizerImpl::UpdateLayout(float layoutWidth, Internal::TextVisualize
     return;
   }
 
+  const float effectiveLineHeight = CalculateEffectiveLineHeight();
+
   if(mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics())
   {
-    Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(mPreparedText, layoutWidth, 0.0f, mExclusionRegions, result);
+    Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionRegions, result);
   }
   else
   {
-    Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, 0.0f, mExclusionRegions, result);
+    Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionRegions, result);
   }
 }
 
