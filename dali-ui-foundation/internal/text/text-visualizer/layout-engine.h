@@ -20,6 +20,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali/public-api/math/rect.h>
 
 namespace Dali::Ui::Internal::TextVisualizer
@@ -27,10 +28,20 @@ namespace Dali::Ui::Internal::TextVisualizer
 class LayoutEngine
 {
 public:
+  static float GetPlaceholderClusterAdvance(const PreparedText& preparedText);
+
+  static float GetPlaceholderLineHeight(const PreparedText& preparedText);
+
   static Dali::Vector<AvailableInterval> BuildAvailableIntervals(float                            layoutWidth,
                                                                  float                            lineY,
                                                                  float                            lineHeight,
                                                                  const Dali::Vector<Rect<float>>& exclusionRegions);
+
+  static void LayoutPlaceholder(const PreparedText&              preparedText,
+                                float                            layoutWidth,
+                                float                            lineHeight,
+                                const Dali::Vector<Rect<float>>& exclusionRegions,
+                                LayoutResult&                    result);
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

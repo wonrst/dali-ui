@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-property-handler.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
 namespace Dali
@@ -67,6 +68,8 @@ TextVisualizerImpl::TextVisualizerImpl()
   mTextColor(Color::BLACK),
   mExclusionRegions(),
   mPreparedText(),
+  mLayoutResult(),
+  mLastLayoutSize(Vector2::ZERO),
   mPrepareDirty(true),
   mLayoutDirty(true),
   mRenderDirty(true)
@@ -84,6 +87,7 @@ void TextVisualizerImpl::SetText(const Dali::String& text)
     mText = text;
     MarkPrepareDirty();
     RelayoutRequest();
+    InvalidateMeasure();
   }
 }
 
@@ -99,6 +103,7 @@ void TextVisualizerImpl::SetFontFamily(const Dali::String& fontFamily)
     mFontFamily = fontFamily;
     MarkPrepareDirty();
     RelayoutRequest();
+    InvalidateMeasure();
   }
 }
 
@@ -114,6 +119,7 @@ void TextVisualizerImpl::SetFontSize(float fontSize)
     mFontSize = fontSize;
     MarkPrepareDirty();
     RelayoutRequest();
+    InvalidateMeasure();
   }
 }
 
@@ -158,6 +164,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
     MarkLayoutDirty();
     MarkRenderDirty();
     RelayoutRequest();
+    InvalidateMeasure();
   }
 }
 
@@ -174,6 +181,7 @@ void TextVisualizerImpl::ClearExclusionRegions()
     MarkLayoutDirty();
     MarkRenderDirty();
     RelayoutRequest();
+    InvalidateMeasure();
   }
 }
 
@@ -188,16 +196,53 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   {
     Prepare();
   }
+
+  if(mLastLayoutSize != size)
+  {
+    MarkLayoutDirty();
+  }
+
+  if(mLayoutDirty)
+  {
+    UpdatePlaceholderLayout(size.x);
+    ClearLayoutDirty();
+  }
+
+  mLastLayoutSize = size;
   ViewImpl::OnRelayout(size, container);
 }
 
 MeasuredSize TextVisualizerImpl::OnMeasure(float widthConstraint, float heightConstraint)
 {
+  (void)heightConstraint;
+
   if(mPrepareDirty)
   {
     Prepare();
   }
-  return ViewImpl::OnMeasure(widthConstraint, heightConstraint);
+
+  if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
+  {
+    mLayoutResult.Clear();
+    ClearLayoutDirty();
+    return MeasuredSize(0.0f, 0.0f);
+  }
+
+  const float clusterAdvance = Internal::TextVisualizer::LayoutEngine::GetPlaceholderClusterAdvance(mPreparedText);
+  const float lineHeight     = Internal::TextVisualizer::LayoutEngine::GetPlaceholderLineHeight(mPreparedText);
+  const float naturalWidth   = static_cast<float>(mPreparedText.GetClusterCount()) * clusterAdvance;
+  const float layoutWidth    = widthConstraint > 0.0f ? widthConstraint : naturalWidth;
+
+  Internal::TextVisualizer::LayoutResult measuredLayoutResult;
+  Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, lineHeight, mExclusionRegions, measuredLayoutResult);
+
+  if(measuredLayoutResult.Empty())
+  {
+    return MeasuredSize(0.0f, 0.0f);
+  }
+
+  const float measuredWidth = widthConstraint > 0.0f ? layoutWidth : measuredLayoutResult.width;
+  return MeasuredSize(measuredWidth, measuredLayoutResult.height);
 }
 
 void TextVisualizerImpl::OnPropertySet(Dali::Property::Index index, const Dali::Property::Value& propertyValue)
@@ -244,6 +289,7 @@ Dali::Property::Value TextVisualizerImpl::GetProperty(BaseObject* object, Dali::
 void TextVisualizerImpl::MarkPrepareDirty()
 {
   mPreparedText.Clear();
+  mLayoutResult.Clear();
   mPrepareDirty = true;
   mLayoutDirty  = true;
   mRenderDirty  = true;
@@ -264,6 +310,11 @@ void TextVisualizerImpl::ClearPrepareDirty()
   mPrepareDirty = false;
 }
 
+void TextVisualizerImpl::ClearLayoutDirty()
+{
+  mLayoutDirty = false;
+}
+
 bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const
 {
   if(mExclusionRegions.Count() != regions.Count())
@@ -281,6 +332,19 @@ bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>
   }
 
   return true;
+}
+
+void TextVisualizerImpl::UpdatePlaceholderLayout(float layoutWidth)
+{
+  mLayoutResult.Clear();
+
+  if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
+  {
+    return;
+  }
+
+  const float lineHeight = Internal::TextVisualizer::LayoutEngine::GetPlaceholderLineHeight(mPreparedText);
+  Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, lineHeight, mExclusionRegions, mLayoutResult);
 }
 
 } // namespace Integration

@@ -41,6 +41,11 @@ bool IsInsideLayoutWidth(const BlockedInterval& interval)
 {
   return interval.end > interval.start;
 }
+
+float GetEffectiveLineHeight(const PreparedText& preparedText, float lineHeight)
+{
+  return lineHeight > 0.0f ? lineHeight : LayoutEngine::GetPlaceholderLineHeight(preparedText);
+}
 } // namespace
 
 Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float                            layoutWidth,
@@ -139,6 +144,102 @@ Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float     
   }
 
   return availableIntervals;
+}
+
+float LayoutEngine::GetPlaceholderClusterAdvance(const PreparedText& preparedText)
+{
+  const float fontSize = preparedText.GetFontSize();
+  return fontSize > 0.0f ? fontSize * 0.5f : 10.0f;
+}
+
+float LayoutEngine::GetPlaceholderLineHeight(const PreparedText& preparedText)
+{
+  const float fontSize = preparedText.GetFontSize();
+  return fontSize > 0.0f ? fontSize * 1.2f : 20.0f;
+}
+
+void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedText,
+                                     float                            layoutWidth,
+                                     float                            lineHeight,
+                                     const Dali::Vector<Rect<float>>& exclusionRegions,
+                                     LayoutResult&                    result)
+{
+  result.Clear();
+
+  const uint32_t clusterCount = preparedText.GetClusterCount();
+  if(preparedText.Empty() || layoutWidth <= 0.0f || clusterCount == 0u)
+  {
+    return;
+  }
+
+  const float clusterAdvance      = GetPlaceholderClusterAdvance(preparedText);
+  const float effectiveLineHeight = GetEffectiveLineHeight(preparedText, lineHeight);
+  if(clusterAdvance <= 0.0f || effectiveLineHeight <= 0.0f)
+  {
+    return;
+  }
+
+  uint32_t       currentCluster = 0u;
+  float          currentY       = 0.0f;
+  const uint32_t maxLineCount   = std::max(1u, clusterCount + static_cast<uint32_t>(exclusionRegions.Count()) + 1u);
+
+  for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentCluster < clusterCount; ++lineIndex)
+  {
+    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervals(layoutWidth, currentY, effectiveLineHeight, exclusionRegions);
+
+    TextLine textLine;
+    textLine.y      = currentY;
+    textLine.height = effectiveLineHeight;
+
+    bool lineHasPlacement = false;
+
+    for(uint32_t intervalIndex = 0u; intervalIndex < availableIntervals.Count() && currentCluster < clusterCount; ++intervalIndex)
+    {
+      const AvailableInterval& availableInterval = availableIntervals[intervalIndex];
+      const uint32_t           fitCount          = static_cast<uint32_t>(availableInterval.width / clusterAdvance);
+
+      if(fitCount == 0u)
+      {
+        continue;
+      }
+
+      const uint32_t placeCount = std::min(fitCount, clusterCount - currentCluster);
+      if(placeCount == 0u)
+      {
+        continue;
+      }
+
+      TextLineFragment fragment;
+      fragment.clusterStart = currentCluster;
+      fragment.clusterEnd   = currentCluster + placeCount;
+      fragment.x            = availableInterval.x;
+      fragment.y            = currentY;
+      fragment.width        = static_cast<float>(placeCount) * clusterAdvance;
+      textLine.fragments.PushBack(fragment);
+
+      for(uint32_t placedIndex = 0u; placedIndex < placeCount; ++placedIndex)
+      {
+        ClusterPlacement placement;
+        placement.clusterIndex = currentCluster + placedIndex;
+        placement.x            = availableInterval.x + static_cast<float>(placedIndex) * clusterAdvance;
+        placement.y            = currentY;
+        placement.width        = clusterAdvance;
+        result.clusterPlacements.PushBack(placement);
+      }
+
+      currentCluster += placeCount;
+      lineHasPlacement = true;
+      result.width     = std::max(result.width, fragment.x + fragment.width);
+    }
+
+    if(lineHasPlacement)
+    {
+      result.lines.PushBack(textLine);
+      result.height = currentY + effectiveLineHeight;
+    }
+
+    currentY += effectiveLineHeight;
+  }
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

@@ -72,16 +72,25 @@ struct LayoutResult
 {
   Dali::Vector<TextLine>         lines;
   Dali::Vector<ClusterPlacement> clusterPlacements;
+  float                          width{0.0f};
+  float                          height{0.0f};
 
   void Clear()
   {
     lines.Clear();
     clusterPlacements.Clear();
+    width  = 0.0f;
+    height = 0.0f;
   }
 
   bool Empty() const
   {
     return lines.Empty() && clusterPlacements.Empty();
+  }
+
+  uint32_t GetLineCount() const
+  {
+    return lines.Count();
   }
 };
 

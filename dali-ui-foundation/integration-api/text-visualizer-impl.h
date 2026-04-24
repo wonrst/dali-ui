@@ -18,6 +18,7 @@
  */
 
 // EXTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
@@ -163,7 +164,9 @@ private:
   void MarkLayoutDirty();
   void MarkRenderDirty();
   void ClearPrepareDirty();
+  void ClearLayoutDirty();
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
+  void UpdatePlaceholderLayout(float layoutWidth);
 
 private:
   Dali::String                           mText;
@@ -172,6 +175,8 @@ private:
   UiColor                                mTextColor;
   Dali::Vector<Rect<float>>              mExclusionRegions;
   Internal::TextVisualizer::PreparedText mPreparedText;
+  Internal::TextVisualizer::LayoutResult mLayoutResult;
+  Vector2                                mLastLayoutSize;
   bool                                   mPrepareDirty;
   bool                                   mLayoutDirty;
   bool                                   mRenderDirty;

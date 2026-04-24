@@ -19,6 +19,7 @@
 #include <dali.h>
 #include <dali-ui-foundation/dali-ui-foundation.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-test-suite-utils.h>
 
 using namespace Dali;
@@ -31,6 +32,16 @@ const char* const PROPERTY_NAME_TEXT        = "text";
 const char* const PROPERTY_NAME_FONT_FAMILY = "fontFamily";
 const char* const PROPERTY_NAME_FONT_SIZE   = "fontSize";
 const char* const PROPERTY_NAME_TEXT_COLOR  = "textColor";
+
+Dali::Ui::Internal::TextVisualizer::PreparedText CreatePreparedText(const char* text, float fontSize, uint32_t clusterCount)
+{
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText;
+  preparedText.SetOriginalText(Dali::String(text));
+  preparedText.SetFontSize(fontSize);
+  preparedText.SetClusterCount(clusterCount);
+  preparedText.SetPrepared(true);
+  return preparedText;
+}
 } // namespace
 
 void utc_dali_text_visualizer_startup(void)
@@ -400,6 +411,119 @@ int UtcDaliTextVisualizerLayoutIntervalsFullyBlockedP(void)
   const auto availableIntervals = Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, exclusionRegions);
 
   DALI_TEST_EQUALS(availableIntervals.Count(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderLayoutBasicP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 20.0f, 12.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_EQUALS(layoutResult.GetLineCount(), 3u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments.Count(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[0].clusterStart, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[0].clusterEnd, 4u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[2].fragments[0].clusterEnd, 10u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.clusterPlacements.Count(), 10u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderLayoutWithExclusionP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(20.0f, 0.0f, 20.0f, 12.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_EQUALS(layoutResult.GetLineCount(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments.Count(), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[0].clusterStart, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[0].clusterEnd, 4u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[1].clusterStart, 4u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[1].clusterEnd, 10u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderLayoutEmptyTextP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText;
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_CHECK(layoutResult.Empty());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderLayoutWidthChangeP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f, 10u);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult narrowLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult wideLayoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 25.0f, 12.0f, exclusionRegions, narrowLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 50.0f, 12.0f, exclusionRegions, wideLayoutResult);
+
+  DALI_TEST_CHECK(narrowLayoutResult.GetLineCount() > wideLayoutResult.GetLineCount());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderLayoutFullBlockedLineP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdef", 10.0f, 6u);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(0.0f, 0.0f, 30.0f, 12.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 30.0f, 12.0f, exclusionRegions, layoutResult);
+
+  DALI_TEST_EQUALS(layoutResult.GetLineCount(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].y, 12.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(layoutResult.lines[0].fragments[0].clusterEnd, 6u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPlaceholderRelayoutSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("abcdefghij");
+  textVisualizer.SetFontSize(10.0f);
+  textVisualizer.Prepare();
+  textVisualizer.SetRequestedWidth(25.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  const float narrowHeight = textVisualizer.GetMeasuredSize().GetHeight();
+
+  textVisualizer.SetRequestedWidth(50.0f);
+  application.SendNotification();
+  application.Render();
+
+  const float wideHeight = textVisualizer.GetMeasuredSize().GetHeight();
+  DALI_TEST_CHECK(narrowHeight > wideHeight);
 
   END_TEST;
 }
