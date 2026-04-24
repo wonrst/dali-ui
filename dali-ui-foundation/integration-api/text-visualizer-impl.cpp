@@ -17,6 +17,7 @@
 
 // EXTERNAL INCLUDES
 #include <dali/devel-api/object/type-registry-helper.h>
+#include <dali/integration-api/debug.h>
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
@@ -78,7 +79,8 @@ TextVisualizerImpl::TextVisualizerImpl()
   mLastLayoutSize(Vector2::ZERO),
   mPrepareDirty(true),
   mLayoutDirty(true),
-  mRenderDirty(true)
+  mRenderDirty(true),
+  mRenderDiagnosticsLogged(false)
 {
 }
 
@@ -201,6 +203,9 @@ void TextVisualizerImpl::OnInitialize()
 
 void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
 {
+  bool updateRenderDataResult = false;
+  bool attachResult           = false;
+
   if(mPrepareDirty)
   {
     Prepare();
@@ -226,12 +231,14 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
-    if(mAtlasRendererBridge.UpdateRenderData())
+    updateRenderDataResult = mAtlasRendererBridge.UpdateRenderData();
+    if(updateRenderDataResult)
     {
       EnsureRenderHost();
       SyncRenderHostSize(size);
 
-      if(mAtlasRendererBridge.AttachRendererToHost())
+      attachResult = mAtlasRendererBridge.AttachRendererToHost();
+      if(attachResult)
       {
         if(mAtlasRendererBridge.IsRenderReady())
         {
@@ -241,6 +248,8 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
       }
     }
   }
+
+  LogRenderDiagnostics(size, updateRenderDataResult, attachResult);
 
   mLastLayoutSize = size;
   ViewImpl::OnRelayout(size, container);
@@ -332,19 +341,22 @@ void TextVisualizerImpl::MarkPrepareDirty()
   mLayoutResult.Clear();
   mAtlasViewAdapter.Clear();
   mAtlasRendererBridge.Clear();
-  mPrepareDirty = true;
-  mLayoutDirty  = true;
-  mRenderDirty  = true;
+  mPrepareDirty            = true;
+  mLayoutDirty             = true;
+  mRenderDirty             = true;
+  mRenderDiagnosticsLogged = false;
 }
 
 void TextVisualizerImpl::MarkLayoutDirty()
 {
-  mLayoutDirty = true;
+  mLayoutDirty             = true;
+  mRenderDiagnosticsLogged = false;
 }
 
 void TextVisualizerImpl::MarkRenderDirty()
 {
-  mRenderDirty = true;
+  mRenderDirty             = true;
+  mRenderDiagnosticsLogged = false;
 }
 
 void TextVisualizerImpl::ClearPrepareDirty()
@@ -396,6 +408,56 @@ void TextVisualizerImpl::ClearRenderHost()
     mRenderHost.Unparent();
     mRenderHost.Reset();
   }
+}
+
+void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const
+{
+  if(mRenderDiagnosticsLogged)
+  {
+    return;
+  }
+
+  const Vector3  renderHostSize      = mAtlasRendererBridge.GetRenderHostSize();
+  const Vector3  rendererOutputSize  = mAtlasRendererBridge.GetRendererOutputSize();
+  const Vector3  firstChildSize      = mAtlasRendererBridge.GetFirstRendererOutputChildSize();
+  const uint32_t glyphPlacementCount = mLayoutResult.glyphPlacements.Count();
+
+  DALI_LOG_RELEASE_INFO(
+    "[TextVisualizer][%p] size=(%.2f,%.2f) glyphPlacements=%u hasRenderable=%d updateRenderData=%d attach=%d "
+    "renderReady=%d getGlyphsCalls=%u lastRequested=%u lastReturned=%u lastStart=%u "
+    "outputChildren=%u outputDescendants=%u outputRenderers=%u outputTotalRenderers=%u hasRenderableDescendant=%d "
+    "outputParentedToHost=%d renderHostSize=(%.2f,%.2f,%.2f) outputSize=(%.2f,%.2f,%.2f) "
+    "firstChildSize=(%.2f,%.2f,%.2f) firstChildVisible=%d\n",
+    this,
+    size.x,
+    size.y,
+    glyphPlacementCount,
+    mAtlasRendererBridge.HasRenderableGlyphs(),
+    updateRenderDataResult,
+    attachResult,
+    mAtlasRendererBridge.IsRenderReady(),
+    mAtlasRendererBridge.GetViewInterfaceGetGlyphsCallCount(),
+    mAtlasRendererBridge.GetLastRequestedGlyphCount(),
+    mAtlasRendererBridge.GetLastReturnedGlyphCount(),
+    mAtlasRendererBridge.GetLastGlyphStartIndex(),
+    mAtlasRendererBridge.GetRendererOutputChildCount(),
+    mAtlasRendererBridge.GetRendererOutputDescendantCount(),
+    mAtlasRendererBridge.GetRendererOutputRendererCount(),
+    mAtlasRendererBridge.GetRendererOutputTotalRendererCount(),
+    mAtlasRendererBridge.HasRendererOutputRenderableDescendant(),
+    mAtlasRendererBridge.IsRendererOutputParentedToHost(),
+    renderHostSize.x,
+    renderHostSize.y,
+    renderHostSize.z,
+    rendererOutputSize.x,
+    rendererOutputSize.y,
+    rendererOutputSize.z,
+    firstChildSize.x,
+    firstChildSize.y,
+    firstChildSize.z,
+    mAtlasRendererBridge.IsFirstRendererOutputChildVisible());
+
+  mRenderDiagnosticsLogged = true;
 }
 
 bool TextVisualizerImpl::HasRenderHost() const

@@ -308,6 +308,7 @@ private:
     status += std::to_string(mCurrentExclusionIndex + 1u).c_str();
     status += " | Fallback Label: ";
     status += (mFallbackLabelEnabled ? "ON" : "OFF");
+    status += "\nSee log: TextVisualizer render diagnostics | Fallback Label: key 4";
     status += "\nManual check: if Label is visible but TextVisualizer glyphs are not, the atlas output path is still the main suspect.";
     mStatusLabel.SetText(status);
 

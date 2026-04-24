@@ -694,6 +694,67 @@ flowchart TD
 - descendant renderer count가 0인 runtime 원인
 - clipping 추가 후에도 glyph가 계속 안 보이면 atlas/shader/mesh generation 쪽으로 더 좁혀야 하는지
 
+## 추가 확인: runtime diagnostics log
+
+현재는 sample 실행 중 internal runtime 값을 눈으로 확인할 방법이 부족하므로, `TextVisualizerImpl` render path에서 diagnostics log를 출력한다.
+
+출력 정책:
+
+- dirty cycle 당 1회만 출력한다.
+- 아래 중 하나가 호출되면 다음 relayout/render path에서 다시 1회 출력한다.
+  - `MarkPrepareDirty()`
+  - `MarkLayoutDirty()`
+  - `MarkRenderDirty()`
+
+로그 항목:
+
+- control `size.x / size.y`
+- `mLayoutResult.glyphPlacements.Count()`
+- `HasRenderableGlyphs()`
+- `UpdateRenderData()` 결과
+- `AttachRendererToHost()` 결과
+- `IsRenderReady()`
+- `GetViewInterfaceGetGlyphsCallCount()`
+- `GetLastRequestedGlyphCount()`
+- `GetLastReturnedGlyphCount()`
+- `GetLastGlyphStartIndex()`
+- `GetRendererOutputChildCount()`
+- `GetRendererOutputDescendantCount()`
+- `GetRendererOutputRendererCount()`
+- `GetRendererOutputTotalRendererCount()`
+- `HasRendererOutputRenderableDescendant()`
+- `IsRendererOutputParentedToHost()`
+- `GetRenderHostSize()`
+- `GetRendererOutputSize()`
+- `GetFirstRendererOutputChildSize()`
+- `IsFirstRendererOutputChildVisible()`
+
+판단 기준:
+
+- `GetGlyphs call count == 0`
+  - `Render()`가 glyph path에 실제로 들어가지 못한 상태다.
+- `Last returned glyph count == 0`
+  - `ViewInterface`가 glyph를 요청받았지만 실질적으로 전달하지 못하고 있다.
+- `Output total renderer count == 0`
+  - output actor 아래 mesh/renderer generation이 아직 되지 않은 상태다.
+- `Output total renderer count > 0`인데도 안 보임
+  - actor visibility, shader, texture, atlas upload, z-order 쪽으로 범위를 더 좁힐 수 있다.
+
+sample 실행 후 우선 기록해야 할 값:
+
+- `getGlyphsCalls`
+- `lastRequested`
+- `lastReturned`
+- `outputChildren`
+- `outputTotalRenderers`
+- `hasRenderableDescendant`
+- `outputParentedToHost`
+
+중요:
+
+- 이 로그는 `render dirty clear` 판단 근거가 아니다.
+- geometry correctness, baseline/bearing/offset, 최종 visual correctness는 여전히 별도 검증 대상이다.
+
 ## 12. 다음 커밋 금지 사항
 
 - 기존 `TextController` 수정 금지

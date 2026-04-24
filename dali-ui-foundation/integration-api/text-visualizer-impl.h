@@ -171,6 +171,7 @@ private:
   void EnsureRenderHost();
   void SyncRenderHostSize(const Vector2& size);
   void ClearRenderHost();
+  void LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const;
   bool HasRenderHost() const;
   bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   void UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
@@ -191,6 +192,7 @@ private:
   bool                                          mPrepareDirty;
   bool                                          mLayoutDirty;
   bool                                          mRenderDirty;
+  mutable bool                                  mRenderDiagnosticsLogged;
 };
 
 } // namespace Integration
