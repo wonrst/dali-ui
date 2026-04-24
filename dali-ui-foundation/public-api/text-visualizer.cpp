@@ -143,6 +143,26 @@ UiColor TextVisualizer::GetTextColor()
   return GetImpl(*this).GetTextColor();
 }
 
+void TextVisualizer::Prepare()
+{
+  GetImpl(*this).Prepare();
+}
+
+void TextVisualizer::SetExclusionRegions(const Dali::Vector<Rect<float>>& regions)
+{
+  GetImpl(*this).SetExclusionRegions(regions);
+}
+
+Dali::Vector<Rect<float>> TextVisualizer::GetExclusionRegions() const
+{
+  return GetImpl(*this).GetExclusionRegions();
+}
+
+void TextVisualizer::ClearExclusionRegions()
+{
+  GetImpl(*this).ClearExclusionRegions();
+}
+
 TextVisualizer::TextVisualizer(Integration::TextVisualizerImpl& implementation)
 : View(implementation)
 {

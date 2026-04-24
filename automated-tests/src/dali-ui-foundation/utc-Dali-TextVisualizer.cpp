@@ -176,3 +176,87 @@ int UtcDaliTextVisualizerGetProperty(void)
 
   END_TEST;
 }
+
+int UtcDaliTextVisualizerPrepareP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.Prepare();
+  textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionRegions(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regions.PushBack(Rect<float>(0.0f, 0.0f, 100.0f, 30.0f));
+  regions.PushBack(Rect<float>(50.0f, 40.0f, 80.0f, 20.0f));
+
+  textVisualizer.SetExclusionRegions(regions);
+
+  const Dali::Vector<Rect<float>> storedRegions = textVisualizer.GetExclusionRegions();
+  DALI_TEST_EQUALS(storedRegions.Count(), regions.Count(), TEST_LOCATION);
+  DALI_TEST_CHECK(storedRegions[0] == regions[0]);
+  DALI_TEST_CHECK(storedRegions[1] == regions[1]);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerClearExclusionRegions(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regions.PushBack(Rect<float>(10.0f, 20.0f, 30.0f, 40.0f));
+  textVisualizer.SetExclusionRegions(regions);
+  DALI_TEST_EQUALS(textVisualizer.GetExclusionRegions().Count(), 1u, TEST_LOCATION);
+
+  textVisualizer.ClearExclusionRegions();
+  DALI_TEST_EQUALS(textVisualizer.GetExclusionRegions().Count(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPrepareAfterStateChangesP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("Prepared text");
+  textVisualizer.SetFontFamily("Roboto");
+  textVisualizer.SetFontSize(28.0f);
+  textVisualizer.Prepare();
+
+  DALI_TEST_EQUALS(textVisualizer.GetText(), std::string("Prepared text"), TEST_LOCATION);
+  DALI_TEST_EQUALS(textVisualizer.GetFontFamily(), std::string("Roboto"), TEST_LOCATION);
+  DALI_TEST_EQUALS(textVisualizer.GetFontSize(), 28.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionRegionsWithoutPrepareP(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regions.PushBack(Rect<float>(5.0f, 5.0f, 25.0f, 15.0f));
+  textVisualizer.SetExclusionRegions(regions);
+  textVisualizer.SetExclusionRegions(regions);
+  textVisualizer.ClearExclusionRegions();
+
+  DALI_TEST_EQUALS(textVisualizer.GetExclusionRegions().Count(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}

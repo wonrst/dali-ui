@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view.h>
+#include <dali/public-api/math/rect.h>
 
 namespace Dali
 {
@@ -183,6 +184,32 @@ public: // Setters for chaining
    * @return The text color currently set on the text visualizer.
    */
   UiColor GetTextColor();
+
+  /**
+   * @brief Prepares the current text state for layout.
+   *
+   * This is an eager command. In this commit it only updates internal dirty state.
+   */
+  void Prepare();
+
+  /**
+   * @brief Sets the exclusion regions used by the future layout pass.
+   *
+   * @param[in] regions Regions where text should not be placed.
+   */
+  void SetExclusionRegions(const Dali::Vector<Rect<float>>& regions);
+
+  /**
+   * @brief Gets the currently stored exclusion regions.
+   *
+   * @return The current exclusion regions.
+   */
+  Dali::Vector<Rect<float>> GetExclusionRegions() const;
+
+  /**
+   * @brief Clears all exclusion regions.
+   */
+  void ClearExclusionRegions();
 
 public:
   explicit DALI_UI_API TextVisualizer(Integration::TextVisualizerImpl& implementation);

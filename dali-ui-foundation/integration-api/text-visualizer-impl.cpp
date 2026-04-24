@@ -63,7 +63,11 @@ TextVisualizerImpl::TextVisualizerImpl()
   mText(),
   mFontFamily(),
   mFontSize(0.0f),
-  mTextColor(Color::BLACK)
+  mTextColor(Color::BLACK),
+  mExclusionRegions(),
+  mPrepareDirty(true),
+  mLayoutDirty(true),
+  mRenderDirty(true)
 {
 }
 
@@ -76,7 +80,7 @@ void TextVisualizerImpl::SetText(const Dali::String& text)
   if(mText != text)
   {
     mText = text;
-    // TODO: Mark prepare dirty when the prepare path is implemented.
+    MarkPrepareDirty();
   }
 }
 
@@ -90,7 +94,7 @@ void TextVisualizerImpl::SetFontFamily(const Dali::String& fontFamily)
   if(mFontFamily != fontFamily)
   {
     mFontFamily = fontFamily;
-    // TODO: Mark prepare dirty when the prepare path is implemented.
+    MarkPrepareDirty();
   }
 }
 
@@ -104,7 +108,7 @@ void TextVisualizerImpl::SetFontSize(float fontSize)
   if(mFontSize != fontSize)
   {
     mFontSize = fontSize;
-    // TODO: Mark prepare dirty when the prepare path is implemented.
+    MarkPrepareDirty();
   }
 }
 
@@ -118,13 +122,45 @@ void TextVisualizerImpl::SetTextColor(const UiColor& color)
   if(mTextColor.Resolve() != color.Resolve() || mTextColor.GetColorId() != color.GetColorId())
   {
     mTextColor = color;
-    // TODO: Mark render dirty when the rendering path is implemented.
+    MarkRenderDirty();
   }
 }
 
 UiColor TextVisualizerImpl::GetTextColor()
 {
   return mTextColor;
+}
+
+void TextVisualizerImpl::Prepare()
+{
+  ClearPrepareDirty();
+  MarkLayoutDirty();
+  MarkRenderDirty();
+}
+
+void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& regions)
+{
+  if(!AreExclusionRegionsEqual(regions))
+  {
+    mExclusionRegions = regions;
+    MarkLayoutDirty();
+    MarkRenderDirty();
+  }
+}
+
+Dali::Vector<Rect<float>> TextVisualizerImpl::GetExclusionRegions() const
+{
+  return mExclusionRegions;
+}
+
+void TextVisualizerImpl::ClearExclusionRegions()
+{
+  if(!mExclusionRegions.Empty())
+  {
+    mExclusionRegions.Clear();
+    MarkLayoutDirty();
+    MarkRenderDirty();
+  }
 }
 
 void TextVisualizerImpl::OnInitialize()
@@ -181,6 +217,47 @@ Dali::Property::Value TextVisualizerImpl::GetProperty(BaseObject* object, Dali::
     value = PropertyHandler::GetProperty(view, index);
   }
   return value;
+}
+
+void TextVisualizerImpl::MarkPrepareDirty()
+{
+  mPrepareDirty = true;
+  mLayoutDirty  = true;
+  mRenderDirty  = true;
+}
+
+void TextVisualizerImpl::MarkLayoutDirty()
+{
+  mLayoutDirty = true;
+}
+
+void TextVisualizerImpl::MarkRenderDirty()
+{
+  mRenderDirty = true;
+}
+
+void TextVisualizerImpl::ClearPrepareDirty()
+{
+  mPrepareDirty = false;
+}
+
+bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const
+{
+  if(mExclusionRegions.Count() != regions.Count())
+  {
+    return false;
+  }
+
+  const uint32_t count = regions.Count();
+  for(uint32_t index = 0u; index < count; ++index)
+  {
+    if(mExclusionRegions[index] != regions[index])
+    {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 } // namespace Integration

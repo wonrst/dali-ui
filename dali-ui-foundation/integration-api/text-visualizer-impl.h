@@ -21,6 +21,7 @@
 #include <dali-ui-foundation/public-api/text/text-visualizer-properties.h>
 #include <dali-ui-foundation/public-api/ui-color.h>
 #include <dali-ui-foundation/public-api/view-impl.h>
+#include <dali/public-api/math/rect.h>
 
 namespace Dali
 {
@@ -96,6 +97,26 @@ public:
    */
   UiColor GetTextColor();
 
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::Prepare
+   */
+  void Prepare();
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::SetExclusionRegions
+   */
+  void SetExclusionRegions(const Dali::Vector<Rect<float>>& regions);
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::GetExclusionRegions
+   */
+  Dali::Vector<Rect<float>> GetExclusionRegions() const;
+
+  /**
+   * @copydoc Dali::Ui::TextVisualizer::ClearExclusionRegions
+   */
+  void ClearExclusionRegions();
+
 public: // From ViewImpl
   /**
    * @copydoc ViewImpl::OnInitialize
@@ -137,10 +158,21 @@ private:
   struct PropertyHandler;
 
 private:
-  Dali::String mText;
-  Dali::String mFontFamily;
-  float        mFontSize;
-  UiColor      mTextColor;
+  void MarkPrepareDirty();
+  void MarkLayoutDirty();
+  void MarkRenderDirty();
+  void ClearPrepareDirty();
+  bool AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
+
+private:
+  Dali::String              mText;
+  Dali::String              mFontFamily;
+  float                     mFontSize;
+  UiColor                   mTextColor;
+  Dali::Vector<Rect<float>> mExclusionRegions;
+  bool                      mPrepareDirty;
+  bool                      mLayoutDirty;
+  bool                      mRenderDirty;
 };
 
 } // namespace Integration
