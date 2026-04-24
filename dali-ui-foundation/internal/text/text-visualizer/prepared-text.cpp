@@ -221,6 +221,37 @@ const Dali::Vector<Text::GlyphIndex>& PreparedText::GetNewParagraphGlyphs() cons
   return mNewParagraphGlyphs;
 }
 
+bool PreparedText::HasGlyphData() const
+{
+  return !mGlyphs.Empty();
+}
+
+bool PreparedText::HasGlyphMetrics() const
+{
+  for(Vector<Text::GlyphInfo>::ConstIterator it = mGlyphs.Begin(), endIt = mGlyphs.End(); it != endIt; ++it)
+  {
+    const Text::GlyphInfo& glyph = *it;
+    if((glyph.advance > 0.0f) || (glyph.width > 0.0f) || (glyph.height > 0.0f))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+float PreparedText::GetTotalGlyphAdvance() const
+{
+  float totalGlyphAdvance = 0.0f;
+
+  for(Vector<Text::GlyphInfo>::ConstIterator it = mGlyphs.Begin(), endIt = mGlyphs.End(); it != endIt; ++it)
+  {
+    totalGlyphAdvance += it->advance;
+  }
+
+  return totalGlyphAdvance;
+}
+
 void PreparedText::SetPrepared(bool prepared)
 {
   mPrepared = prepared;

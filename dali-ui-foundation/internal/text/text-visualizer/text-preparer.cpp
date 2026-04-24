@@ -18,6 +18,7 @@
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/character-set-conversion.h>
 #include <dali-ui-foundation/internal/text/logical-model-impl.h>
+#include <dali-ui-foundation/internal/text/metrics.h>
 #include <dali-ui-foundation/internal/text/multi-language-support.h>
 #include <dali-ui-foundation/internal/text/segmentation.h>
 #include <dali-ui-foundation/internal/text/shaper.h>
@@ -106,6 +107,27 @@ PreparedText TextPreparer::Prepare(const Input& input)
       TextAbstraction::Shaping shaping = TextAbstraction::Shaping::Get();
       Text::ShapeText(shaping, fontClient, characters, lineBreakInfo, scriptRuns, fontRuns, 0u, 0u,
                       convertedCharacterCount, glyphs, glyphToCharacterMap, charactersPerGlyph, newParagraphGlyphs);
+
+      const Text::Length glyphCount = glyphs.Count();
+      if(glyphCount > 0u)
+      {
+        Text::MetricsPtr metrics = Text::Metrics::New(fontClient);
+        metrics->GetGlyphMetrics(glyphs.Begin(), glyphCount);
+
+        for(Vector<Text::GlyphIndex>::ConstIterator it = newParagraphGlyphs.Begin(), endIt = newParagraphGlyphs.End();
+            it != endIt; ++it)
+        {
+          const Text::GlyphIndex index = *it;
+          if(index < glyphs.Count())
+          {
+            Text::GlyphInfo& glyph = glyphs[index];
+
+            glyph.xBearing = 0.0f;
+            glyph.width    = 0.0f;
+            glyph.advance  = 0.0f;
+          }
+        }
+      }
 
       Text::VisualModelPtr visualModel = Text::VisualModel::New();
       visualModel->mGlyphs             = glyphs;

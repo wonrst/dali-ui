@@ -53,6 +53,21 @@ void CheckGlyphMappingConsistency(const Dali::Ui::Internal::TextVisualizer::Prep
   DALI_TEST_EQUALS(preparedText.GetCharacterToGlyphTable().Count(), characterCount, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetGlyphsPerCharacterTable().Count(), characterCount, TEST_LOCATION);
 }
+
+bool HasAnyValidGlyphMetric(const Dali::Ui::Internal::TextVisualizer::PreparedText& preparedText)
+{
+  const Dali::Vector<Dali::Ui::Text::GlyphInfo>& glyphs = preparedText.GetGlyphs();
+
+  for(Dali::Vector<Dali::Ui::Text::GlyphInfo>::ConstIterator it = glyphs.Begin(), endIt = glyphs.End(); it != endIt; ++it)
+  {
+    if((it->advance > 0.0f) || (it->width > 0.0f) || (it->height > 0.0f))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
 } // namespace
 
 void utc_dali_text_visualizer_startup(void)
@@ -552,6 +567,69 @@ int UtcDaliTextVisualizerPreparedMixedShapedGlyphDataP(void)
   if(preparedText.GetGlyphCount() > 0u)
   {
     CheckGlyphMappingConsistency(preparedText);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedAsciiGlyphMetricsP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "abc";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_CHECK(preparedText.HasGlyphData());
+  DALI_TEST_CHECK(preparedText.GetGlyphCount() > 0u);
+  CheckGlyphMappingConsistency(preparedText);
+  DALI_TEST_CHECK(HasAnyValidGlyphMetric(preparedText));
+  DALI_TEST_CHECK(preparedText.HasGlyphMetrics());
+  DALI_TEST_CHECK(preparedText.GetTotalGlyphAdvance() >= 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedKoreanGlyphMetricsP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "가나다";
+  input.fontSize = 10.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+    DALI_TEST_CHECK(HasAnyValidGlyphMetric(preparedText));
+    DALI_TEST_CHECK(preparedText.HasGlyphMetrics());
+    DALI_TEST_CHECK(preparedText.GetTotalGlyphAdvance() >= 0.0f);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedEmojiGlyphMetricsP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text = "😀";
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+    DALI_TEST_CHECK(HasAnyValidGlyphMetric(preparedText));
+    DALI_TEST_CHECK(preparedText.HasGlyphMetrics());
+    DALI_TEST_CHECK(preparedText.GetTotalGlyphAdvance() >= 0.0f);
   }
 
   END_TEST;

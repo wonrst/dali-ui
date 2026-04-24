@@ -93,6 +93,10 @@ public:
   void                                  SetNewParagraphGlyphs(const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs);
   const Dali::Vector<Text::GlyphIndex>& GetNewParagraphGlyphs() const;
 
+  bool  HasGlyphData() const;
+  bool  HasGlyphMetrics() const;
+  float GetTotalGlyphAdvance() const;
+
   void SetPrepared(bool prepared);
   bool IsPrepared() const;
 
