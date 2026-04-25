@@ -184,12 +184,14 @@ private:
   void  MarkRenderDirty();
   void  ClearPrepareDirty();
   void  ClearLayoutDirty();
+  void  ClearRenderDirty();
   void  EnsureRenderHost();
   void  SyncRenderHostSize(const Vector2& size);
   void  ClearRenderHost();
   void  LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const;
   float CalculateEffectiveLineHeight() const;
   bool  HasRenderHost() const;
+  bool  IsRenderUpdateSuccessful(bool updateRenderDataResult, bool attachResult) const;
   bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   void  UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
   void  SyncRenderStateToAdapter(const Vector2& controlSize);

@@ -1772,6 +1772,44 @@ int UtcDaliTextVisualizerAtlasRendererBridgeRenderReadyAfterRenderCallP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerAtlasRendererBridgeRenderSuccessConditionP(void)
+{
+  UiTestApplication                                                application;
+  const auto                                                       preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                 layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter             adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge          bridge;
+  Actor                                                            renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
+  bridge.SetRenderHost(renderHost);
+
+  const bool updateRenderDataResult = adapter.HasRenderableGlyphs() && bridge.UpdateRenderData();
+  const bool attached               = bridge.AttachRendererToHost();
+
+  if(updateRenderDataResult && attached)
+  {
+    DALI_TEST_CHECK(bridge.IsRenderReady());
+    DALI_TEST_CHECK(bridge.GetLastReturnedGlyphCount() > 0u);
+    DALI_TEST_CHECK(bridge.GetLastReturnedGlyphCount() <= bridge.GetLastRequestedGlyphCount());
+    DALI_TEST_CHECK(bridge.GetRendererOutput());
+    DALI_TEST_CHECK(bridge.IsRendererOutputParentedToHost());
+  }
+  else
+  {
+    DALI_TEST_CHECK(!bridge.IsRenderReady());
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerAtlasRendererBridgeSetRenderHostEmptyClearsReadinessP(void)
 {
   UiTestApplication                                                application;
@@ -2199,6 +2237,30 @@ int UtcDaliTextVisualizerRenderCallSmokeP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerRenderDirtyClearsAfterSuccessfulRenderSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer render dirty clear smoke.");
+  textVisualizer.SetFontSize(12.0f);
+  textVisualizer.SetRequestedWidth(240.0f);
+  textVisualizer.SetRequestedHeight(120.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+  application.SendNotification();
+  application.Render();
+
+  MeasuredSize measured = textVisualizer.Measure(240.0f, 0.0f);
+  DALI_TEST_CHECK(measured.GetWidth() > 0.0f);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerTextColorRenderSmokeP(void)
 {
   UiTestApplication application;
@@ -2236,6 +2298,33 @@ int UtcDaliTextVisualizerTextColorChangeWithoutLayoutDirtySmokeP(void)
   application.Render();
 
   DALI_TEST_EQUALS(textVisualizer.GetTextColor().Resolve(), Color::GREEN, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLineHeightChangeReenablesRenderSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("Line height dirty render smoke line height dirty render smoke");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(220.0f);
+  textVisualizer.SetRequestedHeight(180.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetLineHeight(1.5f);
+  application.SendNotification();
+  application.Render();
+
+  MeasuredSize measured = textVisualizer.Measure(220.0f, 0.0f);
+  DALI_TEST_EQUALS(textVisualizer.GetLineHeight(), 1.5f, TEST_LOCATION);
+  DALI_TEST_CHECK(measured.GetWidth() > 0.0f);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
 
   END_TEST;
 }

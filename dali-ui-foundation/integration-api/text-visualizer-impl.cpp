@@ -271,13 +271,9 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
       SyncRenderHostSize(size);
 
       attachResult = mAtlasRendererBridge.AttachRendererToHost();
-      if(attachResult)
+      if(IsRenderUpdateSuccessful(updateRenderDataResult, attachResult))
       {
-        if(mAtlasRendererBridge.IsRenderReady())
-        {
-          // TODO: Keep render dirty until geometry correctness, baseline/bearing/offset,
-          // and render-path validation are verified.
-        }
+        ClearRenderDirty();
       }
     }
   }
@@ -403,6 +399,11 @@ void TextVisualizerImpl::ClearLayoutDirty()
   mLayoutDirty = false;
 }
 
+void TextVisualizerImpl::ClearRenderDirty()
+{
+  mRenderDirty = false;
+}
+
 void TextVisualizerImpl::EnsureRenderHost()
 {
   if(!mRenderHost)
@@ -499,6 +500,26 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
 bool TextVisualizerImpl::HasRenderHost() const
 {
   return static_cast<bool>(mRenderHost);
+}
+
+bool TextVisualizerImpl::IsRenderUpdateSuccessful(bool updateRenderDataResult, bool attachResult) const
+{
+  if(!mRenderDirty ||
+     !mAtlasRendererBridge.HasRenderableGlyphs() ||
+     !updateRenderDataResult ||
+     !attachResult ||
+     !mAtlasRendererBridge.IsRenderReady() ||
+     !mAtlasRendererBridge.GetRendererOutput() ||
+     !mAtlasRendererBridge.IsRendererOutputParentedToHost())
+  {
+    return false;
+  }
+
+  const uint32_t lastRequestedGlyphCount = mAtlasRendererBridge.GetLastRequestedGlyphCount();
+  const uint32_t lastReturnedGlyphCount  = mAtlasRendererBridge.GetLastReturnedGlyphCount();
+
+  return lastReturnedGlyphCount > 0u &&
+         lastReturnedGlyphCount <= lastRequestedGlyphCount;
 }
 
 float TextVisualizerImpl::CalculateEffectiveLineHeight() const

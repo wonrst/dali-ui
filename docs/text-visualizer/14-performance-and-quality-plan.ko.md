@@ -61,7 +61,7 @@ flowchart LR
 | exclusion interval 계산 시 line마다 모든 bounds scan | 기존에는 `BuildAvailableIntervals()`가 line마다 모든 exclusion region을 확인했다. 현재는 layout pass 시작 시 y축 기준 sorted cache를 만들고 line band와 겹칠 수 있는 후보만 검사한다 | bounds 수와 line 수가 모두 커질수록 비용이 커졌고, 1차 최적화 후에는 per-line 후보 scan 비용이 줄었다 | 더 큰 bounds 수에서는 spatial index / partial relayout 검토 | 1차 완료 |
 | `Dali::Vector` / `std::vector` 재할당 | 기존에는 layout 결과와 render data가 `Clear()` 후 반복 push-back 됐다. 현재는 glyph / cluster / renderable glyph count 기반 reserve를 적용했다 | 긴 텍스트에서 allocation/reallocation이 잦을 수 있었고, reserve 적용 후 반복 relayout/update에서 capacity 재사용 여지가 생겼다 | 더 큰 효과가 필요하면 `LayoutResult` object reuse / renderer internal allocation 조사 | 1차 완료 |
 | logging / diagnostics overhead | 현재 `DALI_LOG_ERROR`와 diagnostics getter가 살아 있다 | sample/benchmark 시 관측값을 왜곡할 수 있다 | debug level 또는 compile-time flag로 낮춤 | 높음 |
-| `render dirty` 미해제 구조 | 현재는 성공 후에도 clear하지 않는다 | relayout이 다시 오면 render path가 계속 열린 상태다 | 별도 커밋에서 clear 조건 도입 | 중간 |
+| `render dirty` 미해제 구조 | 성공적인 render update 후 엄격한 조건을 만족하면 clear한다 | 동일 상태에서 render path 반복 진입을 줄인다 | dirty 재설정 경로와 장기 안정성 관찰 | 1차 완료 |
 | sample timer tick과 actual render frame mismatch | 16ms timer가 draw frame과 항상 맞지 않는다 | update 요청 수와 실제 frame rate 체감이 달라질 수 있다 | frame callback 또는 throttled status update 검토 | 낮음 |
 
 ## 3. 빠른 최적화 후보
@@ -672,23 +672,70 @@ flowchart LR
 - renderer 내부 mesh / actor / atlas allocation은 이번 변경 범위 밖에 남아 있다.
 - 더 큰 최적화가 필요하면 `LayoutResult` object reuse 방식, partial relayout, geometry-only update를 별도로 검토해야 한다.
 
+## 진행: render dirty clear condition
+
+최근 커밋:
+
+- `Add TextVisualizer render dirty clear condition`
+
+기존 문제:
+
+- render 성공 후에도 `mRenderDirty`를 clear하지 않아, 동일 상태에서 `OnRelayout()`이 다시 들어오면 render path가 계속 열린 상태로 남을 수 있었다.
+- 특히 attached 상태에서도 `AttachRendererToHost()`가 `Renderer::Render()`를 다시 호출하는 현재 정책에서는 불필요한 full render 재호출 가능성을 줄일 필요가 있었다.
+
+변경된 구조:
+
+- `TextVisualizerImpl::ClearRenderDirty()` helper를 추가했다.
+- `OnRelayout()`의 render path에서 render update가 성공한 경우에만 `ClearRenderDirty()`를 호출한다.
+- clear 판단은 `IsRenderReady()` 하나만 보지 않고, render data update / attach 결과 / glyph diagnostics / output actor parent 상태를 함께 확인한다.
+
+clear 필수 조건:
+
+- `mRenderDirty == true`
+- `mAtlasRendererBridge.HasRenderableGlyphs() == true`
+- `UpdateRenderData() == true`
+- `AttachRendererToHost() == true`
+- `mAtlasRendererBridge.IsRenderReady() == true`
+- `GetLastReturnedGlyphCount() > 0`
+- `GetLastReturnedGlyphCount() <= GetLastRequestedGlyphCount()`
+- `GetRendererOutput()` valid
+- `IsRendererOutputParentedToHost() == true`
+
+clear하지 않는 경우:
+
+- renderable glyph가 없는 경우
+- `UpdateRenderData()`가 실패한 경우
+- `AttachRendererToHost()`가 실패한 경우
+- renderer output actor가 없거나 host에 parented 되지 않은 경우
+- renderer diagnostics에서 returned glyph count가 0이거나 requested count를 초과하는 경우
+
+dirty가 다시 set되는 경로:
+
+- `SetText()` / `SetFontFamily()` / `SetFontSize()`는 `MarkPrepareDirty()`를 통해 prepare + layout + render dirty를 다시 set한다.
+- `SetLineHeight()`는 layout dirty + render dirty를 다시 set한다.
+- `SetTextColor()`는 render dirty를 다시 set한다.
+- `SetExclusionRegions()` / `ClearExclusionRegions()`는 layout dirty + render dirty를 다시 set한다.
+- layout size 변경은 `OnRelayout()`에서 layout dirty + render dirty를 다시 set한다.
+
+기대 효과:
+
+- 동일 상태에서 `UpdateRenderData()` / `Renderer::Render()` 반복 호출을 줄인다.
+- moving bounds처럼 exclusion region이 실제로 바뀌는 경우에는 기존처럼 dirty가 다시 set되어 render update가 발생한다.
+- textColor만 변경되는 경우에도 render dirty가 다시 set되므로 color-only render update 경로는 유지된다.
+
+확인 필요:
+
+- `GetRendererOutputTotalRendererCount()`를 clear 조건에 포함할지 여부
+- output actor 재생성 / 교체가 발생하는 경우 clear 조건의 장기 안정성
+- render dirty false 상태에서 actor / renderer가 외부 요인으로 invalid 되는 경우
+- future async render와 dirty clear 관계
+- performance sample에서 FPS 개선 폭
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Add render dirty clear condition
-
-이유:
-
-- render 성공 후에도 `mRenderDirty`를 clear하지 않는 구조는 향후 불필요한 render path 재실행 비용을 키울 수 있다.
-
-주의:
-
-- `IsRenderReady()`만으로 clear하면 안 된다.
-- 최소한 `UpdateRenderData()` 성공, `Renderer::Render()` 성공, output actor attach/parent 상태, glyph count 일관성을 함께 확인해야 한다.
-- 별도 커밋으로만 다룬다.
-
-### B. Redundant exclusion region update skip
+### A. Redundant exclusion region update skip
 
 이유:
 
@@ -700,7 +747,7 @@ flowchart LR
 - core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
 - sample-level upstream skip과 core API policy를 분리해서 검토한다.
 
-### C. Layout unchanged 시 render skip
+### B. Layout unchanged 시 render skip
 
 이유:
 
@@ -712,21 +759,21 @@ flowchart LR
 - float 비교 정책, layout hash/version, glyph placement 비교 기준이 필요하다.
 - `render dirty` clear 조건보다 뒤에서 다루는 것이 안전하다.
 
-### D. Add line-level metrics if needed
+### C. Add line-level metrics if needed
 
 이유:
 
 - 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
 - `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
 
-### E. Clarify FontSize unit and conversion
+### D. Clarify FontSize unit and conversion
 
 이유:
 
 - public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
 - line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
 
-### F. Improve word/cluster line break
+### E. Improve word/cluster line break
 
 이유:
 
@@ -738,7 +785,8 @@ flowchart LR
 - `FontSize` pixel size와 relative line height 정책은 고정됐다.
 - exclusion interval scanning의 1차 최적화는 완료됐다.
 - layout/render buffer reserve의 1차 최적화는 완료됐다.
-- 다음 성능 후보는 render dirty clear처럼 별도 correctness 조건이 필요한 작업과 redundant update/layout unchanged skip처럼 float/layout 비교 정책이 필요한 작업으로 나눠서 다룬다.
+- render dirty clear의 1차 조건은 도입됐다.
+- 다음 성능 후보는 redundant update/layout unchanged skip처럼 float/layout 비교 정책이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 
 ## 금지 사항

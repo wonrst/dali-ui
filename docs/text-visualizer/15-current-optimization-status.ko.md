@@ -16,10 +16,15 @@
 - `Optimize TextVisualizer exclusion interval scanning`
 - `Reserve TextVisualizer layout and render buffers`
 - `Fix TextVisualizer UTC expectations`
+- `Add TextVisualizer render dirty clear condition`
 
-가장 최근 커밋:
+직전 기준 커밋:
 
 - `ed71e35` `Fix TextVisualizer UTC expectations`
+
+이번 커밋 최신 상태:
+
+- render dirty clear 조건을 전용 커밋으로 도입했다.
 
 현재 해석:
 
@@ -38,7 +43,7 @@
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `112 tests, 0 failures` 상태다.
+- 전체 `TextVisualizer` UTC는 `115 tests, 0 failures` 상태다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -185,7 +190,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 현재 결과:
 
 - targeted UTC passed
-- 전체 `TextVisualizer` UTC: `112 tests, 0 failures`
+- 전체 `TextVisualizer` UTC: `115 tests, 0 failures`
 
 커밋 참고:
 
@@ -200,30 +205,59 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 | line metrics / baseline | 1차 적용 완료 | line-level metrics 검토 |
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
-| render dirty 미해제 | 아직 남음 | 별도 커밋에서 clear 조건 검토 |
+| render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
 | redundant exclusion update | 아직 남음 | epsilon/unchanged skip 검토 |
 | layout unchanged render skip | 아직 남음 | layout hash/version 검토 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
-## 9. 다음 추천 작업
+## 9. Render Dirty Clear 현재 상태
+
+render dirty clear는 전용 성능 커밋으로 1차 조건을 도입했다.
+
+기존 문제:
+
+- render 성공 후에도 `mRenderDirty`가 계속 true로 남아 동일 상태에서 render path가 다시 열릴 수 있었다.
+- attached 상태에서도 `AttachRendererToHost()`가 `Renderer::Render()`를 호출하는 현재 정책상, 성공한 render update 이후 dirty를 닫을 필요가 있었다.
+
+현재 clear 조건:
+
+- `mRenderDirty == true`
+- renderable glyph가 존재한다.
+- `UpdateRenderData()`가 성공한다.
+- `AttachRendererToHost()`가 성공한다.
+- `IsRenderReady()`가 true다.
+- renderer diagnostics의 returned glyph count가 0보다 크다.
+- returned glyph count가 requested glyph count 이하이다.
+- renderer output actor가 valid하다.
+- renderer output actor가 render host에 parented 되어 있다.
+
+dirty가 다시 set되는 경로:
+
+- `SetText()` / `SetFontFamily()` / `SetFontSize()`는 prepare + layout + render dirty를 다시 set한다.
+- `SetLineHeight()`는 layout + render dirty를 다시 set한다.
+- `SetTextColor()`는 render dirty를 다시 set한다.
+- `SetExclusionRegions()` / `ClearExclusionRegions()`는 layout + render dirty를 다시 set한다.
+- layout size 변경은 `OnRelayout()`에서 layout + render dirty를 다시 set한다.
+
+현재 의도:
+
+- 동일 상태에서 `UpdateRenderData()` / `Renderer::Render()` 반복 호출을 줄인다.
+- moving bounds처럼 exclusion region이 바뀌면 render dirty가 다시 set되어 render update가 발생한다.
+- `IsRenderReady()` 하나만으로 clear하지 않는다.
+
+남은 확인 필요:
+
+- `GetRendererOutputTotalRendererCount()`를 clear 조건에 포함할지 여부
+- output actor 재생성 / 교체가 발생하는 경우 clear 조건 안정성
+- render dirty false 상태에서 actor / renderer가 외부 요인으로 invalid 되는 경우
+- future async render와 dirty clear 관계
+- performance sample에서 FPS 개선 여부
+
+## 10. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Add render dirty clear condition
-
-이유:
-
-- render path가 계속 열린 상태일 수 있어 성능 영향 가능성이 있다.
-- 단, `IsRenderReady()`만으로 clear하면 안 된다.
-
-최소 조건 후보:
-
-- `UpdateRenderData()` 성공
-- `Renderer::Render()` 성공
-- output actor attach / parent 상태 일관성
-- requested glyph count / returned glyph count 일관성
-
-### B. Redundant exclusion region update skip
+### A. Redundant exclusion region update skip
 
 이유:
 
@@ -231,7 +265,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 - epsilon compare 또는 sample-level unchanged skip을 검토할 수 있다.
 - core API 정책과 sample upstream skip은 분리해서 판단해야 한다.
 
-### C. Layout unchanged render skip
+### B. Layout unchanged render skip
 
 이유:
 
@@ -243,21 +277,21 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 - float comparison / hash 정책이 필요하다.
 - layout version 또는 placement hash 기준을 먼저 설계해야 한다.
 
-### D. Line-level metrics
+### C. Line-level metrics
 
 이유:
 
 - 현재는 `PreparedText` level metrics 하나만 사용한다.
 - fallback font / emoji가 섞인 line의 line height / baseline 품질 개선이 필요하다.
 
-### E. Word / cluster line break quality
+### D. Word / cluster line break quality
 
 이유:
 
 - 현재 line break는 glyph advance sequential placement에 가깝다.
 - 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
 
-## 10. 다음 커밋 금지 사항
+## 11. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -271,7 +305,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 11. 최신 성능 경로 구조
+## 12. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -281,7 +315,9 @@ flowchart LR
   D --> E[LayoutGlyphs with reserved buffers]
   E --> F[UpdateRenderData with reserved render data]
   F --> G[Renderer::Render]
-  G --> H[Output Actor]
+  G --> H{Render success conditions}
+  H --> I[Clear RenderDirty]
+  H --> J[Output Actor]
 ```
 
 현재 의미:
@@ -291,9 +327,10 @@ flowchart LR
 - layout pass에서 exclusion regions를 y-sorted cache로 준비한다.
 - `LayoutGlyphs()`는 reserved `LayoutResult` buffer를 사용한다.
 - `UpdateRenderData()`는 renderable glyph count 기반 reserved render data를 사용한다.
-- 현재도 `Renderer::Render()` full call은 남아 있다.
+- render 성공 조건을 만족하면 render dirty를 clear한다.
+- 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 12. Compact 이후 복구 지침
+## 13. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
@@ -303,4 +340,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 `render dirty clear` 조건을 별도 커밋으로 설계하는 것이다.
+현재 가장 자연스러운 다음 작업은 redundant exclusion region update skip을 검토하는 것이다.
