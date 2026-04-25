@@ -994,6 +994,50 @@ int UtcDaliTextVisualizerGlyphLayoutWithExclusionP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerLayoutResultSignatureSameForSameLayoutP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  exclusionRegions.PushBack(Rect<float>(10.0f, 0.0f, 25.0f, 20.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult firstLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult secondLayoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 120.0f, 0.0f, exclusionRegions, firstLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 120.0f, 0.0f, exclusionRegions, secondLayoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(firstLayoutResult.CalculateSignature(), secondLayoutResult.CalculateSignature(), TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutResultSignatureChangesForMovedExclusionP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghijabcdefghij", 10.0f);
+  Dali::Vector<Rect<float>> exclusionRegionsA;
+  Dali::Vector<Rect<float>> exclusionRegionsB;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult firstLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult secondLayoutResult;
+
+  exclusionRegionsA.PushBack(Rect<float>(0.0f, 0.0f, 55.0f, 24.0f));
+  exclusionRegionsB.PushBack(Rect<float>(70.0f, 0.0f, 55.0f, 24.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 140.0f, 0.0f, exclusionRegionsA, firstLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 140.0f, 0.0f, exclusionRegionsB, secondLayoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u && !firstLayoutResult.Empty() && !secondLayoutResult.Empty())
+  {
+    DALI_TEST_CHECK(firstLayoutResult.CalculateSignature() != secondLayoutResult.CalculateSignature());
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerGlyphLayoutEmptyTextP(void)
 {
   UiTestApplication application;
@@ -2251,6 +2295,38 @@ int UtcDaliTextVisualizerRenderDirtyClearsAfterSuccessfulRenderSmokeP(void)
   application.GetScene().Add(textVisualizer);
   application.SendNotification();
   application.Render();
+  application.SendNotification();
+  application.Render();
+
+  MeasuredSize measured = textVisualizer.Measure(240.0f, 0.0f);
+  DALI_TEST_CHECK(measured.GetWidth() > 0.0f);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutUnchangedRenderSkipSmokeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> exclusionRegionsA;
+  Dali::Vector<Rect<float>> exclusionRegionsB;
+  DALI_TEST_CHECK(textVisualizer);
+
+  exclusionRegionsA.PushBack(Rect<float>(0.0f, 220.0f, 20.0f, 20.0f));
+  exclusionRegionsB.PushBack(Rect<float>(40.0f, 220.0f, 20.0f, 20.0f));
+
+  textVisualizer.SetText("TextVisualizer unchanged layout render skip smoke.");
+  textVisualizer.SetFontSize(12.0f);
+  textVisualizer.SetRequestedWidth(240.0f);
+  textVisualizer.SetRequestedHeight(120.0f);
+  textVisualizer.SetExclusionRegions(exclusionRegionsA);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  textVisualizer.SetExclusionRegions(exclusionRegionsB);
   application.SendNotification();
   application.Render();
 

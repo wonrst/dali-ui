@@ -19,6 +19,7 @@
  */
 
 // EXTERNAL INCLUDES
+#include <cmath>
 #include <cstdint>
 
 // INTERNAL INCLUDES
@@ -112,6 +113,59 @@ struct LayoutResult
   uint32_t GetLineCount() const
   {
     return lines.Count();
+  }
+
+  uint64_t CalculateSignature(float epsilon = 0.01f) const
+  {
+    uint64_t signature = 1469598103934665603ull;
+
+    HashCombine(signature, lines.Count());
+    HashCombine(signature, clusterPlacements.Count());
+    HashCombine(signature, glyphPlacements.Count());
+    HashCombine(signature, Quantize(width, epsilon));
+    HashCombine(signature, Quantize(height, epsilon));
+
+    for(uint32_t lineIndex = 0u; lineIndex < lines.Count(); ++lineIndex)
+    {
+      const TextLine& line = lines[lineIndex];
+      HashCombine(signature, Quantize(line.y, epsilon));
+      HashCombine(signature, Quantize(line.height, epsilon));
+      HashCombine(signature, line.fragments.Count());
+    }
+
+    for(uint32_t placementIndex = 0u; placementIndex < clusterPlacements.Count(); ++placementIndex)
+    {
+      const ClusterPlacement& placement = clusterPlacements[placementIndex];
+      HashCombine(signature, placement.clusterIndex);
+      HashCombine(signature, Quantize(placement.x, epsilon));
+      HashCombine(signature, Quantize(placement.y, epsilon));
+      HashCombine(signature, Quantize(placement.width, epsilon));
+    }
+
+    for(uint32_t placementIndex = 0u; placementIndex < glyphPlacements.Count(); ++placementIndex)
+    {
+      const GlyphPlacement& placement = glyphPlacements[placementIndex];
+      HashCombine(signature, placement.glyphIndex);
+      HashCombine(signature, Quantize(placement.x, epsilon));
+      HashCombine(signature, Quantize(placement.y, epsilon));
+      HashCombine(signature, Quantize(placement.width, epsilon));
+      HashCombine(signature, Quantize(placement.height, epsilon));
+      HashCombine(signature, Quantize(placement.advance, epsilon));
+    }
+
+    return signature;
+  }
+
+private:
+  static uint64_t Quantize(float value, float epsilon)
+  {
+    const float safeEpsilon = epsilon > 0.0f ? epsilon : 0.01f;
+    return static_cast<uint64_t>(static_cast<int64_t>(std::llround(value / safeEpsilon)));
+  }
+
+  static void HashCombine(uint64_t& seed, uint64_t value)
+  {
+    seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6u) + (seed >> 2u);
   }
 };
 

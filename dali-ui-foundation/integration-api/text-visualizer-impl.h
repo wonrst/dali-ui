@@ -18,6 +18,7 @@
  */
 
 // EXTERNAL INCLUDES
+#include <cstdint>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
@@ -182,6 +183,7 @@ private:
   void  MarkPrepareDirty();
   void  MarkLayoutDirty();
   void  MarkRenderDirty();
+  void  MarkPlacementRenderDirty();
   void  ClearPrepareDirty();
   void  ClearLayoutDirty();
   void  ClearRenderDirty();
@@ -191,7 +193,10 @@ private:
   void  LogRenderDiagnostics(const Vector2& size, bool updateRenderDataResult, bool attachResult) const;
   float CalculateEffectiveLineHeight() const;
   bool  HasRenderHost() const;
+  bool  CanSkipRenderForUnchangedLayout(uint64_t layoutSignature) const;
   bool  IsRenderUpdateSuccessful(bool updateRenderDataResult, bool attachResult) const;
+  void  ResetLastRenderedLayoutSignature();
+  void  StoreLastRenderedLayoutSignature(uint64_t layoutSignature);
   bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   void  UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
   void  SyncRenderStateToAdapter(const Vector2& controlSize);
@@ -209,9 +214,12 @@ private:
   Internal::TextVisualizer::AtlasRendererBridge mAtlasRendererBridge;
   Actor                                         mRenderHost;
   Vector2                                       mLastLayoutSize;
+  uint64_t                                      mLastRenderedLayoutSignature;
   bool                                          mPrepareDirty;
   bool                                          mLayoutDirty;
   bool                                          mRenderDirty;
+  bool                                          mForceRenderDirty;
+  bool                                          mHasLastRenderedLayoutSignature;
   mutable bool                                  mRenderDiagnosticsLogged;
 };
 

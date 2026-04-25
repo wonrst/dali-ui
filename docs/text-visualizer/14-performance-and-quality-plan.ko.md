@@ -55,7 +55,7 @@ flowchart LR
 |---|---|---|---|---|
 | `SetExclusionRegions()`마다 full vector compare/copy | core API는 exact compare 정책을 유지하고, performance sample에는 exclusion update threshold를 추가했다 | bounds 수가 많아질수록 tick마다 O(N) 비교 + 복사 비용이 있었고, sample threshold로 일부 redundant call을 줄인다 | core epsilon 정책은 별도 검토 | sample 1차 완료 |
 | 매 tick full `LayoutGlyphs()` | bounds 이동 시 전체 glyph를 처음부터 다시 배치한다 | glyph 수가 길수록 O(glyph count * line count) 성격으로 커진다 | partial relayout 또는 unchanged layout skip | 높음 |
-| 매 tick full `Renderer::Render()` | `AttachRendererToHost()`가 attached 상태여도 `Render()`를 다시 호출한다 | relayout 뒤 geometry/update 비용이 누적된다 | layout 변경이 없으면 render skip, 중기적으로 geometry-only update 검토 | 높음 |
+| 매 tick full `Renderer::Render()` | layout signature가 마지막 render와 같으면 placement-only dirty에서 render를 skip한다 | relayout 뒤 geometry/update 비용이 누적될 수 있었고, 동일 layout에서는 `UpdateRenderData()` / `Renderer::Render()` 호출을 줄인다 | signature cost와 epsilon 적절성 관찰 | 1차 완료 |
 | output actor/mesh regeneration | output actor 재사용 여부와 별개로 내부 child mesh actor/renderer update가 발생할 수 있다 | actor/renderer 구조가 커질수록 비용 증가 가능 | output actor/mesh actor 재사용 정책 조사 | 중간 |
 | `GetLineBaselineOffset()`의 same-line scan | `AtlasViewAdapter::GetRendererGlyphPosition()`가 glyph마다 같은 line의 glyph placements를 다시 훑는다 | 렌더 직전 좌표 보정에서 line당 반복 scan이 발생한다 | line baseline cache 추가 | 높음 |
 | exclusion interval 계산 시 line마다 모든 bounds scan | 기존에는 `BuildAvailableIntervals()`가 line마다 모든 exclusion region을 확인했다. 현재는 layout pass 시작 시 y축 기준 sorted cache를 만들고 line band와 겹칠 수 있는 후보만 검사한다 | bounds 수와 line 수가 모두 커질수록 비용이 커졌고, 1차 최적화 후에는 per-line 후보 scan 비용이 줄었다 | 더 큰 bounds 수에서는 spatial index / partial relayout 검토 | 1차 완료 |
@@ -110,8 +110,9 @@ flowchart LR
 
 후보:
 
-- `LayoutResult` version/hash 추가
-- glyph placement count / x/y/advance 변화가 없으면 render skip
+- 1차 구현은 완료됐다.
+- `LayoutResult::CalculateSignature()`가 count / size / placement 좌표를 0.01px epsilon으로 quantize해 signature를 만든다.
+- placement-only dirty에서 signature가 마지막 render와 같으면 render path를 skip한다.
 
 ### E. `LayoutResult` / render data reserve
 
@@ -768,25 +769,72 @@ status 표시:
 
 - threshold가 너무 크면 moving bounds와 text reflow 사이에 시각적인 지연이 생겨 visual fidelity가 떨어질 수 있다.
 - 이번 변경은 sample-level upstream skip 실험이며, core API epsilon compare 정책을 의미하지 않는다.
-- partial relayout이나 layout unchanged render skip은 아직 도입하지 않았다.
+- partial relayout은 아직 도입하지 않았다.
+
+## 진행: layout unchanged render skip
+
+최근 커밋:
+
+- `Skip TextVisualizer render when layout is unchanged`
+
+목표:
+
+- exclusion region이나 size 변경 때문에 layout dirty / render dirty가 열렸더라도, 최종 `LayoutResult`가 마지막 render에 사용한 결과와 같으면 `UpdateRenderData()` / `Renderer::Render()` 호출을 생략한다.
+- public API, line break policy, layout placement policy, renderer 구현은 변경하지 않는다.
+
+추가된 구조:
+
+- `LayoutResult::CalculateSignature(float epsilon = 0.01f)`를 추가했다.
+- signature에는 다음 항목을 포함한다.
+  - `lines.Count()`
+  - `clusterPlacements.Count()`
+  - `glyphPlacements.Count()`
+  - layout `width / height`
+  - line `y / height / fragment count`
+  - cluster placement `clusterIndex / x / y / width`
+  - glyph placement `glyphIndex / x / y / width / height / advance`
+- float 값은 `round(value / epsilon)` 방식으로 quantize한다.
+- 기본 epsilon은 `0.01px`다.
+
+render skip 조건:
+
+- `mRenderDirty == true`
+- dirty reason이 force-render가 아니라 placement-only dirty다.
+- 현재 layout이 empty가 아니다.
+- 마지막 성공 render의 layout signature가 존재한다.
+- 현재 layout signature가 마지막 render signature와 같다.
+- renderer bridge가 render-ready 상태다.
+- 기존 renderer output actor가 valid하고 render host에 parented 되어 있다.
+
+force render dirty 정책:
+
+- `SetText()` / `SetFontFamily()` / `SetFontSize()`는 prepare dirty를 통해 force render로 처리한다.
+- `SetTextColor()`는 layout이 같아도 render가 필요하므로 force render로 처리한다.
+- prepare 후 첫 render도 force render로 처리한다.
+- `SetExclusionRegions()` / `ClearExclusionRegions()` / size change / `SetLineHeight()`는 placement-only dirty로 처리한다.
+
+render 성공 후:
+
+- `IsRenderUpdateSuccessful()` 조건을 만족하면 현재 layout signature를 마지막 render signature로 저장한다.
+- 그 뒤 render dirty를 clear한다.
+
+기대 효과:
+
+- moving bounds가 바뀌어도 최종 glyph placement가 같으면 render data 재생성과 `Renderer::Render()` 호출을 생략한다.
+- performance sample threshold가 놓치는 경우에도 core 쪽에서 layout 결과 동일성을 기준으로 한 번 더 비용을 줄일 수 있다.
+
+확인 필요:
+
+- `0.01px` epsilon이 너무 민감하거나 둔감하지 않은지 확인
+- very large glyph count에서 signature 계산 비용이 render skip 이득보다 커지는지 확인
+- color / style 변화가 계속 force render로 확실히 분리되는지 확인
+- future per-glyph color / style 도입 시 signature에 포함할 항목 재검토
 
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Layout unchanged 시 render skip
-
-이유:
-
-- exclusion regions가 바뀌어도 최종 glyph placement가 같을 수 있다.
-- layout 결과가 동일하면 `UpdateRenderData()` / `Renderer::Render()`를 생략할 여지가 있다.
-
-주의:
-
-- float 비교 정책, layout hash/version, glyph placement 비교 기준이 필요하다.
-- `render dirty` clear 조건보다 뒤에서 다루는 것이 안전하다.
-
-### B. Core redundant exclusion region update policy
+### A. Core redundant exclusion region update policy
 
 이유:
 
@@ -798,21 +846,21 @@ status 표시:
 - core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
 - public behavior를 바꾸지 않는 방향으로 별도 검토한다.
 
-### C. Add line-level metrics if needed
+### B. Add line-level metrics if needed
 
 이유:
 
 - 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
 - `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
 
-### D. Clarify FontSize unit and conversion
+### C. Clarify FontSize unit and conversion
 
 이유:
 
 - public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
 - line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
 
-### E. Improve word/cluster line break
+### D. Improve word/cluster line break
 
 이유:
 
@@ -826,7 +874,8 @@ status 표시:
 - layout/render buffer reserve의 1차 최적화는 완료됐다.
 - render dirty clear의 1차 조건은 도입됐다.
 - performance sample에는 exclusion update threshold가 도입됐다.
-- 다음 성능 후보는 layout unchanged render skip이나 core redundant update policy처럼 float/layout 비교 정책이 필요한 작업이다.
+- layout unchanged render skip의 1차 조건은 도입됐다.
+- 다음 성능 후보는 core redundant update policy, partial relayout, geometry-only update처럼 더 큰 정책 판단이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 
 ## 금지 사항

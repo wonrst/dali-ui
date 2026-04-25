@@ -18,15 +18,17 @@
 - `Fix TextVisualizer UTC expectations`
 - `Add TextVisualizer render dirty clear condition`
 - `Add TextVisualizer performance sample exclusion update threshold`
+- `Skip TextVisualizer render when layout is unchanged`
 
-직전 기준 커밋:
+이번 작업 이전 최신 커밋:
 
-- `ed71e35` `Fix TextVisualizer UTC expectations`
+- `9b3f286` `Add TextVisualizer performance sample exclusion update threshold`
 
 최근 최적화 상태:
 
 - render dirty clear 조건을 전용 커밋으로 도입했다.
 - performance sample에 exclusion update threshold를 도입했다.
+- layout unchanged render skip을 도입했다.
 
 현재 해석:
 
@@ -45,7 +47,7 @@
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `115 tests, 0 failures` 상태다.
+- 전체 `TextVisualizer` UTC는 `118 tests, 0 failures` 상태다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -192,7 +194,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 현재 결과:
 
 - targeted UTC passed
-- 전체 `TextVisualizer` UTC: `115 tests, 0 failures`
+- 전체 `TextVisualizer` UTC: `118 tests, 0 failures`
 
 커밋 참고:
 
@@ -209,7 +211,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
 | redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
-| layout unchanged render skip | 아직 남음 | layout hash/version 검토 |
+| layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
 ## 9. Render Dirty Clear 현재 상태
@@ -292,44 +294,76 @@ status 표시:
 - applied/skipped 비율과 체감 reflow 지연 사이의 균형
 - core API에 epsilon 정책이 필요한지, upstream skip만으로 충분한지
 
-## 11. 다음 추천 작업
+## 11. Layout Unchanged Render Skip 현재 상태
+
+layout unchanged render skip은 core `TextVisualizerImpl` 내부 최적화로 1차 적용됐다.
+
+현재 정책:
+
+- `LayoutResult::CalculateSignature(float epsilon = 0.01f)`가 추가됐다.
+- 기본 epsilon은 `0.01px`다.
+- float 값은 `round(value / epsilon)` 방식으로 quantize한다.
+- signature는 line / cluster / glyph placement count, layout size, line metrics, cluster placement, glyph placement 좌표와 advance를 포함한다.
+
+skip 조건:
+
+- render dirty가 true다.
+- dirty reason이 force render가 아니라 placement-only dirty다.
+- current layout이 empty가 아니다.
+- 마지막 성공 render의 layout signature가 있다.
+- current layout signature가 마지막 render signature와 같다.
+- bridge가 render-ready 상태다.
+- 기존 renderer output actor가 valid하고 render host에 parented 되어 있다.
+
+force render dirty 정책:
+
+- text / font family / font size 변경은 prepare dirty를 통해 force render로 처리한다.
+- textColor 변경은 layout이 같아도 render가 필요하므로 force render로 처리한다.
+- prepare 후 첫 render도 force render다.
+- exclusion / size / lineHeight 변경은 placement-only dirty로 처리되어, layout signature가 같으면 render skip이 가능하다.
+
+render 성공 후:
+
+- `UpdateRenderData()` / `AttachRendererToHost()`가 성공하고 render-ready / output parent / glyph count 조건을 만족하면 current layout signature를 저장한다.
+- 그 뒤 render dirty를 clear한다.
+
+기대 효과:
+
+- moving bounds가 계속 변해도 최종 glyph placement가 같으면 `UpdateRenderData()` / `Renderer::Render()` 호출을 생략한다.
+- performance sample threshold보다 core 쪽에서 더 직접적으로 “결과가 같은 layout”을 걸러낸다.
+
+확인 필요:
+
+- `0.01px` epsilon이 실제 device / font metrics에서 적절한지
+- very large glyph count에서 signature 계산 비용이 skip 이득보다 큰 경우가 있는지
+- future per-glyph color / style 도입 시 signature와 force-render reason 확장 필요 여부
+
+## 12. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Layout unchanged render skip
-
-이유:
-
-- exclusion regions가 바뀌어도 최종 glyph placement가 같을 수 있다.
-- layout result가 같으면 `UpdateRenderData()` / `Renderer::Render()`를 생략할 여지가 있다.
-
-주의:
-
-- float comparison / hash 정책이 필요하다.
-- layout version 또는 placement hash 기준을 먼저 설계해야 한다.
-
-### B. Core redundant exclusion region update policy
+### A. Core redundant exclusion region update policy
 
 이유:
 
 - performance sample threshold는 upstream skip 실험으로 완료됐다.
 - core API에 epsilon compare를 넣을지는 layout correctness 정책을 따로 세워야 한다.
 
-### C. Line-level metrics
+### B. Line-level metrics
 
 이유:
 
 - 현재는 `PreparedText` level metrics 하나만 사용한다.
 - fallback font / emoji가 섞인 line의 line height / baseline 품질 개선이 필요하다.
 
-### D. Word / cluster line break quality
+### C. Word / cluster line break quality
 
 이유:
 
 - 현재 line break는 glyph advance sequential placement에 가깝다.
 - 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
 
-## 12. 다음 커밋 금지 사항
+## 13. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -343,7 +377,7 @@ status 표시:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 13. 최신 성능 경로 구조
+## 14. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -353,7 +387,9 @@ flowchart LR
   B --> C[LayoutDirty / RenderDirty]
   C --> D[y-sorted exclusion cache]
   D --> E[LayoutGlyphs with reserved buffers]
-  E --> F[UpdateRenderData with reserved render data]
+  E --> L{Layout signature unchanged}
+  L -->|yes| K[Skip render path]
+  L -->|no| F[UpdateRenderData with reserved render data]
   F --> G[Renderer::Render]
   G --> H{Render success conditions}
   H --> I[Clear RenderDirty]
@@ -367,11 +403,12 @@ flowchart LR
 - `SetExclusionRegions()`는 layout dirty / render dirty를 발생시킨다.
 - layout pass에서 exclusion regions를 y-sorted cache로 준비한다.
 - `LayoutGlyphs()`는 reserved `LayoutResult` buffer를 사용한다.
+- placement-only dirty에서 layout signature가 마지막 render와 같으면 render path를 skip할 수 있다.
 - `UpdateRenderData()`는 renderable glyph count 기반 reserved render data를 사용한다.
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 14. Compact 이후 복구 지침
+## 15. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
@@ -381,4 +418,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 layout unchanged render skip 또는 core redundant exclusion update policy를 검토하는 것이다.
+현재 가장 자연스러운 다음 작업은 core redundant exclusion update policy 또는 line-level metrics를 검토하는 것이다.

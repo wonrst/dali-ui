@@ -80,9 +80,12 @@ TextVisualizerImpl::TextVisualizerImpl()
   mAtlasRendererBridge(),
   mRenderHost(),
   mLastLayoutSize(Vector2::ZERO),
+  mLastRenderedLayoutSignature(0u),
   mPrepareDirty(true),
   mLayoutDirty(true),
   mRenderDirty(true),
+  mForceRenderDirty(true),
+  mHasLastRenderedLayoutSignature(false),
   mRenderDiagnosticsLogged(false)
 {
 }
@@ -148,7 +151,7 @@ void TextVisualizerImpl::SetLineHeight(float lineHeight)
   {
     mLineHeight = normalizedLineHeight;
     MarkLayoutDirty();
-    MarkRenderDirty();
+    MarkPlacementRenderDirty();
     RelayoutRequest();
     InvalidateMeasure();
   }
@@ -200,7 +203,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
   {
     mExclusionRegions = regions;
     MarkLayoutDirty();
-    MarkRenderDirty();
+    MarkPlacementRenderDirty();
     RelayoutRequest();
     InvalidateMeasure();
   }
@@ -217,7 +220,7 @@ void TextVisualizerImpl::ClearExclusionRegions()
   {
     mExclusionRegions.Clear();
     MarkLayoutDirty();
-    MarkRenderDirty();
+    MarkPlacementRenderDirty();
     RelayoutRequest();
     InvalidateMeasure();
   }
@@ -246,7 +249,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   if(mLastLayoutSize != size)
   {
     MarkLayoutDirty();
-    MarkRenderDirty();
+    MarkPlacementRenderDirty();
   }
 
   if(mLayoutDirty)
@@ -262,6 +265,15 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   SyncRenderStateToAdapter(size);
   SyncRenderHostSize(size);
 
+  const bool     hasLayoutSignature      = !mLayoutResult.Empty();
+  const uint64_t currentLayoutSignature  = hasLayoutSignature ? mLayoutResult.CalculateSignature() : 0u;
+  const bool     skipUnchangedLayoutRender = hasLayoutSignature && CanSkipRenderForUnchangedLayout(currentLayoutSignature);
+
+  if(skipUnchangedLayoutRender)
+  {
+    ClearRenderDirty();
+  }
+
   if(mRenderDirty && mAtlasRendererBridge.HasRenderableGlyphs())
   {
     updateRenderDataResult = mAtlasRendererBridge.UpdateRenderData();
@@ -273,6 +285,10 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
       attachResult = mAtlasRendererBridge.AttachRendererToHost();
       if(IsRenderUpdateSuccessful(updateRenderDataResult, attachResult))
       {
+        if(hasLayoutSignature)
+        {
+          StoreLastRenderedLayoutSignature(currentLayoutSignature);
+        }
         ClearRenderDirty();
       }
     }
@@ -374,7 +390,9 @@ void TextVisualizerImpl::MarkPrepareDirty()
   mPrepareDirty            = true;
   mLayoutDirty             = true;
   mRenderDirty             = true;
+  mForceRenderDirty        = true;
   mRenderDiagnosticsLogged = false;
+  ResetLastRenderedLayoutSignature();
 }
 
 void TextVisualizerImpl::MarkLayoutDirty()
@@ -386,6 +404,14 @@ void TextVisualizerImpl::MarkLayoutDirty()
 void TextVisualizerImpl::MarkRenderDirty()
 {
   mRenderDirty             = true;
+  mForceRenderDirty        = true;
+  mRenderDiagnosticsLogged = false;
+}
+
+void TextVisualizerImpl::MarkPlacementRenderDirty()
+{
+  mRenderDirty             = true;
+  mForceRenderDirty        = false;
   mRenderDiagnosticsLogged = false;
 }
 
@@ -401,7 +427,8 @@ void TextVisualizerImpl::ClearLayoutDirty()
 
 void TextVisualizerImpl::ClearRenderDirty()
 {
-  mRenderDirty = false;
+  mRenderDirty      = false;
+  mForceRenderDirty = false;
 }
 
 void TextVisualizerImpl::EnsureRenderHost()
@@ -437,6 +464,7 @@ void TextVisualizerImpl::ClearRenderHost()
   mAtlasRendererBridge.DetachRendererFromHost();
   mAtlasRendererBridge.SetRenderHost(Actor());
   mAtlasRendererBridge.SetTextControlActor(Actor());
+  ResetLastRenderedLayoutSignature();
 
   if(mRenderHost)
   {
@@ -502,6 +530,17 @@ bool TextVisualizerImpl::HasRenderHost() const
   return static_cast<bool>(mRenderHost);
 }
 
+bool TextVisualizerImpl::CanSkipRenderForUnchangedLayout(uint64_t layoutSignature) const
+{
+  return mRenderDirty &&
+         !mForceRenderDirty &&
+         mHasLastRenderedLayoutSignature &&
+         layoutSignature == mLastRenderedLayoutSignature &&
+         mAtlasRendererBridge.IsRenderReady() &&
+         mAtlasRendererBridge.GetRendererOutput() &&
+         mAtlasRendererBridge.IsRendererOutputParentedToHost();
+}
+
 bool TextVisualizerImpl::IsRenderUpdateSuccessful(bool updateRenderDataResult, bool attachResult) const
 {
   if(!mRenderDirty ||
@@ -520,6 +559,18 @@ bool TextVisualizerImpl::IsRenderUpdateSuccessful(bool updateRenderDataResult, b
 
   return lastReturnedGlyphCount > 0u &&
          lastReturnedGlyphCount <= lastRequestedGlyphCount;
+}
+
+void TextVisualizerImpl::ResetLastRenderedLayoutSignature()
+{
+  mLastRenderedLayoutSignature    = 0u;
+  mHasLastRenderedLayoutSignature = false;
+}
+
+void TextVisualizerImpl::StoreLastRenderedLayoutSignature(uint64_t layoutSignature)
+{
+  mLastRenderedLayoutSignature    = layoutSignature;
+  mHasLastRenderedLayoutSignature = true;
 }
 
 float TextVisualizerImpl::CalculateEffectiveLineHeight() const
