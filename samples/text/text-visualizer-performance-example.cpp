@@ -633,6 +633,11 @@ private:
 
   void UpdateStatusText(bool force)
   {
+    if(!mStatusTextUpdatesEnabled)
+    {
+      return;
+    }
+
     if(!force && (mFrameCount % STATUS_INTERVAL) != 0u)
     {
       return;
@@ -656,9 +661,21 @@ private:
             << "   ANIM " << (mAnimationEnabled ? "ON" : "OFF")
             << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
             << "   DRAG ORBS"
-            << "   Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color · 7/8/9 threshold";
+            << "   0 status · Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color · 7/8/9 threshold";
 
     mStatusLabel.SetText(builder.str().c_str());
+  }
+
+  void ToggleStatusTextUpdates()
+  {
+    mStatusTextUpdatesEnabled = !mStatusTextUpdatesEnabled;
+    if(mStatusTextUpdatesEnabled)
+    {
+      UpdateStatusText(true);
+      return;
+    }
+
+    mStatusLabel.SetText("STATUS OFF   Press 0 to enable status updates");
   }
 
   void ToggleAnimation()
@@ -729,6 +746,10 @@ private:
     {
       ToggleAnimation();
     }
+    else if(keyName == "0")
+    {
+      ToggleStatusTextUpdates();
+    }
     else if(keyName == "1")
     {
       SetOrbCount(mActiveOrbCount - 1u);
@@ -781,6 +802,7 @@ private:
   Timer                                 mTimer;
   bool                                  mAnimationEnabled{true};
   bool                                  mExclusionEnabled{true};
+  bool                                  mStatusTextUpdatesEnabled{true};
   bool                                  mHasAppliedExclusionRegions{false};
   int32_t                               mDraggedOrbIndex{-1};
   Vector2                               mDragGrabOffset{Vector2::ZERO};
