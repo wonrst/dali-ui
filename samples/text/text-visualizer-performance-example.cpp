@@ -56,6 +56,7 @@ constexpr uint32_t MIN_ORB_COUNT    = 2u;
 constexpr uint32_t DEFAULT_ORB_COUNT = 5u;
 constexpr uint32_t STATUS_INTERVAL  = 10u;
 constexpr uint32_t TIMER_INTERVAL_MS = 16u;
+constexpr uint32_t ORB_EXCLUSION_BAND_COUNT = 11u;
 constexpr float DEFAULT_EXCLUSION_UPDATE_THRESHOLD = 0.5f;
 constexpr float EXCLUSION_UPDATE_THRESHOLD_STEP    = 0.5f;
 
@@ -194,6 +195,7 @@ struct MovingOrb
 
 struct QuoteBlock
 {
+  View           container;
   View           accent;
   TextVisualizer text;
   Vector2        position{Vector2::ZERO};
@@ -242,12 +244,21 @@ private:
     mRoot.SetRequestedHeight(MATCH_PARENT);
     mRoot.SetBackgroundColor(WINDOW_BG_COLOR);
 
+    mTitleArea = View::New();
+    mTitleArea.SetLayoutMode(LayoutMode::STANDALONE);
+    mTitleArea.SetPositionX(SIDE_MARGIN - 6.0f);
+    mTitleArea.SetPositionY(TITLE_TOP);
+    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f);
+    mTitleArea.SetRequestedHeight(TITLE_HEIGHT);
+    mTitleArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mTitleArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
+
     mTitleText = TextVisualizer::New();
     mTitleText.SetLayoutMode(LayoutMode::STANDALONE);
-    mTitleText.SetPositionX(SIDE_MARGIN - 6.0f);
-    mTitleText.SetPositionY(TITLE_TOP);
-    mTitleText.SetRequestedWidth(WINDOW_WIDTH - (SIDE_MARGIN * 2.0f));
-    mTitleText.SetRequestedHeight(TITLE_HEIGHT);
+    mTitleText.SetPositionX(0.0f);
+    mTitleText.SetPositionY(0.0f);
+    mTitleText.SetRequestedWidth(MATCH_PARENT);
+    mTitleText.SetRequestedHeight(MATCH_PARENT);
     mTitleText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTitleText.SetText(BuildTitleText());
     mTitleText.SetFontSize(TITLE_FONT_SIZE);
@@ -274,7 +285,8 @@ private:
     mStatusText.SetLineHeight(1.2f);
     mStatusText.SetTextColor(STATUS_TEXT_COLOR);
 
-    mRoot.Add(mTitleText);
+    mTitleArea.Add(mTitleText);
+    mRoot.Add(mTitleArea);
     mRoot.Add(mContentArea);
     mRoot.Add(mStatusText);
     window.Add(mRoot);
@@ -312,10 +324,19 @@ private:
       block.position = position;
       block.size     = size;
 
+      block.container = View::New();
+      block.container.SetLayoutMode(LayoutMode::STANDALONE);
+      block.container.SetPositionX(position.x);
+      block.container.SetPositionY(position.y);
+      block.container.SetRequestedWidth(size.x);
+      block.container.SetRequestedHeight(size.y);
+      block.container.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+      block.container.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
+
       block.accent = View::New();
       block.accent.SetLayoutMode(LayoutMode::STANDALONE);
-      block.accent.SetPositionX(position.x + 12.0f);
-      block.accent.SetPositionY(position.y + 12.0f);
+      block.accent.SetPositionX(12.0f);
+      block.accent.SetPositionY(12.0f);
       block.accent.SetRequestedWidth(3.0f);
       block.accent.SetRequestedHeight(accentHeight);
       block.accent.SetBackgroundColor(ACCENT_COLOR.WithAlpha(0.65f));
@@ -327,8 +348,8 @@ private:
 
       block.text = TextVisualizer::New();
       block.text.SetLayoutMode(LayoutMode::STANDALONE);
-      block.text.SetPositionX(position.x + QUOTE_PADDING_LEFT);
-      block.text.SetPositionY(position.y + QUOTE_PADDING_TOP);
+      block.text.SetPositionX(QUOTE_PADDING_LEFT);
+      block.text.SetPositionY(QUOTE_PADDING_TOP);
       block.text.SetRequestedWidth(std::max(0.0f, size.x - QUOTE_PADDING_LEFT - QUOTE_PADDING_RIGHT));
       block.text.SetRequestedHeight(std::max(0.0f, size.y - QUOTE_PADDING_TOP - QUOTE_PADDING_BOTTOM));
       block.text.SetBackgroundColor(UiColor(Color::TRANSPARENT));
@@ -337,8 +358,9 @@ private:
       block.text.SetLineHeight(QUOTE_LINE_HEIGHT);
       block.text.SetTextColor(QUOTE_TEXT_COLOR);
 
-      mContentArea.Add(block.accent);
-      mContentArea.Add(block.text);
+      block.container.Add(block.accent);
+      block.container.Add(block.text);
+      mContentArea.Add(block.container);
       mQuoteBlocks.push_back(block);
     };
 
@@ -510,30 +532,26 @@ private:
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
   {
     constexpr float ORB_BOUND_PADDING = 8.0f;
-    const float insetX = orb.size.x * 0.18f;
-    const float topBandHeight = orb.size.y * 0.22f;
-    const float middleBandHeight = orb.size.y * 0.28f;
-    const float bottomBandHeight = orb.size.y * 0.22f;
-    const float middleStartY = orb.position.y + (orb.size.y * 0.22f);
+    const float     radiusX    = orb.size.x * 0.5f;
+    const float     radiusY    = orb.size.y * 0.5f;
+    const float     centerX    = orb.position.x + radiusX;
+    const float     centerY    = orb.position.y + radiusY;
+    const float     bandHeight = orb.size.y / static_cast<float>(ORB_EXCLUSION_BAND_COUNT);
 
-    const float insetBandWidth = std::max(0.0f, orb.size.x - (insetX * 2.0f));
+    for(uint32_t bandIndex = 0u; bandIndex < ORB_EXCLUSION_BAND_COUNT; ++bandIndex)
+    {
+      const float bandTop     = orb.position.y + (static_cast<float>(bandIndex) * bandHeight);
+      const float bandCenterY = bandTop + (bandHeight * 0.5f);
+      const float normalizedY = (radiusY > 0.0f) ? ((bandCenterY - centerY) / radiusY) : 0.0f;
+      const float xScale      = std::sqrt(std::max(0.0f, 1.0f - (normalizedY * normalizedY)));
+      const float bandWidth   = std::max(0.0f, orb.size.x * xScale);
+      const float bandLeft    = centerX - (bandWidth * 0.5f);
 
-    regions.PushBack(Rect<float>(orb.position.x + insetX - ORB_BOUND_PADDING,
-                                 orb.position.y - ORB_BOUND_PADDING,
-                                 insetBandWidth + (ORB_BOUND_PADDING * 2.0f),
-                                 topBandHeight + (ORB_BOUND_PADDING * 2.0f)));
-    regions.PushBack(Rect<float>(orb.position.x - ORB_BOUND_PADDING,
-                                 middleStartY - ORB_BOUND_PADDING,
-                                 orb.size.x + (ORB_BOUND_PADDING * 2.0f),
-                                 middleBandHeight + (ORB_BOUND_PADDING * 2.0f)));
-    regions.PushBack(Rect<float>(orb.position.x - ORB_BOUND_PADDING,
-                                 middleStartY + middleBandHeight - ORB_BOUND_PADDING,
-                                 orb.size.x + (ORB_BOUND_PADDING * 2.0f),
-                                 middleBandHeight + (ORB_BOUND_PADDING * 2.0f)));
-    regions.PushBack(Rect<float>(orb.position.x + insetX - ORB_BOUND_PADDING,
-                                 orb.position.y + orb.size.y - bottomBandHeight - ORB_BOUND_PADDING,
-                                 insetBandWidth + (ORB_BOUND_PADDING * 2.0f),
-                                 bottomBandHeight + (ORB_BOUND_PADDING * 2.0f)));
+      regions.PushBack(Rect<float>(bandLeft - ORB_BOUND_PADDING,
+                                   bandTop - ORB_BOUND_PADDING,
+                                   bandWidth + (ORB_BOUND_PADDING * 2.0f),
+                                   bandHeight + (ORB_BOUND_PADDING * 2.0f)));
+    }
   }
 
   void ApplyExclusionRegions()
@@ -789,6 +807,7 @@ private:
 private:
   Application&                          mApplication;
   View                                  mRoot;
+  View                                  mTitleArea;
   TextVisualizer                        mTitleText;
   TextVisualizer                        mStatusText;
   View                                  mContentArea;

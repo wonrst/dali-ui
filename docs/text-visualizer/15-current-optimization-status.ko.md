@@ -24,10 +24,11 @@
 - `Add TextVisualizer TextLine metrics cache`
 - `Replace performance sample labels with TextVisualizer`
 - `Use pixel font size conversion for TextVisualizer`
+- `Improve TextVisualizer performance sample visual quality`
 
 이번 작업 포함 최신 커밋:
 
-- `Use pixel font size conversion for TextVisualizer`
+- `Improve TextVisualizer performance sample visual quality`
 
 최근 최적화 상태:
 
@@ -39,6 +40,7 @@
 - `LayoutGlyphs()`가 `TextLine.metrics`를 채우도록 했다.
 - performance sample의 title / status / quote text를 `Label`에서 `TextVisualizer`로 교체했다.
 - `TextPreparer`가 public pixel `FontSize`를 기존 `Label` / `Controller`와 같은 pixel-to-point 변환으로 shaping에 사용하도록 했다.
+- performance sample의 orb exclusion을 ellipse band 기반으로 세분화하고 title / quote `TextVisualizer`를 parent `View` 안에서 layout되도록 조정했다.
 
 현재 해석:
 
@@ -55,6 +57,8 @@
 - moving bounds 이동 시 glyph가 재배치된다.
 - performance demo sample이 존재한다.
 - performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
+- performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
+- moving orb exclusion은 orb 하나당 `11`개의 ellipse band를 사용한다.
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
@@ -431,7 +435,52 @@ variable line height를 아직 적용하지 않은 이유:
 - adapter cache와 `TextLine.metrics` 역할 중복 정리
 - cache 위치를 adapter에 유지할지, 장기적으로 `LayoutResult`에 포함할지
 
-## 13. 다음 추천 작업
+## 13. Performance Sample Visual Quality 현재 상태
+
+performance sample은 `TextVisualizer` 중심 관찰을 유지하면서 visual fidelity를 한 단계 보강했다.
+
+현재 구조:
+
+- title은 `mTitleArea` parent `View` 안에 `mTitleText`를 넣는다.
+- `mTitleArea`는 기존 title 위치 / 크기를 갖고, `mTitleText`는 local `(0, 0)`에서 `MATCH_PARENT`로 채운다.
+- quote block은 `container`, `accent`, `text`로 구성된다.
+- quote `container`가 기존 quote position / size를 갖고, quote `TextVisualizer`는 container 내부 local 좌표와 inner size를 사용한다.
+- quote exclusion rect는 계속 저장된 quote `position / size` 전체 영역을 사용한다.
+
+orb exclusion:
+
+- moving orb는 orb 하나당 `11`개의 horizontal exclusion band를 만든다.
+- 각 band width는 ellipse 식 `sqrt(1 - normalizedY^2)` 기반으로 계산한다.
+- 기존 orb padding은 유지한다.
+- fixed column bounds와 quote bounds 정책은 변경하지 않는다.
+
+유지한 값:
+
+- `TITLE_FONT_SIZE`
+- `BODY_FONT_SIZE`
+- `QUOTE_FONT_SIZE`
+- `BODY_LINE_HEIGHT`
+- `QUOTE_LINE_HEIGHT`
+- `CONTENT_TOP`
+- `CONTENT_HEIGHT`
+- `MIN_FONT_SIZE`
+- `MAX_FONT_SIZE`
+
+계속 무시하는 style:
+
+- italic
+- horizontal / vertical alignment
+- async rendering
+- TextVisualizer-level padding API
+
+확인 필요:
+
+- 실제 sample 실행에서 title / quote multiline이 의도대로 보이는지 확인
+- orb band count `11`의 visual quality와 FPS 균형 확인
+- status update toggle off 상태에서 FPS 관찰
+- TextVisualizer 자체 alignment / padding / style API 필요 여부
+
+## 14. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -439,8 +488,8 @@ variable line height를 아직 적용하지 않은 이유:
 
 이유:
 
-- sample의 title / status / quote text를 `TextVisualizer`로 교체해 `Label` measure / arrange / relayout 영향을 줄였다.
-- italic / alignment / async rendering / padding 같은 `Label` 스타일은 단순화했으므로, sample 목적에 충분한 시각 품질인지 확인해야 한다.
+- sample의 title / quote parent 구조와 orb ellipse band exclusion을 추가했다.
+- 실제 device에서 visual 품질과 FPS 균형을 확인해야 한다.
 - status text는 여전히 `SetText()` prepare 비용이 있으므로 `0` key toggle과 FPS 차이를 함께 확인한다.
 
 ### B. Core redundant exclusion region update policy
@@ -464,7 +513,7 @@ variable line height를 아직 적용하지 않은 이유:
 - 현재 line break는 glyph advance sequential placement에 가깝다.
 - 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
 
-## 14. 다음 커밋 금지 사항
+## 15. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -478,7 +527,7 @@ variable line height를 아직 적용하지 않은 이유:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 15. 최신 성능 경로 구조
+## 16. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -512,7 +561,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 16. Compact 이후 복구 지침
+## 17. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

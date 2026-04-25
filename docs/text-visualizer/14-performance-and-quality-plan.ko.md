@@ -1014,6 +1014,43 @@ variable line height를 아직 적용하지 않는 이유:
 - font variation / fallback font가 pixel conversion과 결합될 때의 visual consistency
 - sample에서 font size 12 / 24 / 36 비교 시 기대한 visual scale이 나오는지 확인
 
+## 진행: performance sample visual quality update
+
+최근 커밋:
+
+- `Improve TextVisualizer performance sample visual quality`
+
+목표:
+
+- performance sample의 visual fidelity를 높이되, core `TextVisualizer` 구현은 변경하지 않는다.
+- 사용자가 조정한 font size, line height, content 위치 / 높이, min / max font size 값은 유지한다.
+- `Label`로 되돌아가지 않고 `TextVisualizer` 중심 sample 구조를 유지한다.
+
+변경 내용:
+
+- moving orb exclusion을 기존 coarse band 방식에서 ellipse 기반 horizontal band 방식으로 바꿨다.
+- orb 하나당 `11`개의 exclusion band를 생성한다.
+- 각 band는 band center의 normalized y 값을 기준으로 `sqrt(1 - y^2)`를 계산해 ellipse 폭을 구한다.
+- 기존 orb padding은 유지해 overlay View와 exclusion region이 너무 붙지 않게 한다.
+- title은 parent `View` 안에 넣고, 내부 `TextVisualizer`는 local `(0, 0)`에서 `MATCH_PARENT` 크기를 사용한다.
+- quote block도 parent container `View`를 갖고, accent와 quote `TextVisualizer`는 container local 좌표를 사용한다.
+- quote exclusion rect는 actor current property 대신 저장된 `position / size` 기준의 전체 quote container 영역을 사용한다.
+
+유지한 정책:
+
+- `TITLE_FONT_SIZE`, `BODY_FONT_SIZE`, `QUOTE_FONT_SIZE`는 변경하지 않는다.
+- `BODY_LINE_HEIGHT`, `QUOTE_LINE_HEIGHT`는 변경하지 않는다.
+- `CONTENT_TOP`, `CONTENT_HEIGHT`, `MIN_FONT_SIZE`, `MAX_FONT_SIZE`는 변경하지 않는다.
+- italic / alignment / async rendering 등 `TextVisualizer` 미지원 style은 계속 무시한다.
+- public API, render dirty clear, line break / layout algorithm은 변경하지 않는다.
+
+확인 필요:
+
+- orb band count `11`이 visual quality와 sample performance 사이에서 적절한지 확인
+- title / quote multiline이 실제 device와 test shell에서 안정적으로 보이는지 확인
+- quote container clipping이 의도한 범위에서 text를 자르는지 확인
+- status update toggle을 끈 상태에서 visual-only FPS 확인
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
