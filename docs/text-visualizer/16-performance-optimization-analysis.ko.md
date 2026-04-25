@@ -334,7 +334,51 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - very large region count에서 exact compare 비용 자체는 여전히 남는다.
 - core epsilon compare는 correctness 정책을 흐릴 수 있으므로 별도 설계 전까지 보류한다.
 
-## 10. 다음 커밋 금지 사항
+## 10. 진행: optional debug status for performance sample
+
+performance sample은 수요일 데모용 visual performance를 우선하기 위해 debug status를 optional path로 정리했다.
+
+기존 비용 후보:
+
+- status `TextVisualizer`도 `SetText()`가 호출되면 prepare / layout / render dirty path를 열 수 있다.
+- status 문자열을 매 interval마다 만들면 `std::chrono`, FPS 계산, `std::ostringstream` formatting 비용이 sample 측정에 섞인다.
+- 데모 기본 상태에서는 status 자체가 화면 구성과 성능 관측을 모두 방해할 수 있다.
+
+현재 정책:
+
+- debug status 기본값은 off다.
+- `0` key로 debug status를 toggle한다.
+- debug status off 상태에서는 `UpdateStatusText()`가 초반에 return한다.
+- off 상태에서는 FPS 계산, stringstream formatting, 반복 `mStatusText.SetText()`를 수행하지 않는다.
+- debug status on 상태에서만 `STATUS_INTERVAL`마다 counters/details를 표시한다.
+- debug status를 끄면 status text를 빈 문자열로 한 번만 설정한다.
+
+debug on에서 표시하는 counters:
+
+- rough FPS
+- frame count
+- active orb count
+- `ApplyExclusionRegions()` call count
+- 실제 `SetExclusionRegions()` call count
+- orb position update count
+- orb view update count
+- status text update count
+- font size / line height / color / exclusion state
+
+유지한 범위:
+
+- core `TextVisualizer` 구현은 변경하지 않았다.
+- public API는 추가하지 않았다.
+- sample visual layout / font size / line height / body text / orb positions는 변경하지 않았다.
+- layout / word wrap / render dirty clear 조건은 변경하지 않았다.
+
+확인 필요:
+
+- debug status on 상태에서 status text 자체가 만드는 prepare 비용
+- counter 표시 길이가 데모 화면에 주는 영향
+- rough FPS가 실제 GPU frame FPS가 아니라는 점
+
+## 11. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -348,7 +392,7 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - sample 관측용 변경과 core 최적화 변경을 한 커밋에 섞지 않기
 
-## 11. Compact 이후 복구 지침
+## 12. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

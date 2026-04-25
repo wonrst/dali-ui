@@ -255,7 +255,6 @@ private:
     ApplyTextStyle();
     ApplyOrbVisuals();
     ApplyExclusionRegions();
-    UpdateStatusText(true);
 
     mStartTime    = std::chrono::steady_clock::now();
     mLastTickTime = mStartTime;
@@ -537,6 +536,7 @@ private:
       mOrbs[index].view.SetPositionY(mOrbs[index].position.y);
       mOrbs[index].view.SetRequestedWidth(mOrbs[index].size.x);
       mOrbs[index].view.SetRequestedHeight(mOrbs[index].size.y);
+      ++mOrbVisualUpdateCount;
     }
   }
 
@@ -583,6 +583,8 @@ private:
 
   void ApplyExclusionRegions()
   {
+    ++mApplyExclusionCallCount;
+
     if(!mExclusionEnabled)
     {
       if(mHasAppliedExclusionRegions)
@@ -617,6 +619,7 @@ private:
     mTextVisualizer.SetExclusionRegions(regions);
     mHasAppliedExclusionRegions  = true;
     ++mAppliedExclusionUpdateCount;
+    ++mSetExclusionRegionsCallCount;
   }
 
   void UpdateOrbPositions(float deltaSeconds)
@@ -643,6 +646,7 @@ private:
       }
 
       orb.position = clampedPosition;
+      ++mOrbPositionUpdateCount;
     }
   }
 
@@ -680,6 +684,11 @@ private:
 
   void UpdateStatusText(bool force)
   {
+    if(!mDetailedStatusEnabled)
+    {
+      return;
+    }
+
     if(!force && (mFrameCount % STATUS_INTERVAL) != 0u)
     {
       return;
@@ -689,26 +698,25 @@ private:
     const float elapsedSec = std::max(std::chrono::duration<float>(now - mStartTime).count(), 0.001f);
     const float fps        = static_cast<float>(mFrameCount) / elapsedSec;
 
+    ++mStatusTextUpdateCount;
+
     std::ostringstream builder;
     builder.setf(std::ios::fixed);
     builder.precision(1);
     builder << "FPS " << fps;
-
-    if(mDetailedStatusEnabled)
-    {
-      builder << "   ORBS " << mActiveOrbCount
-              << "   APPLIED " << mAppliedExclusionUpdateCount
-              << "   FONT " << mBodyFontSize
-              << "   LINE " << BODY_LINE_HEIGHT
-              << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
-              << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
-              << "   DRAG ORBS"
-              << "   0 status · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
-    }
-    else
-    {
-      builder << "   0 status";
-    }
+    builder << "   FRAME " << mFrameCount
+            << "   ORBS " << mActiveOrbCount
+            << "   APPLIED " << mAppliedExclusionUpdateCount
+            << "   APPLY " << mApplyExclusionCallCount
+            << "   SET " << mSetExclusionRegionsCallCount
+            << "   ORBPOS " << mOrbPositionUpdateCount
+            << "   ORBVIEW " << mOrbVisualUpdateCount
+            << "   STATUS " << mStatusTextUpdateCount
+            << "   FONT " << mBodyFontSize
+            << "   LINE " << BODY_LINE_HEIGHT
+            << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
+            << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
+            << "   0 debug · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
 
     mStatusText.SetText(builder.str().c_str());
   }
@@ -716,7 +724,14 @@ private:
   void ToggleStatusDetails()
   {
     mDetailedStatusEnabled = !mDetailedStatusEnabled;
-    UpdateStatusText(true);
+    if(mDetailedStatusEnabled)
+    {
+      UpdateStatusText(true);
+    }
+    else
+    {
+      mStatusText.SetText("");
+    }
   }
 
   void SetOrbCount(uint32_t count)
@@ -815,6 +830,11 @@ private:
   float                                 mBodyFontSize{BODY_FONT_SIZE};
   uint64_t                              mFrameCount{0u};
   uint64_t                              mAppliedExclusionUpdateCount{0u};
+  uint64_t                              mApplyExclusionCallCount{0u};
+  uint64_t                              mSetExclusionRegionsCallCount{0u};
+  uint64_t                              mOrbPositionUpdateCount{0u};
+  uint64_t                              mOrbVisualUpdateCount{0u};
+  uint64_t                              mStatusTextUpdateCount{0u};
   std::chrono::steady_clock::time_point mStartTime;
   std::chrono::steady_clock::time_point mLastTickTime;
 };

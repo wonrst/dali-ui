@@ -28,10 +28,11 @@
 - `Add TextVisualizer basic word wrap`
 - `Optimize TextVisualizer word wrap lookup`
 - `Optimize TextVisualizer exclusion region storage update`
+- `Add optional TextVisualizer performance debug status`
 
 이번 작업 포함 최신 커밋:
 
-- `Optimize TextVisualizer exclusion region storage update`
+- `Add optional TextVisualizer performance debug status`
 
 최근 최적화 상태:
 
@@ -48,6 +49,7 @@
 - `LayoutGlyphs()`가 `PreparedText::LineBreakInfo`를 사용해 interval overflow 시 마지막 word break 후보를 우선 사용한다.
 - word wrap lookup은 layout pass-local glyph cache를 사용해 repeated line break / glyph mapping lookup을 줄인다.
 - `SetExclusionRegions()`는 exact compare 후 same-count region update를 in-place로 처리한다.
+- performance sample의 detailed status는 기본 off이며, `0` key로 켠 경우에만 counters 문자열을 갱신한다.
 
 현재 해석:
 
@@ -65,6 +67,7 @@
 - moving bounds 이동 시 glyph가 재배치된다.
 - performance demo sample이 존재한다.
 - performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
+- performance demo sample은 기본 상태에서 status text update overhead를 만들지 않는다.
 - performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
 - moving orb exclusion은 orb 하나당 `11`개의 ellipse band를 사용한다.
 - body text는 title origin부터 status 영역 위까지 확장된 surface에서 layout된다.
@@ -612,7 +615,32 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - exact compare 비용 자체를 줄일 필요가 있는지
 - core epsilon compare가 필요한지, 아니면 caller-level skip으로 충분한지
 
-## 18. 다음 추천 작업
+## 18. Optional Performance Debug Status 현재 상태
+
+performance sample의 status 출력은 데모 기본 성능을 해치지 않도록 optional debug path로 정리했다.
+
+현재 정책:
+
+- `mDetailedStatusEnabled` 기본값은 `false`다.
+- status off 상태에서는 `UpdateStatusText()`가 즉시 return한다.
+- status off 상태에서는 FPS 계산 / elapsed time 계산 / stringstream formatting / 반복 `SetText()`를 수행하지 않는다.
+- `0` key를 누르면 debug status를 켠다.
+- debug status on 상태에서는 rough FPS, frame, orb, exclusion, font, color 관련 counters를 `STATUS_INTERVAL`마다 표시한다.
+- 다시 `0` key를 누르면 status text를 빈 문자열로 한 번 설정한 뒤 이후 update를 멈춘다.
+
+의미:
+
+- 수요일 데모 기본 상태에서는 visual/performance를 우선한다.
+- 필요할 때만 counters를 켜서 현재 sample update 경향을 확인할 수 있다.
+- status `TextVisualizer` 자체의 prepare 비용은 debug on 상태에서만 감수한다.
+
+확인 필요:
+
+- debug on 상태의 status text 길이와 prepare 비용
+- rough FPS와 실제 compositor / GPU frame rate의 차이
+- 더 정밀한 stage timing을 sample-only로 추가할지 여부
+
+## 19. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -645,7 +673,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
 - 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 19. 다음 커밋 금지 사항
+## 20. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -659,7 +687,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 20. 최신 성능 경로 구조
+## 21. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -694,7 +722,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 21. Compact 이후 복구 지침
+## 22. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
