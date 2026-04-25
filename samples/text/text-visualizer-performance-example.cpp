@@ -32,7 +32,7 @@ namespace
 constexpr float WINDOW_WIDTH  = 1920.0f;
 constexpr float WINDOW_HEIGHT = 1080.0f;
 
-constexpr float SIDE_MARGIN         = 86.0f;
+constexpr float SIDE_MARGIN         = 286.0f;
 constexpr float TITLE_TOP           = 58.0f;
 constexpr float TITLE_HEIGHT        = 310.0f;
 constexpr float CONTENT_TOP         = 350.0f;
@@ -45,7 +45,7 @@ constexpr float STATUS_HEIGHT       = 36.0f;
 constexpr float STATUS_BOTTOM       = 16.0f;
 constexpr float TITLE_FONT_SIZE     = 95.0f;
 constexpr float BODY_FONT_SIZE      = 16.0f;
-constexpr float BODY_LINE_HEIGHT    = 2.2f;
+constexpr float BODY_LINE_HEIGHT    = 2.0f;
 constexpr float MIN_FONT_SIZE       = 16.0f;
 constexpr float MAX_FONT_SIZE       = 32.0f;
 constexpr float FONT_STEP           = 2.0f;
@@ -55,29 +55,31 @@ constexpr uint32_t DEFAULT_ORB_COUNT = 5u;
 constexpr uint32_t STATUS_INTERVAL  = 10u;
 constexpr uint32_t TIMER_INTERVAL_MS = 16u;
 constexpr uint32_t ORB_EXCLUSION_BAND_COUNT = 11u;
-constexpr float DEFAULT_EXCLUSION_UPDATE_THRESHOLD = 0.5f;
-constexpr float EXCLUSION_UPDATE_THRESHOLD_STEP    = 0.5f;
 constexpr float BODY_SURFACE_LEFT             = SIDE_MARGIN - 6.0f;
 constexpr float BODY_SURFACE_TOP              = TITLE_TOP;
 constexpr float BODY_SURFACE_WIDTH            = WINDOW_WIDTH - BODY_SURFACE_LEFT - SIDE_MARGIN;
 constexpr float BODY_SURFACE_HEIGHT           = WINDOW_HEIGHT - BODY_SURFACE_TOP - STATUS_HEIGHT - STATUS_BOTTOM;
-constexpr float TITLE_EXCLUSION_LINE_0_WIDTH  = 850.0f;
-constexpr float TITLE_EXCLUSION_LINE_1_WIDTH  = 845.0f;
-constexpr float TITLE_EXCLUSION_LINE_2_WIDTH  = 505.0f;
+constexpr float TITLE_EXCLUSION_LINE_0_WIDTH  = 880.0f;
+constexpr float TITLE_EXCLUSION_LINE_2_WIDTH  = 510.0f;
 constexpr float TITLE_EXCLUSION_LINE_HEIGHT   = TITLE_FONT_SIZE * 0.72f;
 constexpr float TITLE_EXCLUSION_LINE_PITCH    = TITLE_FONT_SIZE * 0.88f;
 constexpr float TITLE_EXCLUSION_TOP_OFFSET    = 8.0f;
 constexpr float TITLE_EXCLUSION_PADDING       = 8.0f;
+constexpr float DROP_CAP_TEXT_X               = TITLE_EXCLUSION_LINE_0_WIDTH + TITLE_EXCLUSION_PADDING + 45.0f;
+constexpr float DROP_CAP_TEXT_Y               = 0.0f;
+constexpr float DROP_CAP_TEXT_WIDTH           = 60.0f;
+constexpr float DROP_CAP_TEXT_HEIGHT          = 60.0f;
+constexpr float DROP_CAP_FONT_SIZE            = 80.0f;
 constexpr const char* SAMPLE_FONT_FAMILY      = "DejaVu Serif";
 constexpr float TEXT_VISUALIZER_LABEL_WIDTH   = 790.0f;
-constexpr float TEXT_VISUALIZER_LABEL_HEIGHT  = 80.0f;
+constexpr float TEXT_VISUALIZER_LABEL_HEIGHT  = 60.0f;
 constexpr float TEXT_VISUALIZER_LABEL_TRAVEL  = 160.0f;
 constexpr float TEXT_VISUALIZER_LABEL_X       = BODY_SURFACE_WIDTH - TEXT_VISUALIZER_LABEL_WIDTH - TEXT_VISUALIZER_LABEL_TRAVEL;
-constexpr float TEXT_VISUALIZER_LABEL_Y       = 78.0f + (CONTENT_TOP - BODY_SURFACE_TOP);
-constexpr float TIZEN_LABEL_X                 = 384.0f + (SIDE_MARGIN - BODY_SURFACE_LEFT);
-constexpr float TIZEN_LABEL_Y                 = 314.0f + (CONTENT_TOP - BODY_SURFACE_TOP) + 140.0f;
+constexpr float TEXT_VISUALIZER_LABEL_Y       = 70.0f + (CONTENT_TOP - BODY_SURFACE_TOP);
+constexpr float TIZEN_LABEL_X                 = -10.0f + (SIDE_MARGIN - BODY_SURFACE_LEFT);
+constexpr float TIZEN_LABEL_Y                 = 340.0f + (CONTENT_TOP - BODY_SURFACE_TOP) + 140.0f;
 constexpr float TIZEN_LABEL_WIDTH             = 520.0f;
-constexpr float TIZEN_LABEL_HEIGHT            = 62.0f;
+constexpr float TIZEN_LABEL_HEIGHT            = 60.0f;
 constexpr float TIZEN_LABEL_TRAVEL            = 140.0f;
 constexpr float OVERLAY_TEXT_MOVE_SPEED       = 0.55f;
 constexpr float OVERLAY_TEXT_OPPOSITE_PHASE   = 3.14159265f;
@@ -128,7 +130,7 @@ Dali::String BuildBodyText()
 {
   std::ostringstream builder;
   builder
-    << "The rendering pipeline was designed for static pages, yet every modern interface asks text to respond to moving objects, live composition, and editorial pacing. "
+    << "he rendering pipeline was designed for static pages, yet every modern interface asks text to respond to moving objects, live composition, and editorial pacing. "
     << "텍스트는 더 이상 사각형 안에 갇힌 데이터가 아니라 주변 요소와 함께 리듬을 만들어내는 시각 재료다. "
     << "When a system can prepare shaping once and then reflow around objects, it stops feeling like a rigid document engine and starts behaving like a layout instrument. "
     << "A browser still hides the real cost of measurement behind synchronous barriers. A paragraph looks effortless only because the engine measured, broke, aligned, and painted it before the reader noticed. "
@@ -141,16 +143,16 @@ Dali::String BuildBodyText()
     << "CSS taught the industry to think in rectangles, but the most interesting interfaces are rarely rectangular. Cards expand, images drift, subtitles appear, and notifications cut across the reading flow. "
     << "Developers end up guessing text height, over-measuring the DOM, or paying for expensive relayout loops because the engine exposes too little of its own structure. "
     << "A text visualizer should move in the opposite direction. It should prepare text once, expose stable layout inputs, and let the application reposition exclusion bounds as often as composition demands. "
-    << "The renderer then needs to update cleanly when those placements change.\n"
+    << "The renderer then needs to update cleanly when those placements change."
     << "This sample keeps one large text surface and uses invisible fixed bounds to split the body into three reading lanes. "
     << "The moving orb should feel like an inserted image or a conversation bubble that the paragraph naturally avoids. "
     << "It is not enough for the box height to change. The glyphs must truly reflow and find a new path through the composition as the scene shifts. "
     << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive."
     << "The hard part is not drawing a glyph atlas. The hard part is keeping every later decision honest after the glyphs are prepared. "
-    << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
-    << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
-    << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune."
-    << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
+    // << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
+    // << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
+    // << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune."
+    // << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
     // << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
     // << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
     << "Here it remains text: shaped once, measured as text, and continuously rearranged as the scene moves.";
@@ -193,31 +195,20 @@ void AppendTitleLineExclusion(Dali::Vector<Rect<float>>& regions, float lineWidt
                                TITLE_EXCLUSION_LINE_HEIGHT + (TITLE_EXCLUSION_PADDING * 2.0f)));
 }
 
-bool AreRectsClose(const Rect<float>& lhs, const Rect<float>& rhs, float threshold)
+void AppendTitleLineRangeExclusion(Dali::Vector<Rect<float>>& regions, float lineWidth, uint32_t firstLineIndex, uint32_t lineCount)
 {
-  return std::abs(lhs.x - rhs.x) <= threshold &&
-         std::abs(lhs.y - rhs.y) <= threshold &&
-         std::abs(lhs.width - rhs.width) <= threshold &&
-         std::abs(lhs.height - rhs.height) <= threshold;
-}
-
-bool AreRegionsClose(const Dali::Vector<Rect<float>>& lhs, const Dali::Vector<Rect<float>>& rhs, float threshold)
-{
-  if(threshold <= 0.0f || lhs.Count() != rhs.Count())
+  if(lineCount == 0u)
   {
-    return false;
+    return;
   }
 
-  const uint32_t count = lhs.Count();
-  for(uint32_t index = 0u; index < count; ++index)
-  {
-    if(!AreRectsClose(lhs[index], rhs[index], threshold))
-    {
-      return false;
-    }
-  }
+  const float lineY       = TITLE_EXCLUSION_TOP_OFFSET + (static_cast<float>(firstLineIndex) * TITLE_EXCLUSION_LINE_PITCH);
+  const float rangeHeight = TITLE_EXCLUSION_LINE_HEIGHT + (static_cast<float>(lineCount - 1u) * TITLE_EXCLUSION_LINE_PITCH);
 
-  return true;
+  regions.PushBack(Rect<float>(-TITLE_EXCLUSION_PADDING,
+                               lineY - TITLE_EXCLUSION_PADDING,
+                               lineWidth + (TITLE_EXCLUSION_PADDING * 2.0f),
+                               rangeHeight + (TITLE_EXCLUSION_PADDING * 2.0f)));
 }
 
 struct MovingOrb
@@ -351,6 +342,21 @@ private:
     mFixedColumnBounds.PushBack(Rect<float>((bodyColumnWidth * 2.0f) + COLUMN_GAP, 0.0f, COLUMN_SPLIT_WIDTH, BODY_SURFACE_HEIGHT));
 
     mContentArea.Add(mTextVisualizer);
+
+    mDropCapText = TextVisualizer::New();
+    mDropCapText.SetLayoutMode(LayoutMode::STANDALONE);
+    mDropCapText.SetPositionX(DROP_CAP_TEXT_X);
+    mDropCapText.SetPositionY(DROP_CAP_TEXT_Y);
+    mDropCapText.SetRequestedWidth(DROP_CAP_TEXT_WIDTH);
+    mDropCapText.SetRequestedHeight(DROP_CAP_TEXT_HEIGHT);
+    mDropCapText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mDropCapText.SetText("T");
+    mDropCapText.SetFontFamily(SAMPLE_FONT_FAMILY);
+    mDropCapText.SetFontSize(DROP_CAP_FONT_SIZE);
+    mDropCapText.SetLineHeight(1.0f);
+    mDropCapText.SetTextColor(QUOTE_TEXT_COLOR);
+
+    mContentArea.Add(mDropCapText);
   }
 
   void CreateOverlayTextBlocks()
@@ -552,6 +558,11 @@ private:
     return block.bounds;
   }
 
+  Rect<float> GetDropCapExclusionRect() const
+  {
+    return Rect<float>(DROP_CAP_TEXT_X, DROP_CAP_TEXT_Y, DROP_CAP_TEXT_WIDTH, DROP_CAP_TEXT_HEIGHT);
+  }
+
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
   {
     constexpr float ORB_BOUND_PADDING = 8.0f;
@@ -579,8 +590,7 @@ private:
 
   void AppendTitleExclusionRegions(Dali::Vector<Rect<float>>& regions) const
   {
-    AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_0_WIDTH, 0u);
-    AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_1_WIDTH, 1u);
+    AppendTitleLineRangeExclusion(regions, TITLE_EXCLUSION_LINE_0_WIDTH, 0u, 2u);
     AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_2_WIDTH, 2u);
   }
 
@@ -591,7 +601,6 @@ private:
       if(mHasAppliedExclusionRegions)
       {
         mTextVisualizer.ClearExclusionRegions();
-        mLastAppliedExclusionRegions.Clear();
         mHasAppliedExclusionRegions = false;
         ++mAppliedExclusionUpdateCount;
       }
@@ -600,6 +609,7 @@ private:
 
     Dali::Vector<Rect<float>> regions;
     AppendTitleExclusionRegions(regions);
+    regions.PushBack(GetDropCapExclusionRect());
 
     for(uint32_t index = 0u; index < mFixedColumnBounds.Count(); ++index)
     {
@@ -617,15 +627,7 @@ private:
       regions.PushBack(GetOverlayTextExclusionRect(mOverlayTextBlocks[blockIndex]));
     }
 
-    if(mHasAppliedExclusionRegions &&
-       AreRegionsClose(mLastAppliedExclusionRegions, regions, mExclusionUpdateThreshold))
-    {
-      ++mSkippedExclusionUpdateCount;
-      return;
-    }
-
     mTextVisualizer.SetExclusionRegions(regions);
-    mLastAppliedExclusionRegions = regions;
     mHasAppliedExclusionRegions  = true;
     ++mAppliedExclusionUpdateCount;
   }
@@ -676,13 +678,10 @@ private:
     mLastTickTime         = now;
     ++mFrameCount;
 
-    if(mAnimationEnabled)
-    {
-      UpdateOrbPositions(std::max(deltaSecs, 0.001f));
-      UpdateOverlayTextBlocks(std::max(elapsedSecs, 0.0f));
-      ApplyOrbVisuals();
-      ApplyExclusionRegions();
-    }
+    UpdateOrbPositions(std::max(deltaSecs, 0.001f));
+    UpdateOverlayTextBlocks(std::max(elapsedSecs, 0.0f));
+    ApplyOrbVisuals();
+    ApplyExclusionRegions();
 
     if((mFrameCount % STATUS_INTERVAL) == 0u)
     {
@@ -694,11 +693,6 @@ private:
 
   void UpdateStatusText(bool force)
   {
-    if(!mStatusTextUpdatesEnabled)
-    {
-      return;
-    }
-
     if(!force && (mFrameCount % STATUS_INTERVAL) != 0u)
     {
       return;
@@ -711,37 +705,30 @@ private:
     std::ostringstream builder;
     builder.setf(std::ios::fixed);
     builder.precision(1);
-    builder << "FPS " << fps
-            << "   ORBS " << mActiveOrbCount
-            << "   APPLIED " << mAppliedExclusionUpdateCount
-            << "   SKIPPED " << mSkippedExclusionUpdateCount
-            << "   THRESH " << mExclusionUpdateThreshold << "px"
-            << "   FONT " << mBodyFontSize
-            << "   LINE " << BODY_LINE_HEIGHT
-            << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
-            << "   ANIM " << (mAnimationEnabled ? "ON" : "OFF")
-            << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
-            << "   DRAG ORBS"
-            << "   0 status · Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color · 7/8/9 threshold";
+    builder << "FPS " << fps;
+
+    if(mDetailedStatusEnabled)
+    {
+      builder << "   ORBS " << mActiveOrbCount
+              << "   APPLIED " << mAppliedExclusionUpdateCount
+              << "   FONT " << mBodyFontSize
+              << "   LINE " << BODY_LINE_HEIGHT
+              << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
+              << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
+              << "   DRAG ORBS"
+              << "   0 status · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
+    }
+    else
+    {
+      builder << "   0 status";
+    }
 
     mStatusText.SetText(builder.str().c_str());
   }
 
-  void ToggleStatusTextUpdates()
+  void ToggleStatusDetails()
   {
-    mStatusTextUpdatesEnabled = !mStatusTextUpdatesEnabled;
-    if(mStatusTextUpdatesEnabled)
-    {
-      UpdateStatusText(true);
-      return;
-    }
-
-    mStatusText.SetText("STATUS OFF   Press 0 to enable status updates");
-  }
-
-  void ToggleAnimation()
-  {
-    mAnimationEnabled = !mAnimationEnabled;
+    mDetailedStatusEnabled = !mDetailedStatusEnabled;
     UpdateStatusText(true);
   }
 
@@ -775,20 +762,6 @@ private:
     UpdateStatusText(true);
   }
 
-  void AdjustExclusionUpdateThreshold(float delta)
-  {
-    mExclusionUpdateThreshold = std::max(0.0f, mExclusionUpdateThreshold + delta);
-    ApplyExclusionRegions();
-    UpdateStatusText(true);
-  }
-
-  void ResetExclusionUpdateThreshold()
-  {
-    mExclusionUpdateThreshold = DEFAULT_EXCLUSION_UPDATE_THRESHOLD;
-    ApplyExclusionRegions();
-    UpdateStatusText(true);
-  }
-
   void OnKeyEvent(const KeyEvent& event)
   {
     if(event.GetState() != KeyEvent::UP)
@@ -803,13 +776,9 @@ private:
     }
 
     const std::string keyName = event.GetKeyName().CStr();
-    if(keyName == "space" || keyName == "Space")
+    if(keyName == "0")
     {
-      ToggleAnimation();
-    }
-    else if(keyName == "0")
-    {
-      ToggleStatusTextUpdates();
+      ToggleStatusDetails();
     }
     else if(keyName == "1")
     {
@@ -835,18 +804,6 @@ private:
     {
       CycleTextColor();
     }
-    else if(keyName == "7")
-    {
-      AdjustExclusionUpdateThreshold(-EXCLUSION_UPDATE_THRESHOLD_STEP);
-    }
-    else if(keyName == "8")
-    {
-      AdjustExclusionUpdateThreshold(EXCLUSION_UPDATE_THRESHOLD_STEP);
-    }
-    else if(keyName == "9")
-    {
-      ResetExclusionUpdateThreshold();
-    }
   }
 
 private:
@@ -857,24 +814,21 @@ private:
   TextVisualizer                        mStatusText;
   View                                  mContentArea;
   TextVisualizer                        mTextVisualizer;
+  TextVisualizer                        mDropCapText;
   Dali::Vector<Rect<float>>             mFixedColumnBounds;
-  Dali::Vector<Rect<float>>             mLastAppliedExclusionRegions;
   std::vector<OverlayTextBlock>         mOverlayTextBlocks;
   std::vector<MovingOrb>                mOrbs;
   Timer                                 mTimer;
-  bool                                  mAnimationEnabled{true};
   bool                                  mExclusionEnabled{true};
-  bool                                  mStatusTextUpdatesEnabled{true};
+  bool                                  mDetailedStatusEnabled{false};
   bool                                  mHasAppliedExclusionRegions{false};
   int32_t                               mDraggedOrbIndex{-1};
   Vector2                               mDragGrabOffset{Vector2::ZERO};
   uint32_t                              mActiveOrbCount{DEFAULT_ORB_COUNT};
   uint32_t                              mCurrentTextColorIndex{0u};
   float                                 mBodyFontSize{BODY_FONT_SIZE};
-  float                                 mExclusionUpdateThreshold{DEFAULT_EXCLUSION_UPDATE_THRESHOLD};
   uint64_t                              mFrameCount{0u};
   uint64_t                              mAppliedExclusionUpdateCount{0u};
-  uint64_t                              mSkippedExclusionUpdateCount{0u};
   std::chrono::steady_clock::time_point mStartTime;
   std::chrono::steady_clock::time_point mLastTickTime;
 };
