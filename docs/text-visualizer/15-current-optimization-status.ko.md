@@ -17,14 +17,16 @@
 - `Reserve TextVisualizer layout and render buffers`
 - `Fix TextVisualizer UTC expectations`
 - `Add TextVisualizer render dirty clear condition`
+- `Add TextVisualizer performance sample exclusion update threshold`
 
 직전 기준 커밋:
 
 - `ed71e35` `Fix TextVisualizer UTC expectations`
 
-이번 커밋 최신 상태:
+최근 최적화 상태:
 
 - render dirty clear 조건을 전용 커밋으로 도입했다.
+- performance sample에 exclusion update threshold를 도입했다.
 
 현재 해석:
 
@@ -206,7 +208,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
-| redundant exclusion update | 아직 남음 | epsilon/unchanged skip 검토 |
+| redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 아직 남음 | layout hash/version 검토 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
@@ -253,19 +255,48 @@ dirty가 다시 set되는 경로:
 - future async render와 dirty clear 관계
 - performance sample에서 FPS 개선 여부
 
-## 10. 다음 추천 작업
+## 10. Performance Sample Exclusion Update Threshold 현재 상태
+
+performance sample에는 sample-level exclusion update threshold가 적용됐다.
+
+현재 정책:
+
+- core `TextVisualizer::SetExclusionRegions()` 정책은 변경하지 않는다.
+- sample이 마지막으로 적용한 exclusion regions를 저장한다.
+- 새 regions와 마지막 적용 regions의 `x / y / width / height` 차이가 모두 threshold 이하이면 `SetExclusionRegions()` 호출을 skip한다.
+- region count가 다르면 skip하지 않는다.
+- threshold가 `0.0f` 이하이면 close로 보지 않아 매번 update를 시도하는 동작에 가깝게 만든다.
+
+기본값과 조작:
+
+- 기본 threshold: `0.5px`
+- `7`: threshold 감소
+- `8`: threshold 증가
+- `9`: threshold reset
+
+status 표시:
+
+- `APPLIED`: 실제 `SetExclusionRegions()` 또는 clear가 적용된 횟수
+- `SKIPPED`: threshold로 update를 생략한 횟수
+- `THRESH`: 현재 threshold 값
+
+의미:
+
+- moving bounds의 변화가 sub-pixel 또는 매우 작은 경우 sample에서 relayout/render dirty를 여는 호출 자체를 줄인다.
+- core API의 epsilon compare 정책을 의미하지 않는다.
+- threshold가 너무 크면 visual fidelity가 떨어질 수 있다.
+
+확인 필요:
+
+- threshold별 FPS 변화
+- applied/skipped 비율과 체감 reflow 지연 사이의 균형
+- core API에 epsilon 정책이 필요한지, upstream skip만으로 충분한지
+
+## 11. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Redundant exclusion region update skip
-
-이유:
-
-- moving bounds에서 `SetExclusionRegions()`가 매 tick vector compare / copy를 수행한다.
-- epsilon compare 또는 sample-level unchanged skip을 검토할 수 있다.
-- core API 정책과 sample upstream skip은 분리해서 판단해야 한다.
-
-### B. Layout unchanged render skip
+### A. Layout unchanged render skip
 
 이유:
 
@@ -276,6 +307,13 @@ dirty가 다시 set되는 경로:
 
 - float comparison / hash 정책이 필요하다.
 - layout version 또는 placement hash 기준을 먼저 설계해야 한다.
+
+### B. Core redundant exclusion region update policy
+
+이유:
+
+- performance sample threshold는 upstream skip 실험으로 완료됐다.
+- core API에 epsilon compare를 넣을지는 layout correctness 정책을 따로 세워야 한다.
 
 ### C. Line-level metrics
 
@@ -291,7 +329,7 @@ dirty가 다시 set되는 경로:
 - 현재 line break는 glyph advance sequential placement에 가깝다.
 - 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
 
-## 11. 다음 커밋 금지 사항
+## 12. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -305,11 +343,13 @@ dirty가 다시 set되는 경로:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 12. 최신 성능 경로 구조
+## 13. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
-  A[Timer Tick] --> B[SetExclusionRegions]
+  A[Timer Tick] --> B0{Sample threshold}
+  B0 -->|apply| B
+  B0 -->|skip| S[Skip exclusion update]
   B --> C[LayoutDirty / RenderDirty]
   C --> D[y-sorted exclusion cache]
   D --> E[LayoutGlyphs with reserved buffers]
@@ -323,6 +363,7 @@ flowchart LR
 현재 의미:
 
 - timer tick마다 moving bounds가 갱신된다.
+- performance sample은 threshold 이하의 exclusion 변화면 `SetExclusionRegions()` 호출을 skip할 수 있다.
 - `SetExclusionRegions()`는 layout dirty / render dirty를 발생시킨다.
 - layout pass에서 exclusion regions를 y-sorted cache로 준비한다.
 - `LayoutGlyphs()`는 reserved `LayoutResult` buffer를 사용한다.
@@ -330,7 +371,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 13. Compact 이후 복구 지침
+## 14. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
@@ -340,4 +381,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 redundant exclusion region update skip을 검토하는 것이다.
+현재 가장 자연스러운 다음 작업은 layout unchanged render skip 또는 core redundant exclusion update policy를 검토하는 것이다.

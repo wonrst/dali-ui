@@ -53,7 +53,7 @@ flowchart LR
 
 | 병목 후보 | 현재 동작 | 비용 | 개선 방향 | 우선순위 |
 |---|---|---|---|---|
-| `SetExclusionRegions()`마다 full vector compare/copy | `AreExclusionRegionsEqual()`가 count와 각 `Rect<float>`를 전부 비교하고, 다르면 전체 벡터를 복사한다 | bounds 수가 많아질수록 tick마다 O(N) 비교 + 복사 | epsilon 비교 또는 unchanged skip 정책 검토 | 중간 |
+| `SetExclusionRegions()`마다 full vector compare/copy | core API는 exact compare 정책을 유지하고, performance sample에는 exclusion update threshold를 추가했다 | bounds 수가 많아질수록 tick마다 O(N) 비교 + 복사 비용이 있었고, sample threshold로 일부 redundant call을 줄인다 | core epsilon 정책은 별도 검토 | sample 1차 완료 |
 | 매 tick full `LayoutGlyphs()` | bounds 이동 시 전체 glyph를 처음부터 다시 배치한다 | glyph 수가 길수록 O(glyph count * line count) 성격으로 커진다 | partial relayout 또는 unchanged layout skip | 높음 |
 | 매 tick full `Renderer::Render()` | `AttachRendererToHost()`가 attached 상태여도 `Render()`를 다시 호출한다 | relayout 뒤 geometry/update 비용이 누적된다 | layout 변경이 없으면 render skip, 중기적으로 geometry-only update 검토 | 높음 |
 | output actor/mesh regeneration | output actor 재사용 여부와 별개로 내부 child mesh actor/renderer update가 발생할 수 있다 | actor/renderer 구조가 커질수록 비용 증가 가능 | output actor/mesh actor 재사용 정책 조사 | 중간 |
@@ -94,12 +94,13 @@ flowchart LR
 ### C. redundant `SetExclusionRegions()` 회피
 
 - bounds 값이 실질적으로 거의 같다면 `SetExclusionRegions()` 자체를 skip할 수 있다.
-- 현재는 `Rect<float>`의 exact compare만 사용하므로 미세한 float noise에도 dirty가 발생할 수 있다.
+- core `TextVisualizer`는 여전히 `Rect<float>` exact compare만 사용한다.
+- performance sample은 sample-local threshold를 사용해 움직임이 아주 작을 때 `SetExclusionRegions()` 호출 자체를 skip한다.
 
 검토 포인트:
 
-- epsilon compare를 도입할지
-- sample 수준에서는 tick 수를 줄일지
+- core epsilon compare를 도입할지
+- sample threshold가 visual fidelity와 성능 사이에서 적절한지
 - 실서비스에서는 unchanged region update를 upstream에서 줄일지
 
 ### D. layout unchanged 시 `Render()` skip
@@ -731,23 +732,49 @@ dirty가 다시 set되는 경로:
 - future async render와 dirty clear 관계
 - performance sample에서 FPS 개선 폭
 
+## 진행: performance sample exclusion update threshold
+
+최근 커밋:
+
+- `Add TextVisualizer performance sample exclusion update threshold`
+
+목표:
+
+- core `TextVisualizer::SetExclusionRegions()` 정책은 변경하지 않는다.
+- performance sample에서 moving bounds 변화가 매우 작을 때 redundant `SetExclusionRegions()` 호출을 줄이는 실험을 한다.
+- threshold 효과를 sample status에서 바로 관찰할 수 있게 한다.
+
+변경된 구조:
+
+- sample이 마지막으로 적용한 exclusion regions를 `mLastAppliedExclusionRegions`에 저장한다.
+- 새로 계산한 regions와 마지막 적용 regions의 rect `x / y / width / height` 차이가 모두 threshold 이하이면 `SetExclusionRegions()` 호출을 skip한다.
+- region count가 다르거나 threshold가 `0.0f` 이하이면 close로 보지 않는다.
+- exclusion disabled 상태에서는 이미 적용된 regions가 있을 때만 `ClearExclusionRegions()`를 호출하고 cache를 비운다.
+
+sample 조작:
+
+- 기본 threshold는 `0.5px`다.
+- `7`: threshold 감소
+- `8`: threshold 증가
+- `9`: threshold reset
+
+status 표시:
+
+- `APPLIED`: 실제 `SetExclusionRegions()` 또는 clear가 적용된 횟수
+- `SKIPPED`: threshold 때문에 `SetExclusionRegions()` 호출을 생략한 횟수
+- `THRESH`: 현재 threshold pixel 값
+
+주의:
+
+- threshold가 너무 크면 moving bounds와 text reflow 사이에 시각적인 지연이 생겨 visual fidelity가 떨어질 수 있다.
+- 이번 변경은 sample-level upstream skip 실험이며, core API epsilon compare 정책을 의미하지 않는다.
+- partial relayout이나 layout unchanged render skip은 아직 도입하지 않았다.
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Redundant exclusion region update skip
-
-이유:
-
-- moving bounds update path에서는 `SetExclusionRegions()`마다 vector compare / copy 비용이 남아 있다.
-- 실제로 값이 바뀌지 않은 경우 dirty를 걸지 않는 skip 정책은 유효할 수 있다.
-
-주의:
-
-- core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
-- sample-level upstream skip과 core API policy를 분리해서 검토한다.
-
-### B. Layout unchanged 시 render skip
+### A. Layout unchanged 시 render skip
 
 이유:
 
@@ -758,6 +785,18 @@ dirty가 다시 set되는 경로:
 
 - float 비교 정책, layout hash/version, glyph placement 비교 기준이 필요하다.
 - `render dirty` clear 조건보다 뒤에서 다루는 것이 안전하다.
+
+### B. Core redundant exclusion region update policy
+
+이유:
+
+- performance sample threshold는 upstream skip 실험으로 들어갔다.
+- core `TextVisualizer`에 epsilon compare를 넣을지는 correctness 정책을 따로 세워야 한다.
+
+주의:
+
+- core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
+- public behavior를 바꾸지 않는 방향으로 별도 검토한다.
 
 ### C. Add line-level metrics if needed
 
@@ -786,7 +825,8 @@ dirty가 다시 set되는 경로:
 - exclusion interval scanning의 1차 최적화는 완료됐다.
 - layout/render buffer reserve의 1차 최적화는 완료됐다.
 - render dirty clear의 1차 조건은 도입됐다.
-- 다음 성능 후보는 redundant update/layout unchanged skip처럼 float/layout 비교 정책이 필요한 작업이다.
+- performance sample에는 exclusion update threshold가 도입됐다.
+- 다음 성능 후보는 layout unchanged render skip이나 core redundant update policy처럼 float/layout 비교 정책이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 
 ## 금지 사항

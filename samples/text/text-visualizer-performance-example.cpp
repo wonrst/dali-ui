@@ -56,6 +56,8 @@ constexpr uint32_t MIN_ORB_COUNT    = 2u;
 constexpr uint32_t DEFAULT_ORB_COUNT = 5u;
 constexpr uint32_t STATUS_INTERVAL  = 10u;
 constexpr uint32_t TIMER_INTERVAL_MS = 16u;
+constexpr float DEFAULT_EXCLUSION_UPDATE_THRESHOLD = 0.5f;
+constexpr float EXCLUSION_UPDATE_THRESHOLD_STEP    = 0.5f;
 
 const UiColor WINDOW_BG_COLOR(0x0B0B10);
 const UiColor TITLE_COLOR(0xF4F1EC);
@@ -152,6 +154,33 @@ Rect<float> InflateRect(const Vector2& position, const Vector2& size, float padd
                      position.y - padding,
                      size.x + (padding * 2.0f),
                      size.y + (padding * 2.0f));
+}
+
+bool AreRectsClose(const Rect<float>& lhs, const Rect<float>& rhs, float threshold)
+{
+  return std::abs(lhs.x - rhs.x) <= threshold &&
+         std::abs(lhs.y - rhs.y) <= threshold &&
+         std::abs(lhs.width - rhs.width) <= threshold &&
+         std::abs(lhs.height - rhs.height) <= threshold;
+}
+
+bool AreRegionsClose(const Dali::Vector<Rect<float>>& lhs, const Dali::Vector<Rect<float>>& rhs, float threshold)
+{
+  if(threshold <= 0.0f || lhs.Count() != rhs.Count())
+  {
+    return false;
+  }
+
+  const uint32_t count = lhs.Count();
+  for(uint32_t index = 0u; index < count; ++index)
+  {
+    if(!AreRectsClose(lhs[index], rhs[index], threshold))
+    {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 struct MovingOrb
@@ -513,7 +542,13 @@ private:
   {
     if(!mExclusionEnabled)
     {
-      mTextVisualizer.ClearExclusionRegions();
+      if(mHasAppliedExclusionRegions)
+      {
+        mTextVisualizer.ClearExclusionRegions();
+        mLastAppliedExclusionRegions.Clear();
+        mHasAppliedExclusionRegions = false;
+        ++mAppliedExclusionUpdateCount;
+      }
       return;
     }
 
@@ -533,12 +568,18 @@ private:
     {
       regions.PushBack(GetQuoteExclusionRect(mQuoteBlocks[quoteIndex]));
     }
-    mTextVisualizer.SetExclusionRegions(regions);
 
-    if(mExclusionEnabled)
+    if(mHasAppliedExclusionRegions &&
+       AreRegionsClose(mLastAppliedExclusionRegions, regions, mExclusionUpdateThreshold))
     {
-      ++mRelayoutUpdateCount;
+      ++mSkippedExclusionUpdateCount;
+      return;
     }
+
+    mTextVisualizer.SetExclusionRegions(regions);
+    mLastAppliedExclusionRegions = regions;
+    mHasAppliedExclusionRegions  = true;
+    ++mAppliedExclusionUpdateCount;
   }
 
   void UpdateOrbPositions(float deltaSeconds)
@@ -605,15 +646,17 @@ private:
     builder.setf(std::ios::fixed);
     builder.precision(1);
     builder << "FPS " << fps
-            << "   RELOWS " << mRelayoutUpdateCount
             << "   ORBS " << mActiveOrbCount
+            << "   APPLIED " << mAppliedExclusionUpdateCount
+            << "   SKIPPED " << mSkippedExclusionUpdateCount
+            << "   THRESH " << mExclusionUpdateThreshold << "px"
             << "   FONT " << mBodyFontSize
             << "   LINE " << BODY_LINE_HEIGHT
             << "   COLOR " << TEXT_COLOR_NAMES[mCurrentTextColorIndex]
             << "   ANIM " << (mAnimationEnabled ? "ON" : "OFF")
             << "   EXCLUSION " << (mExclusionEnabled ? "ON" : "OFF")
             << "   DRAG ORBS"
-            << "   Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color";
+            << "   Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color · 7/8/9 threshold";
 
     mStatusLabel.SetText(builder.str().c_str());
   }
@@ -651,6 +694,20 @@ private:
   {
     mCurrentTextColorIndex = (mCurrentTextColorIndex + 1u) % static_cast<uint32_t>(sizeof(TEXT_COLORS) / sizeof(TEXT_COLORS[0]));
     ApplyTextStyle();
+    UpdateStatusText(true);
+  }
+
+  void AdjustExclusionUpdateThreshold(float delta)
+  {
+    mExclusionUpdateThreshold = std::max(0.0f, mExclusionUpdateThreshold + delta);
+    ApplyExclusionRegions();
+    UpdateStatusText(true);
+  }
+
+  void ResetExclusionUpdateThreshold()
+  {
+    mExclusionUpdateThreshold = DEFAULT_EXCLUSION_UPDATE_THRESHOLD;
+    ApplyExclusionRegions();
     UpdateStatusText(true);
   }
 
@@ -696,6 +753,18 @@ private:
     {
       CycleTextColor();
     }
+    else if(keyName == "7")
+    {
+      AdjustExclusionUpdateThreshold(-EXCLUSION_UPDATE_THRESHOLD_STEP);
+    }
+    else if(keyName == "8")
+    {
+      AdjustExclusionUpdateThreshold(EXCLUSION_UPDATE_THRESHOLD_STEP);
+    }
+    else if(keyName == "9")
+    {
+      ResetExclusionUpdateThreshold();
+    }
   }
 
 private:
@@ -706,18 +775,22 @@ private:
   View                                  mContentArea;
   TextVisualizer                        mTextVisualizer;
   Dali::Vector<Rect<float>>             mFixedColumnBounds;
+  Dali::Vector<Rect<float>>             mLastAppliedExclusionRegions;
   std::vector<QuoteBlock>               mQuoteBlocks;
   std::vector<MovingOrb>                mOrbs;
   Timer                                 mTimer;
   bool                                  mAnimationEnabled{true};
   bool                                  mExclusionEnabled{true};
+  bool                                  mHasAppliedExclusionRegions{false};
   int32_t                               mDraggedOrbIndex{-1};
   Vector2                               mDragGrabOffset{Vector2::ZERO};
   uint32_t                              mActiveOrbCount{DEFAULT_ORB_COUNT};
   uint32_t                              mCurrentTextColorIndex{0u};
   float                                 mBodyFontSize{BODY_FONT_SIZE};
+  float                                 mExclusionUpdateThreshold{DEFAULT_EXCLUSION_UPDATE_THRESHOLD};
   uint64_t                              mFrameCount{0u};
-  uint64_t                              mRelayoutUpdateCount{0u};
+  uint64_t                              mAppliedExclusionUpdateCount{0u};
+  uint64_t                              mSkippedExclusionUpdateCount{0u};
   std::chrono::steady_clock::time_point mStartTime;
   std::chrono::steady_clock::time_point mLastTickTime;
 };
