@@ -33,10 +33,11 @@
 - `Precompute TextVisualizer renderer glyph positions`
 - `Reduce TextVisualizer redundant render data update`
 - `Split TextVisualizer sample static and dynamic exclusions`
+- `Add TextVisualizer experimental sample`
 
 이번 작업 포함 최신 커밋:
 
-- `Split TextVisualizer sample static and dynamic exclusions`
+- `Add TextVisualizer experimental sample`
 
 최근 최적화 상태:
 
@@ -58,6 +59,7 @@
 - `AtlasViewAdapter`가 renderer glyph positions를 layout 연결 시점에 미리 계산하고 `GetGlyphs()` render path에서 재사용한다.
 - `AtlasRendererBridge::UpdateRenderData()`는 full render data vector build 대신 lightweight validation + renderer ensure 역할로 축소됐다.
 - performance sample은 static exclusions와 dynamic exclusions를 분리하고 combined exclusion vector를 member로 재사용한다.
+- `text-visualizer-experimental-example.cpp`가 추가되어 기존 `text-experimental-example.cpp`의 visual simulation을 `TextVisualizer`로 비교할 수 있다.
 
 현재 해석:
 
@@ -74,6 +76,7 @@
 - exclusion region을 피해서 layout된다.
 - moving bounds 이동 시 glyph가 재배치된다.
 - performance demo sample이 존재한다.
+- experimental sample은 `TextVisualizer` single surface mode와 partial tile mode를 모두 제공한다.
 - performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
 - performance demo sample은 기본 상태에서 FPS만 갱신하고 detailed counters는 만들지 않는다.
 - performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
@@ -672,6 +675,37 @@ basic word wrap 이후 `LayoutGlyphs()`는 glyph advance, glyph width, prefix ad
 - 긴 텍스트에서 memory 증가와 CPU 감소의 균형
 - glyph layout data와 future layout result / renderer position cache의 역할 분리
 - word wrap range scan 자체를 더 줄일지 여부
+
+## 진행: TextVisualizer experimental sample
+
+`samples/text/text-visualizer-experimental-example.cpp`가 추가됐다.
+
+목적:
+
+- 기존 `samples/text/text-experimental-example.cpp`의 움직이는 text grid / ball simulation 룩을 유지한다.
+- 기존 샘플은 `Label` tile 여러 개로 앱 레벨 partial rendering을 구성한다.
+- 새 샘플은 `TextVisualizer`로 같은 시나리오를 비교한다.
+
+render mode:
+
+- 기본값은 `SINGLE_TEXT_VISUALIZER`이다.
+- single mode는 하나의 `TextVisualizer`가 전체 grid text를 렌더링한다.
+- single mode는 매 frame 전체 text buffer를 문자열로 만들고 hash가 달라진 경우에만 `SetText()`를 호출한다.
+- `PARTIAL_TEXT_VISUALIZER_TILES` mode는 기존 tile dirty 구조를 유지하되 각 tile을 `Label` 대신 `TextVisualizer`로 렌더링한다.
+- `5` key로 두 mode를 전환한다.
+
+지원 / 제외:
+
+- `1`, `4`, `7`, `9`, `0`, ESC / BACK key 동작은 유지한다.
+- `2`, `3`, `6`, `8` 계열 Label-specific 기능은 `TextVisualizer` public API에 없으므로 no-op 또는 unsupported log로 둔다.
+- markup color, DALI text color animation, async rendering, overflow mode, italic/rich style은 이번 범위에서 제외했다.
+- 기존 `text-experimental-example.cpp`는 수정하지 않았다.
+
+확인 필요:
+
+- single mode에서 긴 문자열을 매 frame `SetText()`하는 비용과 tile partial mode의 비용 비교
+- `TextVisualizer` word wrap이 monospace grid rendering에서 기대한 고정 셀 느낌을 충분히 유지하는지
+- 추후 fixed-cell / monospace-preserve layout option이 필요한지
 
 ## 20. 다음 추천 작업
 
