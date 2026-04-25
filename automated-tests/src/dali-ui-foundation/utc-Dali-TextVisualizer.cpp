@@ -1868,6 +1868,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeUpdateRenderDataEmptyP(void)
 
   DALI_TEST_CHECK(!bridge.UpdateRenderData());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_CHECK(!bridge.HasValidatedRenderData());
+  DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1882,6 +1884,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeUpdateRenderDataWithEmptyAdapterP(vo
 
   DALI_TEST_CHECK(!bridge.UpdateRenderData());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_CHECK(!bridge.HasValidatedRenderData());
+  DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1905,10 +1909,15 @@ int UtcDaliTextVisualizerAtlasRendererBridgeUpdateRenderDataWithRenderableAdapte
   {
     DALI_TEST_CHECK(bridge.UpdateRenderData());
     DALI_TEST_CHECK(bridge.IsRendererCreated());
+    DALI_TEST_CHECK(bridge.HasValidatedRenderData());
+    DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), adapter.GetRenderableGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(bridge.GetViewInterfaceGetGlyphsCallCount(), 0u, TEST_LOCATION);
   }
   else
   {
     DALI_TEST_CHECK(!bridge.UpdateRenderData());
+    DALI_TEST_CHECK(!bridge.HasValidatedRenderData());
+    DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), 0u, TEST_LOCATION);
   }
 
   END_TEST;
@@ -1937,6 +1946,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeUpdateRenderDataInvalidPlacementP(vo
 
   DALI_TEST_CHECK(!bridge.UpdateRenderData());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_CHECK(!bridge.HasValidatedRenderData());
+  DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1965,6 +1976,8 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearAfterUpdateP(void)
 
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
   DALI_TEST_CHECK(!bridge.HasRenderableGlyphs());
+  DALI_TEST_CHECK(!bridge.HasValidatedRenderData());
+  DALI_TEST_EQUALS(bridge.GetValidatedGlyphCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }

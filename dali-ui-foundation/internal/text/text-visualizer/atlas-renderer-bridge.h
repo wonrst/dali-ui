@@ -90,6 +90,8 @@ public:
   uint32_t GetLastGlyphStartIndex() const;
   uint32_t GetRenderCallCount() const;
   uint32_t GetAttachCallCount() const;
+  uint32_t GetValidatedGlyphCount() const;
+  bool     HasValidatedRenderData() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();

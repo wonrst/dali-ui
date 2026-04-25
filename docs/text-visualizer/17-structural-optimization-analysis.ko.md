@@ -564,7 +564,45 @@ cache invalidation:
 - `UpdateRenderData()`를 position cache와 통합하거나 축소할 수 있는지
 - glyph index -> renderer position direct copy path가 더 필요한지
 
-## 8. 최적화 후보 risk / effect 표
+## 8. 진행: reduce redundant `UpdateRenderData`
+
+이번 구현에서 `AtlasRendererBridge::UpdateRenderData()`의 역할을 full render data build에서 lightweight validation + renderer ensure로 축소했다.
+
+이전 구조:
+
+- `UpdateRenderData()`가 renderable glyph count만큼 adapter placement와 glyph info를 순회했다.
+- 순회 결과를 `mRenderData` vector에 push했다.
+- 하지만 `AtlasRenderer::Render()`는 이 vector를 직접 입력으로 받지 않고, `TextVisualizerViewInterface::GetGlyphs()`를 통해 glyphs / positions를 다시 요청했다.
+- renderer glyph position cache가 생긴 뒤에는 position 계산도 adapter 쪽에서 이미 준비되어 있어 full vector build의 중복성이 더 커졌다.
+
+현재 구조:
+
+- `UpdateRenderData()`는 adapter가 renderable glyphs를 갖는지 확인한다.
+- renderer instance 생성을 보장한다.
+- first / last glyph placement, glyph info, renderer position만 smoke validation한다.
+- validated glyph count와 validation 상태만 bridge 내부에 저장한다.
+- `mRenderData` vector와 glyph count만큼의 per-glyph push loop는 제거했다.
+
+유지한 safety gate:
+
+- `AttachRendererToHost()`는 기존처럼 `Renderer::Render()`를 호출한다.
+- `TextVisualizerViewInterface::GetGlyphs()` diagnostics는 last requested / returned glyph count를 기록한다.
+- render dirty clear는 기존처럼 `UpdateRenderData()` success, attach success, render ready, output actor, output parent, returned glyph count 조건을 모두 본다.
+- 즉 `IsRenderReady()`만으로 render dirty를 clear하지 않는 정책은 유지된다.
+
+유지한 정책:
+
+- `Renderer::Render()` 호출 횟수와 attach 정책은 변경하지 않았다.
+- `AtlasRenderer` 자체는 수정하지 않았다.
+- layout, word wrap, exclusion, font size, line height 정책은 변경하지 않았다.
+
+남은 한계:
+
+- `Renderer::Render()` full call은 여전히 남아 있다.
+- `ViewInterface::GetGlyphs()`는 glyph info copy를 계속 수행한다.
+- geometry-only update 또는 `AtlasRenderer` 내부 mesh reuse는 데모 후 후보로 남긴다.
+
+## 9. 최적화 후보 risk / effect 표
 
 | 후보 | 효과 가능성 | 구현 난이도 | 회귀 위험 | 파일 영향 | 추천 단계 |
 |---|---|---|---|---|---|
@@ -574,33 +612,18 @@ cache invalidation:
 | cached sorted exclusion regions in `TextVisualizerImpl` | 중간 | 중간 | 중간 | `text-visualizer-impl.*`, `layout-engine.*` internal | 데모 전 후보, 신중 |
 | prefix advance binary search word wrap | 중간 | 중간 | 중간 | `layout-engine.cpp` | 데모 후 또는 충분한 UTC 후 |
 | next / previous break candidate cache | 중간 | 중간 | 중간 | `PreparedText` or `layout-engine.cpp` | 데모 후 또는 별도 최적화 |
-| reduce `UpdateRenderData()` if redundant | 중간~높음 | 중간 | 중간 | `atlas-renderer-bridge.*`, dirty success 조건 | 데모 전 분석 후 가능 |
+| reduce `UpdateRenderData()` if redundant | 중간~높음 | 중간 | 낮음~중간 | `atlas-renderer-bridge.*`, dirty success 조건 | 1차 완료 |
 | precomputed renderer glyph positions | 중간~높음 | 중간 | 낮음~중간 | `atlas-view-adapter.*`, view interface | 1차 완료 |
 | glyph placement line index | 중간 | 중간 | 중간 | `layout-types.h`, `layout-engine.cpp`, adapter | 데모 후 권장 |
 | incremental `LayoutResult` signature | 중간 | 중간 | 중간 | `layout-types.h`, `layout-engine.cpp` | 데모 전 가능하지만 신중 |
 | `AtlasRenderer` geometry-only update investigation | 높음 | 높음 | 높음 | `text-atlas-renderer.*` | 데모 후 |
 | partial relayout prototype | 높음 | 높음 | 높음 | layout engine / impl 전반 | 데모 후 |
 
-## 9. 다음 바로 구현할 후보 3개
+## 10. 다음 바로 구현할 후보 3개
 
-### 1. Analyze / reduce redundant `UpdateRenderData()`
+### 1. Sample static / dynamic exclusion split and vector reuse
 
 현재 기준 추천 1순위다.
-
-이유:
-
-- 현재 `UpdateRenderData()`가 만든 vector는 `AtlasRenderer::Render()`에 직접 전달되지 않는다.
-- render path가 `ViewInterface::GetGlyphs()`로 glyphs / positions를 다시 얻는다면 중복 계산일 수 있다.
-- renderer position cache가 생겼으므로 `UpdateRenderData()`의 역할을 validation / render dirty clear gate로 축소할 수 있는지 검토하기 좋아졌다.
-
-주의:
-
-- render dirty clear 조건과 연결되어 있으므로 별도 커밋에서 신중히 다룬다.
-- `AtlasRenderer` 자체는 데모 전에는 수정하지 않는다.
-
-### 2. Sample static/dynamic exclusion split and vector reuse
-
-추천 2순위다.
 
 이유:
 
@@ -614,9 +637,9 @@ cache invalidation:
 - sample-only라 engine 구조 개선은 제한적이다.
 - static bounds가 font size / title style 변경과 연동되는 경우 invalidation을 명확히 해야 한다.
 
-### 3. Incremental `LayoutResult` signature
+### 2. Incremental `LayoutResult` signature
 
-추천 3순위다.
+추천 2순위다.
 
 이유:
 
@@ -629,13 +652,28 @@ cache invalidation:
 - hash 갱신 누락이 correctness에 영향을 줄 수 있으므로 UTC를 충분히 유지한다.
 - signature policy 자체는 바꾸지 않는다.
 
-## 10. 수요일 데모 전 / 데모 후 작업 분리
+### 3. `ViewInterface::GetGlyphs()` copy path 분석
+
+추천 3순위다.
+
+이유:
+
+- renderer position cache와 lightweight `UpdateRenderData()`가 들어간 뒤에도 glyph info copy는 render path에 남아 있다.
+- glyph info와 cached position을 더 직접적인 배열로 제공할 수 있는지 조사할 수 있다.
+- `AtlasRenderer` 수정 없이 adapter / view interface 경계에서 줄일 수 있는 여지가 있는지 확인한다.
+
+주의:
+
+- `Text::ViewInterface` contract를 바꾸지 않는다.
+- `AtlasRenderer` 변경이 필요해지면 데모 후 작업으로 분리한다.
+
+## 11. 수요일 데모 전 / 데모 후 작업 분리
 
 ### 데모 전 안전 작업
 
 - sample static/dynamic exclusion split
 - sample combined exclusion vector reuse
-- analyze / reduce redundant `UpdateRenderData()` if validation gate can stay safe
+- incremental `LayoutResult` signature only if UTC scope is clear
 - optional debug status 유지 / FPS-only 기본 상태 유지
 - existing diagnostics는 기본 off 유지
 
@@ -660,7 +698,7 @@ cache invalidation:
 - 효과가 큰 구조 변경은 별도 branch / fixture / screenshot 비교와 함께 진행한다.
 - 기존 renderer 공유 경로를 건드리는 변경은 충분한 regression 범위를 확보한다.
 
-## 11. 측정 / 검증 계획
+## 12. 측정 / 검증 계획
 
 ### 조건
 
@@ -696,7 +734,7 @@ cache invalidation:
 - debug counters는 off일 때 detailed formatting 비용이 없어야 한다.
 - 정확한 CPU profiling이 필요하면 sample-only timing 또는 external profiler로 분리한다.
 
-## 12. 결론
+## 13. 결론
 
 현재 남은 최적화는 단순 micro optimization보다 pipeline 구조 중복 제거가 중요하다.
 
@@ -717,6 +755,8 @@ exclusion 쪽은 static / dynamic 분리와 vector/cache 재사용이 수요일 
 
 이번 구현으로 render path 후보 중 하나였던 **Precompute renderer glyph positions in `AtlasViewAdapter`**도 1차 완료됐다.
 
-이제 다음 구조 최적화 후보는 render path 중복 제거 쪽이다. 특히 `UpdateRenderData()`가 실제 render 입력과 중복되는지 확인하고, render dirty clear success gate를 유지하면서 더 가볍게 만들 수 있는지 작은 커밋으로 진행하는 것을 권장한다.
+이번 구현으로 **Reduce redundant `UpdateRenderData()`**도 1차 완료됐다. `UpdateRenderData()`는 더 이상 glyph count만큼 render data vector를 만들지 않고, renderer ensure와 lightweight validation gate 역할만 수행한다.
+
+이제 다음 구조 최적화 후보는 exclusion update path와 남은 render copy path 쪽이다. 데모 전에는 sample static / dynamic exclusion split처럼 visual output과 core policy를 건드리지 않는 작업이 가장 안전하다. render 쪽은 `ViewInterface::GetGlyphs()` copy path 분석과 incremental layout signature를 작은 커밋으로 이어갈 수 있다.
 
 다음 세션에서 구조 최적화를 시작한다면 이 문서와 `15-current-optimization-status.ko.md`를 먼저 읽고, 위 후보 중 demo risk가 낮은 항목부터 작은 커밋으로 진행하는 것을 권장한다.

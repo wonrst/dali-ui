@@ -31,10 +31,11 @@
 - `Add optional TextVisualizer performance debug status`
 - `Move TextVisualizer glyph layout cache into PreparedText`
 - `Precompute TextVisualizer renderer glyph positions`
+- `Reduce TextVisualizer redundant render data update`
 
 이번 작업 포함 최신 커밋:
 
-- `Precompute TextVisualizer renderer glyph positions`
+- `Reduce TextVisualizer redundant render data update`
 
 최근 최적화 상태:
 
@@ -54,6 +55,7 @@
 - performance sample의 detailed status는 기본 off이며, `0` key로 켠 경우에만 counters 문자열을 갱신한다.
 - `PreparedText`가 stable glyph layout cache를 보관하고 `LayoutGlyphs()`가 이를 재사용한다.
 - `AtlasViewAdapter`가 renderer glyph positions를 layout 연결 시점에 미리 계산하고 `GetGlyphs()` render path에서 재사용한다.
+- `AtlasRendererBridge::UpdateRenderData()`는 full render data vector build 대신 lightweight validation + renderer ensure 역할로 축소됐다.
 
 현재 해석:
 
@@ -82,6 +84,7 @@
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
 - `LayoutResult`의 각 glyph line은 line별 metrics 후보를 보유할 수 있다.
 - renderer glyph positions는 `AtlasViewAdapter` cache로 미리 계산된다.
+- render data update는 glyph count만큼 별도 vector를 만들지 않고 first / last glyph smoke validation과 renderer creation gate만 수행한다.
 - 기본 word wrap이 추가되어 space 등 unibreak 기반 line break 후보에서 줄바꿈할 수 있다.
 - word wrap lookup에 필요한 stable glyph layout data는 prepare 단계에서 만들어진다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.

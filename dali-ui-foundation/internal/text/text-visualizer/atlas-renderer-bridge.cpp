@@ -18,9 +18,6 @@
 // CLASS HEADER
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 
-// EXTERNAL INCLUDES
-#include <vector>
-
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/rendering/atlas/text-atlas-renderer.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
@@ -62,22 +59,14 @@ uint32_t CountRenderersRecursive(const Actor& actor)
 
 struct AtlasRendererBridge::Impl
 {
-  struct AtlasGlyphRenderData
-  {
-    Text::GlyphInfo glyph;
-    GlyphPlacement  placement;
-    float           x{0.0f};
-    float           y{0.0f};
-    float           width{0.0f};
-    float           height{0.0f};
-  };
-
   void Clear()
   {
-    mRenderData.clear();
+    mValidatedGlyphCount = 0u;
+    mHasValidatedGlyphs  = false;
   }
 
-  std::vector<AtlasGlyphRenderData> mRenderData;
+  uint32_t mValidatedGlyphCount{0u};
+  bool     mHasValidatedGlyphs{false};
 };
 
 AtlasRendererBridge::AtlasRendererBridge()
@@ -113,6 +102,7 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
   }
 
   mAdapter = adapter;
+  mImpl->Clear();
   mViewInterface.SetAdapter(adapter);
 }
 
@@ -241,6 +231,16 @@ uint32_t AtlasRendererBridge::GetAttachCallCount() const
   return mAttachCallCount;
 }
 
+uint32_t AtlasRendererBridge::GetValidatedGlyphCount() const
+{
+  return mImpl->mValidatedGlyphCount;
+}
+
+bool AtlasRendererBridge::HasValidatedRenderData() const
+{
+  return mImpl->mHasValidatedGlyphs;
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
@@ -257,46 +257,50 @@ void AtlasRendererBridge::ResetRenderer()
 
 bool AtlasRendererBridge::UpdateRenderData()
 {
-  if(!HasRenderableGlyphs())
+  if(nullptr == mAdapter)
   {
-    return false;
-  }
-
-  EnsureRenderer();
-  if(!IsRendererCreated())
-  {
+    mImpl->Clear();
     return false;
   }
 
   const uint32_t renderableGlyphCount = mAdapter->GetRenderableGlyphCount();
-  mImpl->Clear();
-  mImpl->mRenderData.reserve(renderableGlyphCount);
-
-  for(uint32_t index = 0u; index < renderableGlyphCount; ++index)
+  if(0u == renderableGlyphCount)
   {
+    mImpl->Clear();
+    return false;
+  }
+
+  if(!mRenderer)
+  {
+    mRenderer = Text::AtlasRenderer::New();
+  }
+
+  if(!IsRendererCreated())
+  {
+    mImpl->Clear();
+    return false;
+  }
+
+  const uint32_t indicesToValidate[] = {0u, renderableGlyphCount - 1u};
+  for(uint32_t index = 0u; index < 2u; ++index)
+  {
+    const uint32_t  placementIndex = indicesToValidate[index];
     GlyphPlacement  placement;
     Text::GlyphInfo glyph;
+    Vector2         position;
 
-    if(!mAdapter->GetGlyphPlacement(index, placement) ||
-       !mAdapter->GetGlyphInfo(placement.glyphIndex, glyph))
+    if(!mAdapter->GetGlyphPlacement(placementIndex, placement) ||
+       !mAdapter->GetGlyphInfo(placement.glyphIndex, glyph) ||
+       !mAdapter->GetRendererGlyphPosition(placementIndex, position))
     {
       mImpl->Clear();
       return false;
     }
-
-    Impl::AtlasGlyphRenderData renderData;
-    renderData.glyph     = glyph;
-    renderData.placement = placement;
-    renderData.x         = placement.x;
-    renderData.y         = placement.y;
-    renderData.width     = placement.width;
-    renderData.height    = (placement.height > 0.0f) ? placement.height : glyph.height;
-    // TODO: Apply baseline, bearing, glyph offset, and text color during actual AtlasRenderer integration.
-
-    mImpl->mRenderData.push_back(renderData);
   }
 
-  return !mImpl->mRenderData.empty();
+  mImpl->mValidatedGlyphCount = renderableGlyphCount;
+  mImpl->mHasValidatedGlyphs  = true;
+  return true;
 }
 
 void AtlasRendererBridge::SetRenderHost(Actor renderHost)
