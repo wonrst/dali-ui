@@ -17,7 +17,6 @@
 #include <dali-ui-foundation/devel-api/ui-foundation-pre-initialize.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <sstream>
@@ -36,10 +35,8 @@ constexpr float SIDE_MARGIN         = 286.0f;
 constexpr float TITLE_TOP           = 58.0f;
 constexpr float TITLE_HEIGHT        = 310.0f;
 constexpr float CONTENT_TOP         = 350.0f;
-constexpr float CONTENT_HEIGHT      = 620.0f;
 constexpr float CONTENT_WIDTH       = WINDOW_WIDTH - (SIDE_MARGIN * 2.0f);
 constexpr float COLUMN_GAP          = 58.0f;
-constexpr float COLUMN_WIDTH        = (CONTENT_WIDTH - (COLUMN_GAP * 2.0f)) / 3.0f;
 constexpr float COLUMN_SPLIT_WIDTH  = COLUMN_GAP;
 constexpr float STATUS_HEIGHT       = 36.0f;
 constexpr float STATUS_BOTTOM       = 16.0f;
@@ -258,8 +255,6 @@ private:
     RebuildStaticExclusionRegions();
     CreateOverlayTextBlocks();
     CreateMovingOrbs();
-    ApplyTextStyle();
-    ApplyOrbVisuals();
     ApplyExclusionRegions();
 
     mStartTime    = std::chrono::steady_clock::now();
@@ -416,6 +411,11 @@ private:
       orb.view.SetCornerRadiusPolicyRelative();
       orb.view.SetCornerRadius(0.5f);
       orb.view.SetProperty(View::Property::SHADOW, CreateOrbShadowMap(orb.color.WithAlpha(0.28f)));
+      orb.view.SetProperty(Actor::Property::VISIBLE, index < mActiveOrbCount);
+      orb.view.SetPositionX(orb.position.x);
+      orb.view.SetPositionY(orb.position.y);
+      orb.view.SetRequestedWidth(orb.size.x);
+      orb.view.SetRequestedHeight(orb.size.y);
       orb.view.TouchedSignal().Connect(this, &TextVisualizerPerformanceController::OnOrbTouched);
 
       mRoot.Add(orb.view);
@@ -483,7 +483,7 @@ private:
 
     MovingOrb& orb = mOrbs[static_cast<uint32_t>(mDraggedOrbIndex)];
     orb.position    = ClampOrbPosition(windowLocalPosition - mDragGrabOffset, orb.size);
-    ApplyOrbVisuals();
+    UpdateOrbPositionsOnScreen();
     ApplyExclusionRegions();
     UpdateStatusText(true);
   }
@@ -540,21 +540,20 @@ private:
     mTextVisualizer.SetTextColor(TEXT_COLORS[mCurrentTextColorIndex]);
   }
 
-  void ApplyOrbVisuals()
+  void UpdateOrbVisibility()
   {
     for(uint32_t index = 0u; index < mOrbs.size(); ++index)
     {
-      const bool active = index < mActiveOrbCount;
-      mOrbs[index].view.SetProperty(Actor::Property::VISIBLE, active);
-      if(!active)
-      {
-        continue;
-      }
+      mOrbs[index].view.SetProperty(Actor::Property::VISIBLE, index < mActiveOrbCount);
+    }
+  }
 
+  void UpdateOrbPositionsOnScreen()
+  {
+    for(uint32_t index = 0u; index < std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size())); ++index)
+    {
       mOrbs[index].view.SetPositionX(mOrbs[index].position.x);
       mOrbs[index].view.SetPositionY(mOrbs[index].position.y);
-      mOrbs[index].view.SetRequestedWidth(mOrbs[index].size.x);
-      mOrbs[index].view.SetRequestedHeight(mOrbs[index].size.y);
       ++mOrbVisualUpdateCount;
     }
   }
@@ -722,7 +721,7 @@ private:
 
     UpdateOrbPositions(std::max(deltaSecs, 0.001f));
     UpdateOverlayTextBlocks(std::max(elapsedSecs, 0.0f));
-    ApplyOrbVisuals();
+    UpdateOrbPositionsOnScreen();
     ApplyExclusionRegions();
 
     if((mFrameCount % STATUS_INTERVAL) == 0u)
@@ -776,20 +775,13 @@ private:
   void ToggleStatusDetails()
   {
     mDetailedStatusEnabled = !mDetailedStatusEnabled;
-    if(mDetailedStatusEnabled)
-    {
-      UpdateStatusText(true);
-    }
-    else
-    {
-      UpdateStatusText(true);
-    }
+    UpdateStatusText(true);
   }
 
   void SetOrbCount(uint32_t count)
   {
     mActiveOrbCount = std::min(std::max(count, MIN_ORB_COUNT), MAX_ORB_COUNT);
-    ApplyOrbVisuals();
+    UpdateOrbVisibility();
     ApplyExclusionRegions();
     UpdateStatusText(true);
   }
