@@ -203,7 +203,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
 {
   if(!AreExclusionRegionsEqual(regions))
   {
-    mExclusionRegions = regions;
+    UpdateStoredExclusionRegions(regions);
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
     RelayoutRequest();
@@ -603,6 +603,26 @@ float TextVisualizerImpl::CalculateEffectiveLineHeight() const
   }
 
   return 0.0f;
+}
+
+void TextVisualizerImpl::UpdateStoredExclusionRegions(const Dali::Vector<Rect<float>>& regions)
+{
+  const uint32_t count = regions.Count();
+  if(mExclusionRegions.Count() == count)
+  {
+    for(uint32_t index = 0u; index < count; ++index)
+    {
+      mExclusionRegions[index] = regions[index];
+    }
+    return;
+  }
+
+  mExclusionRegions.Clear();
+  mExclusionRegions.Reserve(count);
+  for(uint32_t index = 0u; index < count; ++index)
+  {
+    mExclusionRegions.PushBack(regions[index]);
+  }
 }
 
 bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const

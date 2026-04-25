@@ -150,12 +150,12 @@ Dali::String BuildBodyText()
     << "It is not enough for the box height to change. The glyphs must truly reflow and find a new path through the composition as the scene shifts. "
     << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive."
     << "The hard part is not drawing a glyph atlas. The hard part is keeping every later decision honest after the glyphs are prepared. "
-    // << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
-    // << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
-    // << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune."
-    // << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
-    // << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
-    // << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
+    << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
+    << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
+    << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune."
+    << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
+    << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
+    << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
     << "Here it remains text: shaped once, measured as text, and continuously rearranged as the scene moves.";
 
   const std::string text = builder.str();

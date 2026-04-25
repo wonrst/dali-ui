@@ -197,6 +197,7 @@ private:
   bool  IsRenderUpdateSuccessful(bool updateRenderDataResult, bool attachResult) const;
   void  ResetLastRenderedLayoutSignature();
   void  StoreLastRenderedLayoutSignature(uint64_t layoutSignature);
+  void  UpdateStoredExclusionRegions(const Dali::Vector<Rect<float>>& regions);
   bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
   float GetNaturalTextWidth() const;
   float MeasureNaturalTextHeightForWidth(float layoutWidth);

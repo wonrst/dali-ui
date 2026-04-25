@@ -27,10 +27,11 @@
 - `Improve TextVisualizer performance sample visual quality`
 - `Add TextVisualizer basic word wrap`
 - `Optimize TextVisualizer word wrap lookup`
+- `Optimize TextVisualizer exclusion region storage update`
 
 이번 작업 포함 최신 커밋:
 
-- `Optimize TextVisualizer word wrap lookup`
+- `Optimize TextVisualizer exclusion region storage update`
 
 최근 최적화 상태:
 
@@ -46,12 +47,14 @@
 - body `TextVisualizer` surface를 title origin부터 시작하도록 넓히고, title word-level exclusion과 full-surface orb movement를 적용했다.
 - `LayoutGlyphs()`가 `PreparedText::LineBreakInfo`를 사용해 interval overflow 시 마지막 word break 후보를 우선 사용한다.
 - word wrap lookup은 layout pass-local glyph cache를 사용해 repeated line break / glyph mapping lookup을 줄인다.
+- `SetExclusionRegions()`는 exact compare 후 same-count region update를 in-place로 처리한다.
 
 현재 해석:
 
 - `TextVisualizer`는 더 이상 skeleton 단계가 아니라 실제 glyph text를 화면에 표시하는 실험 렌더링 경로다.
 - 최근 작업은 “보이게 만들기”에서 “moving bounds 상황의 relayout/render 비용과 line height 품질을 다듬는 단계”로 넘어왔다.
 - 최신 UTC 수정 커밋은 기능 정책을 크게 바꾼 것이 아니라, 현재 의도된 render/lineHeight 정책에 맞게 테스트 기대값을 조정한 커밋이다.
+- exclusion region storage update는 core exact compare 정책을 유지하면서 same-count update를 in-place로 처리하는 내부 최적화다.
 
 ## 2. 현재 동작 상태
 
@@ -261,7 +264,7 @@ line-level cache:
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
-| redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
+| redundant exclusion update | sample threshold 적용 + core storage update 최적화 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
 | sample Label overhead | title/status/quote TextVisualizer 교체 완료 | sample visual fidelity 확인 |
 | word wrap 품질 | 기본 lineBreakInfo 기반 wrap + lookup cache 적용 완료 | cluster-perfect / bidi / emoji 품질 검토 |
@@ -578,7 +581,38 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - `MATCH_PARENT` 측정 정책을 Label과 더 엄밀히 맞출지 여부
 - fixed height overflow / clipping의 장기 정책
 
-## 17. 다음 추천 작업
+## 17. Exclusion Region Storage Update 현재 상태
+
+`SetExclusionRegions()`는 public API와 exact compare policy를 유지한 채 내부 저장소 갱신 방식을 최적화했다.
+
+기존 문제:
+
+- moving bounds 상황에서는 exclusion regions가 매 tick 바뀔 수 있다.
+- 기존 구현은 값이 다르면 `mExclusionRegions` 전체 assignment를 수행했다.
+- region count가 같고 rect 값만 바뀌는 경우에도 저장소 전체 교체 경로가 열렸다.
+
+현재 정책:
+
+- `AreExclusionRegionsEqual()` exact compare는 그대로 유지한다.
+- 값이 같으면 dirty를 걸지 않는다.
+- 값이 다르고 region count가 같으면 기존 `mExclusionRegions` storage를 in-place update한다.
+- 값이 다르고 region count가 다르면 `Clear()` 후 `Reserve()` + `PushBack()`으로 capacity 재사용 가능성을 높인다.
+- `ClearExclusionRegions()`는 기존처럼 `Clear()`를 호출하고 dirty / relayout / measure invalidation 정책도 유지한다.
+
+유지한 것:
+
+- public API 변경 없음
+- epsilon compare 도입 없음
+- layout / word wrap policy 변경 없음
+- render dirty clear 조건 변경 없음
+
+확인 필요:
+
+- `Dali::Vector::Clear()` 이후 capacity 유지 여부
+- exact compare 비용 자체를 줄일 필요가 있는지
+- core epsilon compare가 필요한지, 아니면 caller-level skip으로 충분한지
+
+## 18. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -611,7 +645,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
 - 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 18. 다음 커밋 금지 사항
+## 19. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -625,7 +659,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 19. 최신 성능 경로 구조
+## 20. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -660,7 +694,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 20. Compact 이후 복구 지침
+## 21. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

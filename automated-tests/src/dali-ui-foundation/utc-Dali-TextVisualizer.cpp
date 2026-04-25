@@ -409,6 +409,76 @@ int UtcDaliTextVisualizerClearExclusionRegions(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerExclusionRegionsSameCountUpdateP(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regionsA;
+  Dali::Vector<Rect<float>> regionsB;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regionsA.PushBack(Rect<float>(0.0f, 0.0f, 100.0f, 30.0f));
+  regionsA.PushBack(Rect<float>(50.0f, 40.0f, 80.0f, 20.0f));
+  regionsB.PushBack(Rect<float>(10.0f, 20.0f, 90.0f, 35.0f));
+  regionsB.PushBack(Rect<float>(70.0f, 45.0f, 60.0f, 25.0f));
+
+  textVisualizer.SetExclusionRegions(regionsA);
+  textVisualizer.SetExclusionRegions(regionsB);
+
+  const Dali::Vector<Rect<float>> storedRegions = textVisualizer.GetExclusionRegions();
+  DALI_TEST_EQUALS(storedRegions.Count(), regionsB.Count(), TEST_LOCATION);
+  DALI_TEST_CHECK(storedRegions[0] == regionsB[0]);
+  DALI_TEST_CHECK(storedRegions[1] == regionsB[1]);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionRegionsDifferentCountUpdateP(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regionsA;
+  Dali::Vector<Rect<float>> regionsB;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regionsA.PushBack(Rect<float>(0.0f, 0.0f, 100.0f, 30.0f));
+  regionsB.PushBack(Rect<float>(10.0f, 20.0f, 90.0f, 35.0f));
+  regionsB.PushBack(Rect<float>(70.0f, 45.0f, 60.0f, 25.0f));
+  regionsB.PushBack(Rect<float>(140.0f, 80.0f, 40.0f, 30.0f));
+
+  textVisualizer.SetExclusionRegions(regionsA);
+  textVisualizer.SetExclusionRegions(regionsB);
+
+  const Dali::Vector<Rect<float>> storedRegions = textVisualizer.GetExclusionRegions();
+  DALI_TEST_EQUALS(storedRegions.Count(), regionsB.Count(), TEST_LOCATION);
+  DALI_TEST_CHECK(storedRegions[0] == regionsB[0]);
+  DALI_TEST_CHECK(storedRegions[1] == regionsB[1]);
+  DALI_TEST_CHECK(storedRegions[2] == regionsB[2]);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionRegionsSameValuesNoOpP(void)
+{
+  UiTestApplication         application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> regions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  regions.PushBack(Rect<float>(0.0f, 0.0f, 100.0f, 30.0f));
+  regions.PushBack(Rect<float>(50.0f, 40.0f, 80.0f, 20.0f));
+
+  textVisualizer.SetExclusionRegions(regions);
+  textVisualizer.SetExclusionRegions(regions);
+
+  const Dali::Vector<Rect<float>> storedRegions = textVisualizer.GetExclusionRegions();
+  DALI_TEST_EQUALS(storedRegions.Count(), regions.Count(), TEST_LOCATION);
+  DALI_TEST_CHECK(storedRegions[0] == regions[0]);
+  DALI_TEST_CHECK(storedRegions[1] == regions[1]);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPrepareAfterStateChangesP(void)
 {
   UiTestApplication application;

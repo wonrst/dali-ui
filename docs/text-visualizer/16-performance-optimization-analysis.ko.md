@@ -302,7 +302,39 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - `OnMeasure()`는 local layout을 계산하므로, 반복 measure가 많아지면 별도 measure cache가 필요할 수 있다.
 - fixed height에서 overflow된 text는 현재 clipping / render host size 정책에 맡긴다.
 
-## 9. 다음 커밋 금지 사항
+## 9. 진행: exclusion region storage update optimization
+
+`SetExclusionRegions()`의 public 동작 의미와 exact compare 정책은 유지하면서, 내부 저장소 갱신 비용을 줄였다.
+
+기존 비용 후보:
+
+- `SetExclusionRegions()`는 moving bounds 상황에서 매 tick 호출될 수 있다.
+- 기존 구현은 값이 달라지면 `mExclusionRegions = regions` 형태로 전체 vector assignment를 수행했다.
+- region count가 같고 rect 값만 움직이는 경우에도 저장소 전체 교체 경로를 탈 수 있었다.
+- 많은 region을 가진 sample / application에서는 compare 이후 copy / allocation 비용이 누적될 수 있다.
+
+현재 저장 정책:
+
+- 먼저 기존처럼 `AreExclusionRegionsEqual()`로 exact compare를 수행한다.
+- 값이 같으면 아무 것도 하지 않는다.
+- 값이 다르고 region count가 같으면 `mExclusionRegions[index] = regions[index]`로 in-place update한다.
+- 값이 다르고 region count가 다르면 `Clear()` 후 `Reserve(regions.Count())`를 수행하고 `PushBack()`으로 복사한다.
+- dirty 정책은 기존과 동일하게 layout dirty + placement render dirty + relayout request + measure invalidation을 수행한다.
+
+유지한 범위:
+
+- public API는 변경하지 않았다.
+- epsilon compare는 도입하지 않았다.
+- `SetExclusionRegions()`의 semantic은 변경하지 않았다.
+- layout / word wrap / render dirty clear 조건은 변경하지 않았다.
+
+확인 필요:
+
+- `Dali::Vector::Clear()` 이후 capacity가 장기적으로 유지되는지 확인이 필요하다.
+- very large region count에서 exact compare 비용 자체는 여전히 남는다.
+- core epsilon compare는 correctness 정책을 흐릴 수 있으므로 별도 설계 전까지 보류한다.
+
+## 10. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -316,7 +348,7 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - sample 관측용 변경과 core 최적화 변경을 한 커밋에 섞지 않기
 
-## 10. Compact 이후 복구 지침
+## 11. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
