@@ -58,7 +58,7 @@ flowchart LR
 | 매 tick full `Renderer::Render()` | `AttachRendererToHost()`가 attached 상태여도 `Render()`를 다시 호출한다 | relayout 뒤 geometry/update 비용이 누적된다 | layout 변경이 없으면 render skip, 중기적으로 geometry-only update 검토 | 높음 |
 | output actor/mesh regeneration | output actor 재사용 여부와 별개로 내부 child mesh actor/renderer update가 발생할 수 있다 | actor/renderer 구조가 커질수록 비용 증가 가능 | output actor/mesh actor 재사용 정책 조사 | 중간 |
 | `GetLineBaselineOffset()`의 same-line scan | `AtlasViewAdapter::GetRendererGlyphPosition()`가 glyph마다 같은 line의 glyph placements를 다시 훑는다 | 렌더 직전 좌표 보정에서 line당 반복 scan이 발생한다 | line baseline cache 추가 | 높음 |
-| exclusion interval 계산 시 line마다 모든 bounds scan | `BuildAvailableIntervals()`가 현재 line마다 모든 exclusion region을 확인한다 | bounds 수와 line 수가 모두 커질수록 비용 증가 | y축 sort/cache로 line band candidate 축소 | 중간 |
+| exclusion interval 계산 시 line마다 모든 bounds scan | 기존에는 `BuildAvailableIntervals()`가 line마다 모든 exclusion region을 확인했다. 현재는 layout pass 시작 시 y축 기준 sorted cache를 만들고 line band와 겹칠 수 있는 후보만 검사한다 | bounds 수와 line 수가 모두 커질수록 비용이 커졌고, 1차 최적화 후에는 per-line 후보 scan 비용이 줄었다 | 더 큰 bounds 수에서는 spatial index / partial relayout 검토 | 1차 완료 |
 | `Dali::Vector` / `std::vector` 재할당 | layout 결과와 render data가 `Clear()` 후 반복 push-back 된다 | 긴 텍스트에서 allocation/reallocation이 잦을 수 있다 | glyph count 기반 reserve/preallocate | 중간 |
 | logging / diagnostics overhead | 현재 `DALI_LOG_ERROR`와 diagnostics getter가 살아 있다 | sample/benchmark 시 관측값을 왜곡할 수 있다 | debug level 또는 compile-time flag로 낮춤 | 높음 |
 | `render dirty` 미해제 구조 | 현재는 성공 후에도 clear하지 않는다 | relayout이 다시 오면 render path가 계속 열린 상태다 | 별도 커밋에서 clear 조건 도입 | 중간 |
@@ -129,8 +129,11 @@ flowchart LR
 
 ### G. interval optimization
 
-- 현재 `BuildAvailableIntervals()`는 매 line마다 모든 exclusion region을 scan한다.
-- bounds를 y 기준으로 sort/cache하면 현재 line band와 겹칠 가능성이 있는 bounds만 확인하도록 줄일 수 있다.
+- 1차 최적화는 완료됐다.
+- layout pass 시작 시 exclusion region을 y 기준으로 정렬한 cache를 만든다.
+- 각 line에서는 `top / bottom` 기준으로 현재 line band와 겹칠 가능성이 있는 region만 검사한다.
+- blocked interval 생성 이후의 x sort / merge / available interval 생성 정책은 유지한다.
+- 남은 과제는 더 큰 bounds 수에서 spatial index나 affected-line partial relayout이 필요한지 확인하는 것이다.
 
 ## 4. 중기 최적화 후보
 
@@ -575,53 +578,135 @@ flowchart LR
 
 즉, 이번 단계는 “placeholder 규칙보다 낫다” 수준의 개선이지, font-system 수준의 최종 정답은 아니다.
 
+## 진행: exclusion interval scanning optimization
+
+최근 커밋:
+
+- `47cb3d725372757294d15e1f03a40e31aa07a9c9`
+- `Optimize TextVisualizer exclusion interval scanning`
+
+기존 문제:
+
+- `BuildAvailableIntervals()`가 line마다 전체 exclusion region을 scan했다.
+- moving bounds가 많고 visible line 수가 많을수록 `line count x bounds count` 비용이 커졌다.
+- 각 line은 전체 bounds scan 이후 vertical overlap region만 `blockedIntervals`에 넣고, 그 다음 x 방향 sort / merge를 수행했다.
+
+변경된 구조:
+
+- `LayoutPlaceholder()`와 `LayoutGlyphs()`가 layout pass 시작 시 exclusion region을 y축 기준으로 한 번 정렬한다.
+- 각 line에서는 sorted cache를 순회하면서:
+  - `region.bottom <= lineTop`이면 이미 지난 region이므로 skip한다.
+  - `region.top >= lineBottom`이면 이후 region은 현재 line과 겹칠 수 없으므로 scan을 중단한다.
+  - 그 외 region만 기존 vertical overlap 검사와 blocked interval 후보 생성에 사용한다.
+- blocked interval 생성 이후의 x 방향 sort / merge / available interval 생성 정책은 기존과 동일하게 유지한다.
+- public `LayoutEngine::BuildAvailableIntervals()` API는 그대로 유지하며, 내부에서 sorted cache helper를 사용한다.
+
+적용 범위:
+
+- `LayoutPlaceholder()`
+- `LayoutGlyphs()`
+- public `BuildAvailableIntervals()` compatibility path
+
+기대 효과:
+
+- moving bounds가 많을 때 line별 exclusion scan 후보 수가 줄어든다.
+- visible line count가 많을수록 전체 relayout 비용 감소 효과가 커질 수 있다.
+- layout 결과 정책은 유지하면서 검사 대상만 줄이는 최적화다.
+
+남은 한계:
+
+- bounds가 매 tick 움직이면 sorted cache는 layout pass마다 다시 생성된다.
+- bounds 수가 매우 많아지면 단순 y-sort보다 더 고급 spatial index가 필요할 수 있다.
+- affected line만 다시 계산하는 partial relayout은 아직 도입하지 않았다.
+- render 호출 횟수나 renderer geometry update 비용은 이번 변경의 범위가 아니다.
+
+다음 성능 최적화 후보:
+
+- `LayoutResult` / render data reserve
+- `render dirty` clear 조건 도입
+- `SetExclusionRegions()` epsilon compare 또는 upstream unchanged skip 정책
+- layout unchanged 시 render skip
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Add line-level metrics if needed
+### A. Reserve / preallocate layout and render buffers
+
+이유:
+
+- exclusion scan 1차 최적화 이후에는 반복 allocation 비용을 줄이는 안전한 성능 커밋이 다음 후보가 될 수 있다.
+- glyph count / cluster count를 알고 있으므로 `LayoutResult`와 bridge render data에 reserve 여지가 있다.
+- public API나 render lifecycle을 건드리지 않고 작게 가져갈 수 있다.
+
+주의:
+
+- buffer reserve와 layout 정책 변경을 섞지 않는다.
+- `Renderer::Render()` 호출 정책이나 `render dirty` clear는 건드리지 않는다.
+
+### B. Add render dirty clear condition
+
+이유:
+
+- render 성공 후에도 `mRenderDirty`를 clear하지 않는 구조는 향후 불필요한 render path 재실행 비용을 키울 수 있다.
+
+주의:
+
+- `IsRenderReady()`만으로 clear하면 안 된다.
+- 최소한 `UpdateRenderData()` 성공, `Renderer::Render()` 성공, output actor attach/parent 상태, glyph count 일관성을 함께 확인해야 한다.
+- 별도 커밋으로만 다룬다.
+
+### C. Redundant exclusion region update skip
+
+이유:
+
+- moving bounds update path에서는 `SetExclusionRegions()`마다 vector compare / copy 비용이 남아 있다.
+- 실제로 값이 바뀌지 않은 경우 dirty를 걸지 않는 skip 정책은 유효할 수 있다.
+
+주의:
+
+- core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
+- sample-level upstream skip과 core API policy를 분리해서 검토한다.
+
+### D. Layout unchanged 시 render skip
+
+이유:
+
+- exclusion regions가 바뀌어도 최종 glyph placement가 같을 수 있다.
+- layout 결과가 동일하면 `UpdateRenderData()` / `Renderer::Render()`를 생략할 여지가 있다.
+
+주의:
+
+- float 비교 정책, layout hash/version, glyph placement 비교 기준이 필요하다.
+- `render dirty` clear 조건보다 뒤에서 다루는 것이 안전하다.
+
+### E. Add line-level metrics if needed
 
 이유:
 
 - 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
 - `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
 
-### B. Clarify FontSize unit and conversion
+### F. Clarify FontSize unit and conversion
 
 이유:
 
 - public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
 - line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
 
-### C. Improve word/cluster line break
+### G. Improve word/cluster line break
 
 이유:
 
 - 현재는 line height는 나아졌지만 line break 품질은 여전히 glyph advance 순차 배치에 가깝다.
 
-### D. Optimize exclusion interval scanning
-
-이유:
-
-- line metrics 적용으로 line 수는 줄었지만, 현재 구조는 여전히 line마다 모든 bounds를 훑는다.
-
-### E. Add render dirty clear condition
-
-이유:
-
-- render correctness와 update 정책이 더 안정화된 뒤에 별도 커밋으로 다루는 것이 안전하다.
-
-### F. Reserve / preallocate layout and render buffers
-
-이유:
-
-- 구조는 단순하지만 긴 텍스트와 moving bounds가 많을 때 allocation 비용이 쌓일 수 있다.
-
 현재 우선순위 재정렬의 핵심은 다음과 같다.
 
 - line height 품질은 이제 한 단계 올라왔다.
 - `FontSize` pixel size와 relative line height 정책은 고정됐다.
-- 다음 핵심은 line-level metrics 필요성 확인과 conversion 의미 보강이다.
+- exclusion interval scanning의 1차 최적화는 완료됐다.
+- 다음 성능 후보는 reserve / preallocate처럼 안전한 allocation 비용 절감 또는 render dirty clear처럼 별도 correctness 조건이 필요한 작업으로 나눠서 다룬다.
+- 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 
 ## 금지 사항
 
