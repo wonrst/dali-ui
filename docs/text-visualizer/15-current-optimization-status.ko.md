@@ -37,10 +37,11 @@
 - `Analyze TextVisualizer atlas render update cost`
 - `Clean up TextVisualizer performance sample update path`
 - `Start TextVisualizer render optimization phase 2`
+- `Inspect TextVisualizer lightweight renderer dependencies`
 
 이번 작업 포함 최신 커밋:
 
-- `Start TextVisualizer render optimization phase 2`
+- `Inspect TextVisualizer lightweight renderer dependencies`
 
 최근 최적화 상태:
 
@@ -68,6 +69,9 @@
 - Phase 2 primary target은 text content가 stable하고 exclusion / layout / glyph positions만 자주 바뀌는 layout-dynamic workload다.
 - content-dynamic ASCII raster / terminal-like workload는 Phase 2 primary target이 아니며 별도 renderer/cache 전략 후보로 둔다.
 - `docs/text-visualizer/19-render-optimization-phase2-plan.ko.md`에서 `TextVisualizerGlyphRenderer` prototype 방향을 시작점으로 잡았다.
+- `docs/text-visualizer/20-lightweight-renderer-dependency-analysis.ko.md`에서 `TextVisualizerGlyphRenderer` 구현에 필요한 atlas / mesh / geometry dependency를 조사했다.
+- 조사 결과 `AtlasGlyphManager`와 `AtlasMeshFactory`는 재사용 가능하지만, `CacheGlyph`, `MeshRecord`, `TextCacheEntry`, actor/renderer 생성 lifecycle은 `AtlasRenderer::Impl` private 구현에 묶여 있다.
+- 다음 low-risk 구현 후보는 active path에 연결하지 않는 `TextVisualizerGlyphRenderer` skeleton이다.
 
 현재 해석:
 
@@ -747,22 +751,22 @@ Non-primary workload:
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Inspect TextVisualizer lightweight renderer dependencies
+### A. Add `TextVisualizerGlyphRenderer` skeleton
 
 이유:
 
-- Phase 2의 첫 목표는 `TextVisualizerGlyphRenderer` prototype 가능성을 확인하는 것이다.
-- `AtlasGlyphManager` / `AtlasMeshFactory` / atlas slot / shader / texture path 접근성이 먼저 확인돼야 한다.
-- `text-atlas-renderer.*`를 바로 수정하지 않고 필요한 internal dependency를 문서화할 수 있다.
+- dependency 분석 결과 skeleton은 기존 renderer path에 영향을 주지 않고 추가할 수 있다.
+- 새 renderer class의 output actor lifecycle / clear skeleton부터 작게 시작할 수 있다.
+- active rendering path에 연결하지 않으면 회귀 위험이 낮다.
 - public API 영향이 없다.
 
-### B. Add `TextVisualizerGlyphRenderer` skeleton
+### B. Prototype TextVisualizer glyph mesh builder
 
 이유:
 
-- dependency 조사 후 새 renderer class의 output actor lifecycle skeleton을 별도 커밋으로 만들 수 있다.
-- active rendering path에 연결하지 않으면 회귀 위험이 낮다.
-- empty state UTC부터 시작할 수 있다.
+- skeleton 이후 `AtlasGlyphManager` / `AtlasMeshFactory`를 사용하는 최소 mesh build path를 검증한다.
+- `CacheGlyph`와 text cache/refcount lifecycle은 기존 `AtlasRenderer::Impl` private helper를 직접 재사용할 수 없으므로 제한된 prototype 범위가 필요하다.
+- 기존 `Text::AtlasRenderer` path는 fallback으로 유지한다.
 
 ### C. Prototype geometry-only update path
 
@@ -837,4 +841,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 `Inspect TextVisualizer lightweight renderer dependencies`이다. 새 세션에서는 이 문서 다음에 `19-render-optimization-phase2-plan.ko.md`와 `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 `Add TextVisualizerGlyphRenderer skeleton`이다. 새 세션에서는 이 문서 다음에 `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
