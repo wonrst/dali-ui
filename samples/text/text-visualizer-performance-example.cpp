@@ -186,6 +186,11 @@ Vector2 GetLegacyContentOffset()
   return Vector2(SIDE_MARGIN - BODY_SURFACE_LEFT, CONTENT_TOP - BODY_SURFACE_TOP);
 }
 
+Vector2 GetBodySurfaceOrigin()
+{
+  return Vector2(BODY_SURFACE_LEFT, BODY_SURFACE_TOP);
+}
+
 void AppendTitleLineExclusion(Dali::Vector<Rect<float>>& regions, float lineWidth, uint32_t lineIndex)
 {
   const float lineY     = TITLE_EXCLUSION_TOP_OFFSET + (static_cast<float>(lineIndex) * TITLE_EXCLUSION_LINE_PITCH);
@@ -334,8 +339,8 @@ private:
     mContentArea.Add(mTextVisualizer);
 
     mDropCapText = TextVisualizer::New();
-    mDropCapText.SetPositionX(DROP_CAP_TEXT_X);
-    mDropCapText.SetPositionY(DROP_CAP_TEXT_Y);
+    mDropCapText.SetPositionX(BODY_SURFACE_LEFT + DROP_CAP_TEXT_X);
+    mDropCapText.SetPositionY(BODY_SURFACE_TOP + DROP_CAP_TEXT_Y);
     mDropCapText.SetRequestedWidth(DROP_CAP_TEXT_WIDTH);
     mDropCapText.SetRequestedHeight(DROP_CAP_TEXT_HEIGHT);
     mDropCapText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
@@ -345,7 +350,7 @@ private:
     mDropCapText.SetLineHeight(1.0f);
     mDropCapText.SetTextColor(QUOTE_TEXT_COLOR);
 
-    mContentArea.Add(mDropCapText);
+    mRoot.Add(mDropCapText);
   }
 
   void CreateOverlayTextBlocks()
@@ -362,8 +367,8 @@ private:
       block.phase      = phase;
 
       block.text = TextVisualizer::New();
-      block.text.SetPositionX(bounds.x);
-      block.text.SetPositionY(bounds.y);
+      block.text.SetPositionX(BODY_SURFACE_LEFT + bounds.x);
+      block.text.SetPositionY(BODY_SURFACE_TOP + bounds.y);
       block.text.SetRequestedWidth(bounds.width);
       block.text.SetRequestedHeight(bounds.height);
       block.text.SetBackgroundColor(UiColor(Color::TRANSPARENT));
@@ -373,7 +378,7 @@ private:
       block.text.SetLineHeight(1.0f);
       block.text.SetTextColor(textColor);
 
-      mContentArea.Add(block.text);
+      mRoot.Add(block.text);
       mOverlayTextBlocks.push_back(block);
     };
 
@@ -400,7 +405,7 @@ private:
     for(uint32_t index = 0u; index < MAX_ORB_COUNT; ++index)
     {
       MovingOrb orb;
-      orb.position    = ClampOrbPosition(ORB_PRESETS[index].position + GetLegacyContentOffset(), ORB_PRESETS[index].size);
+      orb.position    = ClampOrbPosition(ORB_PRESETS[index].position + GetLegacyContentOffset() + GetBodySurfaceOrigin(), ORB_PRESETS[index].size);
       orb.size        = ORB_PRESETS[index].size;
       orb.velocity    = ORB_PRESETS[index].velocity;
       orb.color       = ORB_PRESETS[index].color;
@@ -413,8 +418,20 @@ private:
       orb.view.SetProperty(View::Property::SHADOW, CreateOrbShadowMap(orb.color.WithAlpha(0.28f)));
       orb.view.TouchedSignal().Connect(this, &TextVisualizerPerformanceController::OnOrbTouched);
 
-      mContentArea.Add(orb.view);
+      mRoot.Add(orb.view);
       mOrbs.push_back(orb);
+    }
+
+    RaiseForegroundTextToTop();
+  }
+
+  void RaiseForegroundTextToTop()
+  {
+    mTitleText.RaiseToTop(LayoutOrderPolicy::PRESERVE);
+    mDropCapText.RaiseToTop(LayoutOrderPolicy::PRESERVE);
+    for(OverlayTextBlock& block : mOverlayTextBlocks)
+    {
+      block.text.RaiseToTop(LayoutOrderPolicy::PRESERVE);
     }
   }
 
@@ -432,13 +449,13 @@ private:
 
   Vector2 ClampOrbPosition(const Vector2& position, const Vector2& size) const
   {
-    const float maxX = std::max(0.0f, BODY_SURFACE_WIDTH - size.x);
-    const float maxY = std::max(0.0f, BODY_SURFACE_HEIGHT - size.y);
+    const float maxX = std::max(0.0f, WINDOW_WIDTH - size.x);
+    const float maxY = std::max(0.0f, WINDOW_HEIGHT - size.y);
     return Vector2(std::clamp(position.x, 0.0f, maxX),
                    std::clamp(position.y, 0.0f, maxY));
   }
 
-  bool GetContentLocalPosition(const TouchEvent& touch, Vector2& localPosition) const
+  bool GetWindowLocalPosition(const TouchEvent& touch, Vector2& localPosition) const
   {
     if(touch.GetPointCount() < 1u)
     {
@@ -448,7 +465,7 @@ private:
     const Vector2 screenPosition = touch.GetScreenPosition(0u);
     float         localX         = 0.0f;
     float         localY         = 0.0f;
-    if(!mContentArea.ScreenToLocal(localX, localY, screenPosition.x, screenPosition.y))
+    if(!mRoot.ScreenToLocal(localX, localY, screenPosition.x, screenPosition.y))
     {
       return false;
     }
@@ -457,7 +474,7 @@ private:
     return true;
   }
 
-  void UpdateDraggedOrb(const Vector2& contentLocalPosition)
+  void UpdateDraggedOrb(const Vector2& windowLocalPosition)
   {
     if(mDraggedOrbIndex < 0 || static_cast<uint32_t>(mDraggedOrbIndex) >= mOrbs.size())
     {
@@ -465,7 +482,7 @@ private:
     }
 
     MovingOrb& orb = mOrbs[static_cast<uint32_t>(mDraggedOrbIndex)];
-    orb.position    = ClampOrbPosition(contentLocalPosition - mDragGrabOffset, orb.size);
+    orb.position    = ClampOrbPosition(windowLocalPosition - mDragGrabOffset, orb.size);
     ApplyOrbVisuals();
     ApplyExclusionRegions();
     UpdateStatusText(true);
@@ -479,8 +496,8 @@ private:
       return false;
     }
 
-    Vector2 contentLocalPosition;
-    if(!GetContentLocalPosition(touch, contentLocalPosition))
+    Vector2 windowLocalPosition;
+    if(!GetWindowLocalPosition(touch, windowLocalPosition))
     {
       return false;
     }
@@ -489,8 +506,8 @@ private:
     if(state == PointState::DOWN)
     {
       mDraggedOrbIndex = orbIndex;
-      mDragGrabOffset  = contentLocalPosition - mOrbs[static_cast<uint32_t>(orbIndex)].position;
-      UpdateDraggedOrb(contentLocalPosition);
+      mDragGrabOffset  = windowLocalPosition - mOrbs[static_cast<uint32_t>(orbIndex)].position;
+      UpdateDraggedOrb(windowLocalPosition);
       return true;
     }
 
@@ -501,13 +518,13 @@ private:
 
     if(state == PointState::MOTION)
     {
-      UpdateDraggedOrb(contentLocalPosition);
+      UpdateDraggedOrb(windowLocalPosition);
       return true;
     }
 
     if(state == PointState::UP || state == PointState::INTERRUPTED || state == PointState::LEAVE)
     {
-      UpdateDraggedOrb(contentLocalPosition);
+      UpdateDraggedOrb(windowLocalPosition);
       mDraggedOrbIndex = -1;
       UpdateStatusText(true);
       return true;
@@ -555,15 +572,16 @@ private:
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
   {
     constexpr float ORB_BOUND_PADDING = 8.0f;
+    const Vector2   bodyLocalPosition = orb.position - GetBodySurfaceOrigin();
     const float     radiusX    = orb.size.x * 0.5f;
     const float     radiusY    = orb.size.y * 0.5f;
-    const float     centerX    = orb.position.x + radiusX;
-    const float     centerY    = orb.position.y + radiusY;
+    const float     centerX    = bodyLocalPosition.x + radiusX;
+    const float     centerY    = bodyLocalPosition.y + radiusY;
     const float     bandHeight = orb.size.y / static_cast<float>(ORB_EXCLUSION_BAND_COUNT);
 
     for(uint32_t bandIndex = 0u; bandIndex < ORB_EXCLUSION_BAND_COUNT; ++bandIndex)
     {
-      const float bandTop     = orb.position.y + (static_cast<float>(bandIndex) * bandHeight);
+      const float bandTop     = bodyLocalPosition.y + (static_cast<float>(bandIndex) * bandHeight);
       const float bandCenterY = bandTop + (bandHeight * 0.5f);
       const float normalizedY = (radiusY > 0.0f) ? ((bandCenterY - centerY) / radiusY) : 0.0f;
       const float xScale      = std::sqrt(std::max(0.0f, 1.0f - (normalizedY * normalizedY)));
@@ -690,7 +708,7 @@ private:
       const float offset = ((std::sin((elapsedSeconds * OVERLAY_TEXT_MOVE_SPEED) + block.phase) + 1.0f) * 0.5f) * block.travelX;
       block.bounds      = block.baseBounds;
       block.bounds.x += offset;
-      block.text.SetPositionX(block.bounds.x);
+      block.text.SetPositionX(BODY_SURFACE_LEFT + block.bounds.x);
     }
   }
 
