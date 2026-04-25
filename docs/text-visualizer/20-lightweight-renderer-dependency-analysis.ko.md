@@ -469,7 +469,51 @@ Add TextVisualizerGlyphRenderer skeleton
 
 그 다음 커밋에서 glyph cache / mesh build MVP를 별도로 진행한다.
 
-## 13. Compact 이후 복구 지침
+## 13. 진행: TextVisualizerGlyphRenderer Skeleton
+
+`TextVisualizerGlyphRenderer` skeleton class를 추가했다.
+
+추가 위치:
+
+```text
+dali-ui-foundation/internal/text/text-visualizer/rendering/text-visualizer-glyph-renderer.h
+dali-ui-foundation/internal/text/text-visualizer/rendering/text-visualizer-glyph-renderer.cpp
+```
+
+현재 구현 범위:
+
+- constructor / destructor
+- `Clear()`
+- render host setter / getter
+- output actor 생성
+- output actor attach / detach
+- empty lifecycle UTC
+
+명시적으로 아직 하지 않는 것:
+
+- glyph mesh build
+- atlas glyph cache 접근
+- `VertexBuffer` / `Geometry` / `Renderer` 생성
+- `PreparedText` / `LayoutResult` 처리
+- `AtlasRendererBridge` active path 연결
+
+즉 이번 skeleton은 Phase 2 prototype을 위한 isolated class만 추가한다. 기존 `Text::AtlasRenderer` fallback path와 현재 `TextVisualizer` render path는 변경하지 않는다.
+
+다음 단계:
+
+```text
+Prototype TextVisualizer glyph mesh builder
+```
+
+또는 더 작게:
+
+```text
+Add TextVisualizerGlyphRenderer empty output lifecycle tests
+```
+
+실제 rendering MVP로 넘어갈 때는 glyph cache ref count, atlas page split, shader 선택, vertex/index buffer reuse 정책을 별도 커밋으로 다룬다.
+
+## 14. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서로 읽는다.
 

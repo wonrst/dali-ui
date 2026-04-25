@@ -24,6 +24,7 @@
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/rendering/text-visualizer-glyph-renderer.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-visualizer-view-interface.h>
 #include <dali-ui-test-suite-utils.h>
@@ -1706,6 +1707,112 @@ int UtcDaliTextVisualizerAtlasViewAdapterInvalidPlacementIndexP(void)
   DALI_TEST_CHECK(!adapter.HasValidGlyphPlacementIndices());
   DALI_TEST_CHECK(!adapter.HasRenderableGlyphs());
   DALI_TEST_EQUALS(adapter.GetGlyphPlacementCount(), 1u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererEmptyStateP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  DALI_TEST_CHECK(!renderer.HasRenderHost());
+  DALI_TEST_CHECK(!renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.GetRenderHost());
+  DALI_TEST_CHECK(!renderer.GetOutputActor());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererRenderHostSetterP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          host = Actor::New();
+
+  renderer.SetRenderHost(host);
+  DALI_TEST_CHECK(renderer.HasRenderHost());
+  DALI_TEST_CHECK(renderer.GetRenderHost() == host);
+
+  renderer.Clear();
+  DALI_TEST_CHECK(!renderer.HasRenderHost());
+  DALI_TEST_CHECK(!renderer.GetRenderHost());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererEnsureOutputActorP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  renderer.EnsureOutputActor();
+
+  DALI_TEST_CHECK(renderer.HasOutputActor());
+  DALI_TEST_CHECK(renderer.GetOutputActor());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.GetOutputActor().GetParent());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererAttachWithoutHostP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  renderer.EnsureOutputActor();
+
+  DALI_TEST_CHECK(!renderer.AttachOutputToHost());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.GetOutputActor().GetParent());
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererAttachDetachP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          host = Actor::New();
+
+  renderer.SetRenderHost(host);
+
+  DALI_TEST_CHECK(renderer.AttachOutputToHost());
+  DALI_TEST_CHECK(renderer.IsAttached());
+  DALI_TEST_CHECK(renderer.HasOutputActor());
+  DALI_TEST_CHECK(renderer.GetOutputActor().GetParent() == host);
+  DALI_TEST_EQUALS(host.GetChildCount(), 1u, TEST_LOCATION);
+
+  renderer.DetachOutputFromHost();
+
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.GetOutputActor().GetParent());
+  DALI_TEST_EQUALS(host.GetChildCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererClearP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          host = Actor::New();
+
+  renderer.SetRenderHost(host);
+  DALI_TEST_CHECK(renderer.AttachOutputToHost());
+
+  renderer.Clear();
+
+  DALI_TEST_CHECK(!renderer.HasRenderHost());
+  DALI_TEST_CHECK(!renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.GetRenderHost());
+  DALI_TEST_CHECK(!renderer.GetOutputActor());
+  DALI_TEST_EQUALS(host.GetChildCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
