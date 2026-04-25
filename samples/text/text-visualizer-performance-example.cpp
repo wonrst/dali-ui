@@ -43,11 +43,9 @@ constexpr float COLUMN_WIDTH        = (CONTENT_WIDTH - (COLUMN_GAP * 2.0f)) / 3.
 constexpr float COLUMN_SPLIT_WIDTH  = COLUMN_GAP;
 constexpr float STATUS_HEIGHT       = 36.0f;
 constexpr float STATUS_BOTTOM       = 16.0f;
-constexpr float TITLE_FONT_SIZE     = 100.0f;
+constexpr float TITLE_FONT_SIZE     = 95.0f;
 constexpr float BODY_FONT_SIZE      = 16.0f;
-constexpr float QUOTE_FONT_SIZE     = 16.0f;
 constexpr float BODY_LINE_HEIGHT    = 2.2f;
-constexpr float QUOTE_LINE_HEIGHT   = 2.2f;
 constexpr float MIN_FONT_SIZE       = 16.0f;
 constexpr float MAX_FONT_SIZE       = 32.0f;
 constexpr float FONT_STEP           = 2.0f;
@@ -59,13 +57,36 @@ constexpr uint32_t TIMER_INTERVAL_MS = 16u;
 constexpr uint32_t ORB_EXCLUSION_BAND_COUNT = 11u;
 constexpr float DEFAULT_EXCLUSION_UPDATE_THRESHOLD = 0.5f;
 constexpr float EXCLUSION_UPDATE_THRESHOLD_STEP    = 0.5f;
+constexpr float BODY_SURFACE_LEFT             = SIDE_MARGIN - 6.0f;
+constexpr float BODY_SURFACE_TOP              = TITLE_TOP;
+constexpr float BODY_SURFACE_WIDTH            = WINDOW_WIDTH - BODY_SURFACE_LEFT - SIDE_MARGIN;
+constexpr float BODY_SURFACE_HEIGHT           = WINDOW_HEIGHT - BODY_SURFACE_TOP - STATUS_HEIGHT - STATUS_BOTTOM;
+constexpr float TITLE_EXCLUSION_LINE_0_WIDTH  = 850.0f;
+constexpr float TITLE_EXCLUSION_LINE_1_WIDTH  = 845.0f;
+constexpr float TITLE_EXCLUSION_LINE_2_WIDTH  = 505.0f;
+constexpr float TITLE_EXCLUSION_LINE_HEIGHT   = TITLE_FONT_SIZE * 0.72f;
+constexpr float TITLE_EXCLUSION_LINE_PITCH    = TITLE_FONT_SIZE * 0.88f;
+constexpr float TITLE_EXCLUSION_TOP_OFFSET    = 8.0f;
+constexpr float TITLE_EXCLUSION_PADDING       = 8.0f;
+constexpr const char* SAMPLE_FONT_FAMILY      = "DejaVu Serif";
+constexpr float TEXT_VISUALIZER_LABEL_WIDTH   = 790.0f;
+constexpr float TEXT_VISUALIZER_LABEL_HEIGHT  = 80.0f;
+constexpr float TEXT_VISUALIZER_LABEL_TRAVEL  = 160.0f;
+constexpr float TEXT_VISUALIZER_LABEL_X       = BODY_SURFACE_WIDTH - TEXT_VISUALIZER_LABEL_WIDTH - TEXT_VISUALIZER_LABEL_TRAVEL;
+constexpr float TEXT_VISUALIZER_LABEL_Y       = 78.0f + (CONTENT_TOP - BODY_SURFACE_TOP);
+constexpr float TIZEN_LABEL_X                 = 384.0f + (SIDE_MARGIN - BODY_SURFACE_LEFT);
+constexpr float TIZEN_LABEL_Y                 = 314.0f + (CONTENT_TOP - BODY_SURFACE_TOP) + 140.0f;
+constexpr float TIZEN_LABEL_WIDTH             = 520.0f;
+constexpr float TIZEN_LABEL_HEIGHT            = 62.0f;
+constexpr float TIZEN_LABEL_TRAVEL            = 140.0f;
+constexpr float OVERLAY_TEXT_MOVE_SPEED       = 0.55f;
+constexpr float OVERLAY_TEXT_OPPOSITE_PHASE   = 3.14159265f;
 
 const UiColor WINDOW_BG_COLOR(0x0B0B10);
 const UiColor TITLE_COLOR(0xF4F1EC);
-const UiColor ACCENT_COLOR(0xC9A45D);
 const UiColor STATUS_TEXT_COLOR = UiColor(0xFFFFFF).WithAlpha(0.45f);
-const UiColor QUOTE_BG_COLOR = UiColor(0x16161C).WithAlpha(0.70f);
 const UiColor QUOTE_TEXT_COLOR(0xCFB06A);
+const UiColor TIZEN_TEXT_COLOR(0x57C7F3);
 
 const UiColor TEXT_COLORS[] = {
   UiColor(0xF1E8D2),
@@ -100,7 +121,7 @@ const OrbPreset ORB_PRESETS[MAX_ORB_COUNT] = {
 
 Dali::String BuildTitleText()
 {
-  return Dali::String("THE FUTURE OF \nTEXT LAYOUT \nIS DYNAMIC");
+  return Dali::String("THE FUTURE OF TEXT LAYOUT IS DYNAMIC");
 }
 
 Dali::String BuildBodyText()
@@ -124,7 +145,15 @@ Dali::String BuildBodyText()
     << "This sample keeps one large text surface and uses invisible fixed bounds to split the body into three reading lanes. "
     << "The moving orb should feel like an inserted image or a conversation bubble that the paragraph naturally avoids. "
     << "It is not enough for the box height to change. The glyphs must truly reflow and find a new path through the composition as the scene shifts. "
-    << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive.";
+    << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive.\n\n"
+    << "The hard part is not drawing a glyph atlas. The hard part is keeping every later decision honest after the glyphs are prepared. "
+    << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
+    << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
+    << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune.\n\n"
+    << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
+    << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
+    << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
+    << "Here it remains text: shaped once, measured as text, and continuously rearranged as the scene moves.";
 
   const std::string text = builder.str();
   return Dali::String(text.c_str());
@@ -149,12 +178,19 @@ Property::Map CreateOrbShadowMap(const UiColor& color)
   return shadow;
 }
 
-Rect<float> InflateRect(const Vector2& position, const Vector2& size, float padding)
+Vector2 GetLegacyContentOffset()
 {
-  return Rect<float>(position.x - padding,
-                     position.y - padding,
-                     size.x + (padding * 2.0f),
-                     size.y + (padding * 2.0f));
+  return Vector2(SIDE_MARGIN - BODY_SURFACE_LEFT, CONTENT_TOP - BODY_SURFACE_TOP);
+}
+
+void AppendTitleLineExclusion(Dali::Vector<Rect<float>>& regions, float lineWidth, uint32_t lineIndex)
+{
+  const float lineY     = TITLE_EXCLUSION_TOP_OFFSET + (static_cast<float>(lineIndex) * TITLE_EXCLUSION_LINE_PITCH);
+
+  regions.PushBack(Rect<float>(-TITLE_EXCLUSION_PADDING,
+                               lineY - TITLE_EXCLUSION_PADDING,
+                               lineWidth + (TITLE_EXCLUSION_PADDING * 2.0f),
+                               TITLE_EXCLUSION_LINE_HEIGHT + (TITLE_EXCLUSION_PADDING * 2.0f)));
 }
 
 bool AreRectsClose(const Rect<float>& lhs, const Rect<float>& rhs, float threshold)
@@ -193,13 +229,13 @@ struct MovingOrb
   UiColor  color;
 };
 
-struct QuoteBlock
+struct OverlayTextBlock
 {
-  View           container;
-  View           accent;
   TextVisualizer text;
-  Vector2        position{Vector2::ZERO};
-  Vector2        size{Vector2::ZERO};
+  Rect<float>    baseBounds;
+  Rect<float>    bounds;
+  float          travelX{0.0f};
+  float          phase{0.0f};
 };
 } // namespace
 
@@ -222,7 +258,7 @@ private:
 
     CreateScene(window);
     CreateTextSurface();
-    CreateQuoteBlock();
+    CreateOverlayTextBlocks();
     CreateMovingOrbs();
     ApplyTextStyle();
     ApplyOrbVisuals();
@@ -246,9 +282,9 @@ private:
 
     mTitleArea = View::New();
     mTitleArea.SetLayoutMode(LayoutMode::STANDALONE);
-    mTitleArea.SetPositionX(SIDE_MARGIN - 6.0f);
-    mTitleArea.SetPositionY(TITLE_TOP);
-    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f - 100);
+    mTitleArea.SetPositionX(BODY_SURFACE_LEFT);
+    mTitleArea.SetPositionY(BODY_SURFACE_TOP);
+    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f - 80);
     mTitleArea.SetRequestedHeight(TITLE_HEIGHT);
     mTitleArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTitleArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
@@ -261,16 +297,17 @@ private:
     mTitleText.SetRequestedHeight(MATCH_PARENT);
     mTitleText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTitleText.SetText(BuildTitleText());
+    mTitleText.SetFontFamily(SAMPLE_FONT_FAMILY);
     mTitleText.SetFontSize(TITLE_FONT_SIZE);
     mTitleText.SetLineHeight(0.88f);
     mTitleText.SetTextColor(TITLE_COLOR);
 
     mContentArea = View::New();
     mContentArea.SetLayoutMode(LayoutMode::STANDALONE);
-    mContentArea.SetPositionX(SIDE_MARGIN);
-    mContentArea.SetPositionY(CONTENT_TOP);
-    mContentArea.SetRequestedWidth(CONTENT_WIDTH);
-    mContentArea.SetRequestedHeight(CONTENT_HEIGHT);
+    mContentArea.SetPositionX(BODY_SURFACE_LEFT);
+    mContentArea.SetPositionY(BODY_SURFACE_TOP);
+    mContentArea.SetRequestedWidth(BODY_SURFACE_WIDTH);
+    mContentArea.SetRequestedHeight(BODY_SURFACE_HEIGHT);
     mContentArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mContentArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
 
@@ -281,13 +318,14 @@ private:
     mStatusText.SetRequestedWidth(CONTENT_WIDTH);
     mStatusText.SetRequestedHeight(STATUS_HEIGHT);
     mStatusText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mStatusText.SetFontFamily(SAMPLE_FONT_FAMILY);
     mStatusText.SetFontSize(15.0f);
     mStatusText.SetLineHeight(1.2f);
     mStatusText.SetTextColor(STATUS_TEXT_COLOR);
 
+    mRoot.Add(mContentArea);
     mTitleArea.Add(mTitleText);
     mRoot.Add(mTitleArea);
-    mRoot.Add(mContentArea);
     mRoot.Add(mStatusText);
     window.Add(mRoot);
   }
@@ -302,77 +340,62 @@ private:
     mTextVisualizer.SetRequestedHeight(MATCH_PARENT);
     mTextVisualizer.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTextVisualizer.SetText(BuildBodyText());
+    mTextVisualizer.SetFontFamily(SAMPLE_FONT_FAMILY);
     mTextVisualizer.SetFontSize(mBodyFontSize);
     mTextVisualizer.SetLineHeight(BODY_LINE_HEIGHT);
     mTextVisualizer.SetTextColor(TEXT_COLORS[mCurrentTextColorIndex]);
 
+    const float bodyColumnWidth = (BODY_SURFACE_WIDTH - (COLUMN_GAP * 2.0f)) / 3.0f;
     mFixedColumnBounds.Clear();
-    mFixedColumnBounds.PushBack(Rect<float>(COLUMN_WIDTH, 0.0f, COLUMN_SPLIT_WIDTH, CONTENT_HEIGHT));
-    mFixedColumnBounds.PushBack(Rect<float>((COLUMN_WIDTH * 2.0f) + COLUMN_GAP, 0.0f, COLUMN_SPLIT_WIDTH, CONTENT_HEIGHT));
+    mFixedColumnBounds.PushBack(Rect<float>(bodyColumnWidth, 0.0f, COLUMN_SPLIT_WIDTH, BODY_SURFACE_HEIGHT));
+    mFixedColumnBounds.PushBack(Rect<float>((bodyColumnWidth * 2.0f) + COLUMN_GAP, 0.0f, COLUMN_SPLIT_WIDTH, BODY_SURFACE_HEIGHT));
 
     mContentArea.Add(mTextVisualizer);
   }
 
-  void CreateQuoteBlock()
+  void CreateOverlayTextBlocks()
   {
-    mQuoteBlocks.clear();
-    mQuoteBlocks.reserve(2u);
+    mOverlayTextBlocks.clear();
+    mOverlayTextBlocks.reserve(2u);
 
-    auto addQuote = [&](const Dali::String& text, const Vector2& position, const Vector2& size, float accentHeight)
+    auto addTextBlock = [&](const Dali::String& text, const Rect<float>& bounds, float travelX, float phase, float fontSize, const UiColor& textColor)
     {
-      QuoteBlock block;
-      block.position = position;
-      block.size     = size;
-
-      block.container = View::New();
-      block.container.SetLayoutMode(LayoutMode::STANDALONE);
-      block.container.SetPositionX(position.x);
-      block.container.SetPositionY(position.y);
-      block.container.SetRequestedWidth(size.x);
-      block.container.SetRequestedHeight(size.y);
-      block.container.SetBackgroundColor(UiColor(Color::TRANSPARENT));
-      block.container.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
-
-      block.accent = View::New();
-      block.accent.SetLayoutMode(LayoutMode::STANDALONE);
-      block.accent.SetPositionX(12.0f);
-      block.accent.SetPositionY(12.0f);
-      block.accent.SetRequestedWidth(3.0f);
-      block.accent.SetRequestedHeight(accentHeight);
-      block.accent.SetBackgroundColor(ACCENT_COLOR.WithAlpha(0.65f));
-
-      constexpr float QUOTE_PADDING_LEFT   = 34.0f;
-      constexpr float QUOTE_PADDING_RIGHT  = 12.0f;
-      constexpr float QUOTE_PADDING_TOP    = 8.0f;
-      constexpr float QUOTE_PADDING_BOTTOM = 8.0f;
+      OverlayTextBlock block;
+      block.baseBounds = bounds;
+      block.bounds     = bounds;
+      block.travelX    = travelX;
+      block.phase      = phase;
 
       block.text = TextVisualizer::New();
       block.text.SetLayoutMode(LayoutMode::STANDALONE);
-      block.text.SetPositionX(QUOTE_PADDING_LEFT);
-      block.text.SetPositionY(QUOTE_PADDING_TOP);
-      block.text.SetRequestedWidth(MATCH_PARENT);
-      block.text.SetRequestedHeight(MATCH_PARENT);
+      block.text.SetPositionX(bounds.x);
+      block.text.SetPositionY(bounds.y);
+      block.text.SetRequestedWidth(bounds.width);
+      block.text.SetRequestedHeight(bounds.height);
       block.text.SetBackgroundColor(UiColor(Color::TRANSPARENT));
       block.text.SetText(text);
-      block.text.SetFontSize(QUOTE_FONT_SIZE);
-      block.text.SetLineHeight(QUOTE_LINE_HEIGHT);
-      block.text.SetTextColor(QUOTE_TEXT_COLOR);
+      block.text.SetFontFamily(SAMPLE_FONT_FAMILY);
+      block.text.SetFontSize(fontSize);
+      block.text.SetLineHeight(1.0f);
+      block.text.SetTextColor(textColor);
 
-      block.container.Add(block.accent);
-      block.container.Add(block.text);
-      mContentArea.Add(block.container);
-      mQuoteBlocks.push_back(block);
+      mContentArea.Add(block.text);
+      mOverlayTextBlocks.push_back(block);
     };
 
-    addQuote("“Text becomes a\nfirst-class participant\nin the visual composition\n— not a static block.”",
-             Vector2(384.0f, 314.0f),
-             Vector2(200.0f, 140.0f),
-             116.0f);
+    addTextBlock("TIZEN DALI UI",
+                 Rect<float>(TIZEN_LABEL_X, TIZEN_LABEL_Y, TIZEN_LABEL_WIDTH, TIZEN_LABEL_HEIGHT),
+                 TIZEN_LABEL_TRAVEL,
+                 OVERLAY_TEXT_OPPOSITE_PHASE,
+                 65.0f,
+                 TIZEN_TEXT_COLOR);
 
-    addQuote("“The layout engine stops\nfeeling like a text box\nand starts behaving like\nan editorial surface.”",
-             Vector2(1186.0f, 78.0f),
-             Vector2(200.0f, 140.0f),
-             108.0f);
+    addTextBlock("TEXT VISUALIZER",
+                 Rect<float>(TEXT_VISUALIZER_LABEL_X, TEXT_VISUALIZER_LABEL_Y, TEXT_VISUALIZER_LABEL_WIDTH, TEXT_VISUALIZER_LABEL_HEIGHT),
+                 TEXT_VISUALIZER_LABEL_TRAVEL,
+                 0.0f,
+                 80.0f,
+                 QUOTE_TEXT_COLOR);
   }
 
   void CreateMovingOrbs()
@@ -383,7 +406,7 @@ private:
     for(uint32_t index = 0u; index < MAX_ORB_COUNT; ++index)
     {
       MovingOrb orb;
-      orb.position    = ORB_PRESETS[index].position;
+      orb.position    = ClampOrbPosition(ORB_PRESETS[index].position + GetLegacyContentOffset(), ORB_PRESETS[index].size);
       orb.size        = ORB_PRESETS[index].size;
       orb.velocity    = ORB_PRESETS[index].velocity;
       orb.color       = ORB_PRESETS[index].color;
@@ -415,8 +438,8 @@ private:
 
   Vector2 ClampOrbPosition(const Vector2& position, const Vector2& size) const
   {
-    const float maxX = std::max(0.0f, CONTENT_WIDTH - size.x);
-    const float maxY = std::max(0.0f, CONTENT_HEIGHT - size.y);
+    const float maxX = std::max(0.0f, BODY_SURFACE_WIDTH - size.x);
+    const float maxY = std::max(0.0f, BODY_SURFACE_HEIGHT - size.y);
     return Vector2(std::clamp(position.x, 0.0f, maxX),
                    std::clamp(position.y, 0.0f, maxY));
   }
@@ -524,9 +547,9 @@ private:
     }
   }
 
-  Rect<float> GetQuoteExclusionRect(const QuoteBlock& block) const
+  Rect<float> GetOverlayTextExclusionRect(const OverlayTextBlock& block) const
   {
-    return InflateRect(block.position, block.size, 3.0f);
+    return block.bounds;
   }
 
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
@@ -554,6 +577,13 @@ private:
     }
   }
 
+  void AppendTitleExclusionRegions(Dali::Vector<Rect<float>>& regions) const
+  {
+    AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_0_WIDTH, 0u);
+    AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_1_WIDTH, 1u);
+    AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_2_WIDTH, 2u);
+  }
+
   void ApplyExclusionRegions()
   {
     if(!mExclusionEnabled)
@@ -569,6 +599,8 @@ private:
     }
 
     Dali::Vector<Rect<float>> regions;
+    AppendTitleExclusionRegions(regions);
+
     for(uint32_t index = 0u; index < mFixedColumnBounds.Count(); ++index)
     {
       regions.PushBack(mFixedColumnBounds[index]);
@@ -580,9 +612,9 @@ private:
       AppendOrbExclusionRegions(regions, orb);
     }
 
-    for(uint32_t quoteIndex = 0u; quoteIndex < mQuoteBlocks.size(); ++quoteIndex)
+    for(uint32_t blockIndex = 0u; blockIndex < mOverlayTextBlocks.size(); ++blockIndex)
     {
-      regions.PushBack(GetQuoteExclusionRect(mQuoteBlocks[quoteIndex]));
+      regions.PushBack(GetOverlayTextExclusionRect(mOverlayTextBlocks[blockIndex]));
     }
 
     if(mHasAppliedExclusionRegions &&
@@ -625,16 +657,29 @@ private:
     }
   }
 
+  void UpdateOverlayTextBlocks(float elapsedSeconds)
+  {
+    for(OverlayTextBlock& block : mOverlayTextBlocks)
+    {
+      const float offset = ((std::sin((elapsedSeconds * OVERLAY_TEXT_MOVE_SPEED) + block.phase) + 1.0f) * 0.5f) * block.travelX;
+      block.bounds      = block.baseBounds;
+      block.bounds.x += offset;
+      block.text.SetPositionX(block.bounds.x);
+    }
+  }
+
   bool OnTimerTick()
   {
     const auto now        = std::chrono::steady_clock::now();
     const float deltaSecs = std::chrono::duration<float>(now - mLastTickTime).count();
+    const float elapsedSecs = std::chrono::duration<float>(now - mStartTime).count();
     mLastTickTime         = now;
     ++mFrameCount;
 
     if(mAnimationEnabled)
     {
       UpdateOrbPositions(std::max(deltaSecs, 0.001f));
+      UpdateOverlayTextBlocks(std::max(elapsedSecs, 0.0f));
       ApplyOrbVisuals();
       ApplyExclusionRegions();
     }
@@ -814,7 +859,7 @@ private:
   TextVisualizer                        mTextVisualizer;
   Dali::Vector<Rect<float>>             mFixedColumnBounds;
   Dali::Vector<Rect<float>>             mLastAppliedExclusionRegions;
-  std::vector<QuoteBlock>               mQuoteBlocks;
+  std::vector<OverlayTextBlock>         mOverlayTextBlocks;
   std::vector<MovingOrb>                mOrbs;
   Timer                                 mTimer;
   bool                                  mAnimationEnabled{true};

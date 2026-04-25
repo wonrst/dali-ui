@@ -1035,6 +1035,11 @@ variable line height를 아직 적용하지 않는 이유:
 - title은 parent `View` 안에 넣고, 내부 `TextVisualizer`는 local `(0, 0)`에서 `MATCH_PARENT` 크기를 사용한다.
 - quote block도 parent container `View`를 갖고, accent와 quote `TextVisualizer`는 container local 좌표를 사용한다.
 - quote exclusion rect는 actor current property 대신 저장된 `position / size` 기준의 전체 quote container 영역을 사용한다.
+- body `TextVisualizer` surface는 title origin에서 시작해 status 영역 위까지 확장한다.
+- title은 하나의 큰 rectangle이 아니라 word-level rectangle exclusion으로 body text가 글자 형상에 더 가깝게 회피하도록 한다.
+- moving orb의 clamp 영역도 확장된 body surface 기준으로 바꿔 title 영역까지 이동할 수 있게 한다.
+- quote와 orb의 초기 화면 위치는 기존 composition에 가깝게 유지하되, 이동 가능 영역만 title까지 확장한다.
+- body sample text는 title exclusion과 확장된 surface에서도 충분히 채워지도록 문단을 추가했다.
 
 유지한 정책:
 

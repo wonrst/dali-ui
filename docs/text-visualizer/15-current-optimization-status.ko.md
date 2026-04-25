@@ -41,6 +41,7 @@
 - performance sample의 title / status / quote text를 `Label`에서 `TextVisualizer`로 교체했다.
 - `TextPreparer`가 public pixel `FontSize`를 기존 `Label` / `Controller`와 같은 pixel-to-point 변환으로 shaping에 사용하도록 했다.
 - performance sample의 orb exclusion을 ellipse band 기반으로 세분화하고 title / quote `TextVisualizer`를 parent `View` 안에서 layout되도록 조정했다.
+- body `TextVisualizer` surface를 title origin부터 시작하도록 넓히고, title word-level exclusion과 full-surface orb movement를 적용했다.
 
 현재 해석:
 
@@ -59,6 +60,9 @@
 - performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
 - performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
 - moving orb exclusion은 orb 하나당 `11`개의 ellipse band를 사용한다.
+- body text는 title origin부터 status 영역 위까지 확장된 surface에서 layout된다.
+- title은 word-level exclusion으로 body text가 글자 형상에 더 가깝게 회피한다.
+- moving orb는 title 영역까지 포함한 확장 surface 안에서 이동한다.
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
@@ -443,6 +447,8 @@ performance sample은 `TextVisualizer` 중심 관찰을 유지하면서 visual f
 
 - title은 `mTitleArea` parent `View` 안에 `mTitleText`를 넣는다.
 - `mTitleArea`는 기존 title 위치 / 크기를 갖고, `mTitleText`는 local `(0, 0)`에서 `MATCH_PARENT`로 채운다.
+- body `TextVisualizer` surface는 title origin에서 시작해 status 영역 위까지 확장된다.
+- body는 title word-level exclusion을 받아 title glyph silhouette에 가깝게 흐른다.
 - quote block은 `container`, `accent`, `text`로 구성된다.
 - quote `container`가 기존 quote position / size를 갖고, quote `TextVisualizer`는 container 내부 local 좌표와 inner size를 사용한다.
 - quote exclusion rect는 계속 저장된 quote `position / size` 전체 영역을 사용한다.
@@ -452,7 +458,13 @@ orb exclusion:
 - moving orb는 orb 하나당 `11`개의 horizontal exclusion band를 만든다.
 - 각 band width는 ellipse 식 `sqrt(1 - normalizedY^2)` 기반으로 계산한다.
 - 기존 orb padding은 유지한다.
+- moving orb clamp 영역은 확장된 body surface 기준이라 title 영역까지 이동할 수 있다.
 - fixed column bounds와 quote bounds 정책은 변경하지 않는다.
+
+sample text:
+
+- body surface가 title origin부터 시작하고 title exclusion 영역이 추가되어 실제 visible text가 줄어든다.
+- 이를 보완하기 위해 body sample text에 추가 문단을 넣었다.
 
 유지한 값:
 
