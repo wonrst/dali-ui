@@ -513,7 +513,51 @@ Add TextVisualizerGlyphRenderer empty output lifecycle tests
 
 실제 rendering MVP로 넘어갈 때는 glyph cache ref count, atlas page split, shader 선택, vertex/index buffer reuse 정책을 별도 커밋으로 다룬다.
 
-## 14. Compact 이후 복구 지침
+## 14. 진행: Glyph Mesh Builder Skeleton
+
+`TextVisualizerGlyphRenderer`에 glyph mesh builder prototype을 위한 최소 mesh state lifecycle을 추가했다.
+
+현재 추가된 구조:
+
+- private `MeshRecord`
+  - `atlasId`
+  - mesh actor handle
+  - `Renderer`
+  - `Geometry`
+  - `VertexBuffer`
+  - vertex / index count
+- `ClearMeshes()`
+- `HasMeshRecords()`
+- `GetMeshRecordCount()`
+
+현재 구현 범위:
+
+- mesh record vector를 renderer 내부 state로 보유할 수 있다.
+- `ClearMeshes()`는 mesh actor가 parented 되어 있으면 detach하고, renderer / geometry / vertex buffer handles를 reset한다.
+- `Clear()`는 output actor와 render host를 reset하기 전에 mesh state도 clear한다.
+- output actor lifecycle은 기존 skeleton 동작을 유지한다.
+
+명시적으로 아직 하지 않는 것:
+
+- glyph atlas lookup
+- glyph cache / ref count lifecycle
+- `AtlasManager::Mesh2D` 생성
+- vertex / index data 생성
+- actual `VertexBuffer` / `Geometry` / `Renderer` 생성
+- output actor 아래 mesh actor 생성
+- `AtlasRendererBridge` active path 연결
+
+이번 단계는 실제 glyph mesh rendering이 아니라, 다음 MVP에서 필요한 actor / renderer / geometry lifecycle을 담을 자리만 만든다. 기존 `Text::AtlasRenderer` fallback path와 현재 `TextVisualizer` render path는 변경하지 않았다.
+
+다음 단계:
+
+```text
+Add simple TextVisualizer glyph mesh MVP
+```
+
+이 단계에서는 atlas slot lookup, mesh page split, shader 선택, glyph ref count 관리 중 최소 범위를 정해서 별도 커밋으로 검증한다.
+
+## 15. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서로 읽는다.
 

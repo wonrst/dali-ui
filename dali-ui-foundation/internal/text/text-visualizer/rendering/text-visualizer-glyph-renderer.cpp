@@ -24,7 +24,8 @@ namespace Dali::Ui::Internal::TextVisualizer
 TextVisualizerGlyphRenderer::TextVisualizerGlyphRenderer()
 : mRenderHost(),
   mOutputActor(),
-  mAttached(false)
+  mAttached(false),
+  mMeshRecords()
 {
 }
 
@@ -35,6 +36,7 @@ TextVisualizerGlyphRenderer::~TextVisualizerGlyphRenderer()
 
 void TextVisualizerGlyphRenderer::Clear()
 {
+  ClearMeshes();
   DetachOutputFromHost();
   mOutputActor.Reset();
   mRenderHost.Reset();
@@ -130,6 +132,41 @@ void TextVisualizerGlyphRenderer::DetachOutputFromHost()
   }
 
   mAttached = false;
+}
+
+void TextVisualizerGlyphRenderer::ClearMeshes()
+{
+  for(MeshRecord& record : mMeshRecords)
+  {
+    if(record.actor)
+    {
+      Actor parent = record.actor.GetParent();
+      if(parent)
+      {
+        record.actor.Unparent();
+      }
+    }
+
+    record.actor.Reset();
+    record.renderer.Reset();
+    record.geometry.Reset();
+    record.vertexBuffer.Reset();
+    record.vertexCount = 0u;
+    record.indexCount  = 0u;
+    record.atlasId     = 0u;
+  }
+
+  mMeshRecords.clear();
+}
+
+bool TextVisualizerGlyphRenderer::HasMeshRecords() const
+{
+  return !mMeshRecords.empty();
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetMeshRecordCount() const
+{
+  return static_cast<uint32_t>(mMeshRecords.size());
 }
 
 } // namespace Dali::Ui::Internal::TextVisualizer

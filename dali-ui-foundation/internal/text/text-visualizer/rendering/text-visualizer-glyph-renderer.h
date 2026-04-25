@@ -20,6 +20,12 @@
 
 // EXTERNAL INCLUDES
 #include <dali/public-api/actors/actor.h>
+#include <dali/public-api/rendering/geometry.h>
+#include <dali/public-api/rendering/renderer.h>
+#include <dali/public-api/rendering/vertex-buffer.h>
+
+#include <cstdint>
+#include <vector>
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
@@ -51,10 +57,27 @@ public:
   bool AttachOutputToHost();
   void DetachOutputFromHost();
 
+  void ClearMeshes();
+  bool HasMeshRecords() const;
+  uint32_t GetMeshRecordCount() const;
+
 private:
+  struct MeshRecord
+  {
+    uint32_t     atlasId{0u};
+    Actor        actor;
+    Renderer     renderer;
+    Geometry     geometry;
+    VertexBuffer vertexBuffer;
+    uint32_t     vertexCount{0u};
+    uint32_t     indexCount{0u};
+  };
+
   Actor mRenderHost;
   Actor mOutputActor;
   bool  mAttached;
+
+  std::vector<MeshRecord> mMeshRecords;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

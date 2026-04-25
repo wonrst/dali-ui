@@ -1719,8 +1719,10 @@ int UtcDaliTextVisualizerGlyphRendererEmptyStateP(void)
   DALI_TEST_CHECK(!renderer.HasRenderHost());
   DALI_TEST_CHECK(!renderer.HasOutputActor());
   DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
   DALI_TEST_CHECK(!renderer.GetRenderHost());
   DALI_TEST_CHECK(!renderer.GetOutputActor());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1813,6 +1815,52 @@ int UtcDaliTextVisualizerGlyphRendererClearP(void)
   DALI_TEST_CHECK(!renderer.GetRenderHost());
   DALI_TEST_CHECK(!renderer.GetOutputActor());
   DALI_TEST_EQUALS(host.GetChildCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererMeshEmptyStateP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererClearMeshesP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  renderer.EnsureOutputActor();
+  renderer.ClearMeshes();
+
+  DALI_TEST_CHECK(renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererClearClearsMeshesP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          host = Actor::New();
+
+  renderer.SetRenderHost(host);
+  DALI_TEST_CHECK(renderer.AttachOutputToHost());
+
+  renderer.Clear();
+
+  DALI_TEST_CHECK(!renderer.HasRenderHost());
+  DALI_TEST_CHECK(!renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
