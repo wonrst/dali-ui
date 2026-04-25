@@ -40,6 +40,14 @@ struct SortedExclusionRegion
   float       bottom{0.0f};
 };
 
+struct GlyphFitResult
+{
+  uint32_t glyphEnd{0u};
+  float    width{0.0f};
+  bool     hasGlyphs{false};
+  bool     forceLineBreak{false};
+};
+
 using SortedExclusionRegions = std::vector<SortedExclusionRegion>;
 
 bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& region)
@@ -154,6 +162,116 @@ uint32_t GetGlyphCharacterEnd(const PreparedText& preparedText, uint32_t glyphIn
   }
 
   return preparedText.GetCharacterCount();
+}
+
+Text::LineBreakInfo GetLineBreakInfoAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
+{
+  const uint32_t characterEnd = GetGlyphCharacterEnd(preparedText, glyphIndex);
+  if(characterEnd == 0u)
+  {
+    return TextAbstraction::LINE_NO_BREAK;
+  }
+
+  const uint32_t                           characterIndex = characterEnd - 1u;
+  const Dali::Vector<Text::LineBreakInfo>& lineBreakInfo  = preparedText.GetLineBreakInfo();
+  if(characterIndex < lineBreakInfo.Count())
+  {
+    return lineBreakInfo[characterIndex];
+  }
+
+  return TextAbstraction::LINE_NO_BREAK;
+}
+
+bool IsLineBreakAllowedAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
+{
+  const Text::LineBreakInfo lineBreakInfo = GetLineBreakInfoAfterGlyph(preparedText, glyphIndex);
+  return (lineBreakInfo == TextAbstraction::LINE_ALLOW_BREAK) || (lineBreakInfo == TextAbstraction::LINE_MUST_BREAK);
+}
+
+bool IsLineBreakMandatoryAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
+{
+  return GetLineBreakInfoAfterGlyph(preparedText, glyphIndex) == TextAbstraction::LINE_MUST_BREAK;
+}
+
+GlyphFitResult FindGlyphRangeForInterval(const PreparedText&                  preparedText,
+                                         const Dali::Vector<Text::GlyphInfo>& glyphs,
+                                         uint32_t                             glyphStart,
+                                         float                                availableWidth,
+                                         bool                                 allowOversizedFirstGlyph)
+{
+  GlyphFitResult result;
+  result.glyphEnd = glyphStart;
+
+  if(glyphStart >= glyphs.Count())
+  {
+    return result;
+  }
+
+  float    cursorX        = 0.0f;
+  float    fragmentWidth  = 0.0f;
+  uint32_t lastBreakEnd   = glyphStart;
+  float    lastBreakWidth = 0.0f;
+
+  for(uint32_t glyphIndex = glyphStart; glyphIndex < glyphs.Count(); ++glyphIndex)
+  {
+    const Text::GlyphInfo& glyph         = glyphs[glyphIndex];
+    const float            glyphAdvance  = GetGlyphPlacementAdvance(glyph);
+    const float            glyphWidth    = GetGlyphPlacementWidth(glyph);
+    const float            requiredWidth = std::max(glyphAdvance, glyphWidth);
+    const bool             canFit        = (requiredWidth <= 0.0f) || ((cursorX + requiredWidth) <= availableWidth);
+    const bool             isFirstGlyph  = (glyphIndex == glyphStart);
+
+    if(!canFit)
+    {
+      if(lastBreakEnd > glyphStart)
+      {
+        result.glyphEnd  = lastBreakEnd;
+        result.width     = lastBreakWidth;
+        result.hasGlyphs = true;
+        return result;
+      }
+
+      if(!isFirstGlyph)
+      {
+        result.glyphEnd  = glyphIndex;
+        result.width     = fragmentWidth;
+        result.hasGlyphs = result.glyphEnd > glyphStart;
+        return result;
+      }
+
+      if(!allowOversizedFirstGlyph)
+      {
+        return result;
+      }
+    }
+
+    const float placementRight = std::max(cursorX + glyphWidth, cursorX + glyphAdvance);
+    fragmentWidth              = std::max(fragmentWidth, placementRight);
+    cursorX += glyphAdvance;
+
+    result.glyphEnd  = glyphIndex + 1u;
+    result.width     = fragmentWidth;
+    result.hasGlyphs = true;
+
+    if(IsLineBreakAllowedAfterGlyph(preparedText, glyphIndex))
+    {
+      lastBreakEnd   = glyphIndex + 1u;
+      lastBreakWidth = fragmentWidth;
+    }
+
+    if(IsLineBreakMandatoryAfterGlyph(preparedText, glyphIndex))
+    {
+      result.forceLineBreak = true;
+      return result;
+    }
+
+    if(!canFit && allowOversizedFirstGlyph)
+    {
+      return result;
+    }
+  }
+
+  return result;
 }
 
 TextLineMetrics CalculateTextLineMetrics(const PreparedText& preparedText,
@@ -446,27 +564,34 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     for(uint32_t intervalIndex = 0u; intervalIndex < availableIntervals.Count() && currentGlyph < glyphCount; ++intervalIndex)
     {
       const AvailableInterval& availableInterval = availableIntervals[intervalIndex];
-      const float              intervalEnd       = availableInterval.x + availableInterval.width;
-      float                    cursorX           = availableInterval.x;
-      bool                     fragmentOpen      = false;
-      TextLineFragment         fragment;
+      const bool               allowOversized    = !lineHasPlacement;
+      const GlyphFitResult     fitResult         = FindGlyphRangeForInterval(preparedText, glyphs, currentGlyph, availableInterval.width, allowOversized);
 
-      while(currentGlyph < glyphCount)
+      if(!fitResult.hasGlyphs || fitResult.glyphEnd <= currentGlyph)
       {
-        const Text::GlyphInfo& glyph          = glyphs[currentGlyph];
-        const float            glyphAdvance   = GetGlyphPlacementAdvance(glyph);
-        const float            glyphWidth     = GetGlyphPlacementWidth(glyph);
-        const float            requiredWidth  = std::max(glyphAdvance, glyphWidth);
-        const bool             intervalCanFit = (requiredWidth <= 0.0f) || ((cursorX + requiredWidth) <= intervalEnd);
-        const bool             allowOversized = !lineHasPlacement && !fragmentOpen;
+        continue;
+      }
 
-        if(!intervalCanFit && !allowOversized)
-        {
-          break;
-        }
+      const uint32_t glyphStart = currentGlyph;
+      const uint32_t glyphEnd   = fitResult.glyphEnd;
+      float          cursorX    = availableInterval.x;
+
+      TextLineFragment fragment;
+      fragment.clusterStart = GetGlyphCharacterStart(preparedText, glyphStart);
+      fragment.clusterEnd   = GetGlyphCharacterEnd(preparedText, glyphEnd - 1u);
+      fragment.glyphStart   = glyphStart;
+      fragment.glyphEnd     = glyphEnd;
+      fragment.x            = availableInterval.x;
+      fragment.y            = currentY;
+      fragment.width        = fitResult.width;
+
+      for(uint32_t glyphIndex = glyphStart; glyphIndex < glyphEnd; ++glyphIndex)
+      {
+        const Text::GlyphInfo& glyph        = glyphs[glyphIndex];
+        const float            glyphAdvance = GetGlyphPlacementAdvance(glyph);
 
         GlyphPlacement placement;
-        placement.glyphIndex = currentGlyph;
+        placement.glyphIndex = glyphIndex;
         placement.x          = cursorX;
         placement.y          = currentY;
         placement.width      = glyph.width;
@@ -474,36 +599,17 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
         placement.advance    = glyphAdvance;
         result.glyphPlacements.PushBack(placement);
 
-        if(!fragmentOpen)
-        {
-          fragment.clusterStart = GetGlyphCharacterStart(preparedText, currentGlyph);
-          fragment.glyphStart   = currentGlyph;
-          fragment.x            = cursorX;
-          fragment.y            = currentY;
-          fragment.width        = 0.0f;
-          fragmentOpen          = true;
-        }
-
-        fragment.clusterEnd = GetGlyphCharacterEnd(preparedText, currentGlyph);
-        fragment.glyphEnd   = currentGlyph + 1u;
-
-        const float placementRight = std::max(cursorX + glyphWidth, cursorX + glyphAdvance);
-        fragment.width             = std::max(fragment.width, placementRight - fragment.x);
-        result.width               = std::max(result.width, fragment.x + fragment.width);
-
         cursorX += glyphAdvance;
-        ++currentGlyph;
-        lineHasPlacement = true;
-
-        if(!intervalCanFit && allowOversized)
-        {
-          break;
-        }
       }
 
-      if(fragmentOpen)
+      textLine.fragments.PushBack(fragment);
+      currentGlyph     = glyphEnd;
+      lineHasPlacement = true;
+      result.width     = std::max(result.width, fragment.x + fragment.width);
+
+      if(fitResult.forceLineBreak)
       {
-        textLine.fragments.PushBack(fragment);
+        break;
       }
     }
 

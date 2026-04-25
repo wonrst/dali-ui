@@ -25,10 +25,11 @@
 - `Replace performance sample labels with TextVisualizer`
 - `Use pixel font size conversion for TextVisualizer`
 - `Improve TextVisualizer performance sample visual quality`
+- `Add TextVisualizer basic word wrap`
 
 이번 작업 포함 최신 커밋:
 
-- `Improve TextVisualizer performance sample visual quality`
+- `Add TextVisualizer basic word wrap`
 
 최근 최적화 상태:
 
@@ -42,6 +43,7 @@
 - `TextPreparer`가 public pixel `FontSize`를 기존 `Label` / `Controller`와 같은 pixel-to-point 변환으로 shaping에 사용하도록 했다.
 - performance sample의 orb exclusion을 ellipse band 기반으로 세분화하고 title / quote `TextVisualizer`를 parent `View` 안에서 layout되도록 조정했다.
 - body `TextVisualizer` surface를 title origin부터 시작하도록 넓히고, title word-level exclusion과 full-surface orb movement를 적용했다.
+- `LayoutGlyphs()`가 `PreparedText::LineBreakInfo`를 사용해 interval overflow 시 마지막 word break 후보를 우선 사용한다.
 
 현재 해석:
 
@@ -67,8 +69,9 @@
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
 - `LayoutResult`의 각 glyph line은 line별 metrics 후보를 보유할 수 있다.
+- 기본 word wrap이 추가되어 space 등 unibreak 기반 line break 후보에서 줄바꿈할 수 있다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `126 tests, 0 failures` 상태다.
+- basic word wrap 이전 전체 `TextVisualizer` UTC는 `126 tests, 0 failures` 상태였고, 이번 변경 후 전체 UTC는 재검증이 필요하다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -240,7 +243,7 @@ line-level cache:
 현재 결과:
 
 - targeted UTC passed
-- 전체 `TextVisualizer` UTC: `123 tests, 0 failures`
+- 당시 전체 `TextVisualizer` UTC: `123 tests, 0 failures`
 
 커밋 참고:
 
@@ -259,6 +262,7 @@ line-level cache:
 | redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
 | sample Label overhead | title/status/quote TextVisualizer 교체 완료 | sample visual fidelity 확인 |
+| word wrap 품질 | 기본 lineBreakInfo 기반 wrap 적용 완료 | cluster-perfect / bidi / emoji 품질 검토 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
 ## 9. Render Dirty Clear 현재 상태
@@ -492,7 +496,35 @@ sample text:
 - status update toggle off 상태에서 FPS 관찰
 - TextVisualizer 자체 alignment / padding / style API 필요 여부
 
-## 14. 다음 추천 작업
+## 14. Basic Word Wrap 현재 상태
+
+basic word wrap은 `TextVisualizer` 전용 `LayoutGlyphs()`에만 적용된 1차 품질 개선이다.
+
+현재 정책:
+
+- `PreparedText::GetLineBreakInfo()`에 저장된 unibreak 기반 `LINE_ALLOW_BREAK` / `LINE_MUST_BREAK`를 사용한다.
+- ICU line break를 새로 호출하지 않는다.
+- interval overflow가 발생하면 현재 interval 안의 마지막 allowed break 후보에서 먼저 줄바꿈한다.
+- break 후보가 없거나 단어가 interval보다 길면 기존처럼 glyph 단위 fallback으로 배치한다.
+- `LINE_MUST_BREAK`는 해당 glyph range를 배치한 뒤 현재 line을 종료하는 hard break 후보로 취급한다.
+- 한 line에 여러 available interval이 있으면 interval마다 같은 range 계산을 수행한다.
+
+유지한 범위:
+
+- public API는 추가하지 않았다.
+- 기존 `TextController`, `TextView`, `Label` / `InputField`, `text-atlas-renderer.*`는 수정하지 않았다.
+- line height, baseline, render dirty clear, exclusion interval merge 정책은 변경하지 않았다.
+- hyphenation, ellipsis, bidi / RTL, justification은 도입하지 않았다.
+
+확인 필요:
+
+- mandatory newline glyph가 shaping 결과에서 어떤 glyph range로 나타나는지 추가 fixture 확인
+- complex cluster / emoji ZWJ sequence를 중간에서 자르지 않는 정책 강화
+- interval 사이에서 단어를 같은 line의 다음 fragment로 보낼지 다음 line으로 보낼지 장기 정책
+- Korean / Japanese / Thai word break 품질
+- bidi / RTL text와 visual order
+
+## 15. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -518,14 +550,14 @@ sample text:
 - `TextLine.metrics` 기반 line-level baseline cache는 들어갔다.
 - fallback font / emoji가 섞인 line의 height 품질을 더 올리려면 line-level `naturalLineHeight`를 layout에 연결할지 검토해야 한다.
 
-### D. Word / cluster line break quality
+### D. Advanced word / cluster line break quality
 
 이유:
 
-- 현재 line break는 glyph advance sequential placement에 가깝다.
-- 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
+- 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
+- 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 15. 다음 커밋 금지 사항
+## 16. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -539,7 +571,7 @@ sample text:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 16. 최신 성능 경로 구조
+## 17. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -573,7 +605,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 17. Compact 이후 복구 지침
+## 18. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

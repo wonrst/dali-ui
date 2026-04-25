@@ -1056,6 +1056,47 @@ variable line height를 아직 적용하지 않는 이유:
 - quote container clipping이 의도한 범위에서 text를 자르는지 확인
 - status update toggle을 끈 상태에서 visual-only FPS 확인
 
+## 진행: basic word wrap
+
+이번 단계는 복잡한 line break engine을 새로 만들지 않고, `PreparedText`에 이미 저장된 `lineBreakInfo`를 `LayoutGlyphs()`가 사용하는 1차 품질 개선이다.
+
+기존 한계:
+
+- `LayoutGlyphs()`는 glyph advance를 순차 누적하다가 interval overflow가 나면 즉시 다음 interval / line으로 넘어갔다.
+- 따라서 space 기반 word boundary가 있어도 line 끝이 glyph 단위로 잘릴 수 있었다.
+
+변경된 구조:
+
+- interval에 실제 placement를 push하기 전에, 먼저 해당 interval에 들어갈 glyph range를 계산한다.
+- range 계산 중 `PreparedText::GetGlyphToCharacterMap()`, `GetCharactersPerGlyph()`, `GetLineBreakInfo()`를 사용해 현재 glyph 뒤의 character boundary가 break 가능한지 확인한다.
+- overflow가 발생하면 현재 interval 안의 마지막 `LINE_ALLOW_BREAK` 또는 `LINE_MUST_BREAK` 후보를 우선 사용한다.
+- break 후보가 없으면 기존처럼 glyph 단위 fallback을 사용한다.
+- 단어가 interval보다 길면 최소 glyph 단위로 계속 배치해 layout이 멈추지 않게 한다.
+- `LINE_MUST_BREAK`는 현재 range를 배치한 뒤 line을 종료하는 기본 hard break 후보로 취급한다.
+
+exclusion interval 정책:
+
+- 한 line에 여러 available interval이 있으면 각 interval마다 같은 word wrap range 계산을 수행한다.
+- break 후보가 interval 안에 있으면 그 지점에서 끊고 다음 interval 또는 다음 line으로 이어간다.
+- blocked interval x sort / merge, line height, baseline, render dirty 정책은 변경하지 않는다.
+
+이번 커밋에서 제외한 것:
+
+- ICU line break 추가 사용
+- hyphenation
+- ellipsis
+- bidi / RTL 전용 처리
+- justification
+- cluster-perfect advanced wrapping
+
+확인 필요:
+
+- mandatory newline glyph가 shaping 결과에서 어떤 glyph range로 나타나는지 추가 fixture 확인
+- emoji ZWJ sequence와 complex script에서 cluster 단위 절단 방지 강화
+- interval 사이에서 단어를 같은 line의 다음 fragment로 보낼지, 다음 line으로 보낼지 장기 정책
+- Thai / Korean / Japanese word break 품질
+- bidi / RTL text에서 line break 후보와 visual order 연결
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
@@ -1091,7 +1132,8 @@ variable line height를 아직 적용하지 않는 이유:
 
 이유:
 
-- 현재는 line height는 나아졌지만 line break 품질은 여전히 glyph advance 순차 배치에 가깝다.
+- 기본 word wrap은 들어갔지만 아직 glyph / character map 기반의 1차 구현이다.
+- cluster-perfect wrapping, bidi / RTL, emoji ZWJ, hyphenation, ellipsis는 여전히 별도 품질 과제다.
 
 현재 우선순위 재정렬의 핵심은 다음과 같다.
 
@@ -1106,6 +1148,7 @@ variable line height를 아직 적용하지 않는 이유:
 - line-level metrics cache의 1차 적용은 완료됐다.
 - `TextLine.metrics` 저장 기반은 추가됐지만 variable line height는 아직 적용하지 않았다.
 - `TextVisualizer` public `FontSize`는 기존 `Label` / `Controller`와 같은 pixel-to-point conversion을 거쳐 shaping에 사용된다.
+- `LayoutGlyphs()`는 `PreparedText::LineBreakInfo`를 사용해 기본 word wrap을 수행한다.
 - 다음 성능 후보는 core redundant update policy, partial relayout, geometry-only update처럼 더 큰 정책 판단이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인, visual font scale 확인, word / cluster line break 개선을 계속 분리해서 다룬다.
 
