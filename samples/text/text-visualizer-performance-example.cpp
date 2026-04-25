@@ -35,7 +35,7 @@ constexpr float WINDOW_HEIGHT = 1080.0f;
 constexpr float SIDE_MARGIN         = 86.0f;
 constexpr float TITLE_TOP           = 58.0f;
 constexpr float TITLE_HEIGHT        = 310.0f;
-constexpr float CONTENT_TOP         = 400.0f;
+constexpr float CONTENT_TOP         = 350.0f;
 constexpr float CONTENT_HEIGHT      = 620.0f;
 constexpr float CONTENT_WIDTH       = WINDOW_WIDTH - (SIDE_MARGIN * 2.0f);
 constexpr float COLUMN_GAP          = 58.0f;
@@ -43,13 +43,13 @@ constexpr float COLUMN_WIDTH        = (CONTENT_WIDTH - (COLUMN_GAP * 2.0f)) / 3.
 constexpr float COLUMN_SPLIT_WIDTH  = COLUMN_GAP;
 constexpr float STATUS_HEIGHT       = 36.0f;
 constexpr float STATUS_BOTTOM       = 16.0f;
-constexpr float TITLE_FONT_SIZE     = 104.0f;
-constexpr float BODY_FONT_SIZE      = 12.0f;
-constexpr float QUOTE_FONT_SIZE     = 12.0f;
-constexpr float BODY_LINE_HEIGHT    = 2.6f;
+constexpr float TITLE_FONT_SIZE     = 100.0f;
+constexpr float BODY_FONT_SIZE      = 16.0f;
+constexpr float QUOTE_FONT_SIZE     = 16.0f;
+constexpr float BODY_LINE_HEIGHT    = 2.2f;
 constexpr float QUOTE_LINE_HEIGHT   = 2.2f;
-constexpr float MIN_FONT_SIZE       = 12.0f;
-constexpr float MAX_FONT_SIZE       = 24.0f;
+constexpr float MIN_FONT_SIZE       = 16.0f;
+constexpr float MAX_FONT_SIZE       = 32.0f;
 constexpr float FONT_STEP           = 2.0f;
 constexpr uint32_t MAX_ORB_COUNT    = 6u;
 constexpr uint32_t MIN_ORB_COUNT    = 2u;
@@ -100,7 +100,7 @@ const OrbPreset ORB_PRESETS[MAX_ORB_COUNT] = {
 
 Dali::String BuildTitleText()
 {
-  return Dali::String("THE FUTURE OF\nTEXT LAYOUT\nIS DYNAMIC");
+  return Dali::String("THE FUTURE OF \nTEXT LAYOUT \nIS DYNAMIC");
 }
 
 Dali::String BuildBodyText()
@@ -248,7 +248,7 @@ private:
     mTitleArea.SetLayoutMode(LayoutMode::STANDALONE);
     mTitleArea.SetPositionX(SIDE_MARGIN - 6.0f);
     mTitleArea.SetPositionY(TITLE_TOP);
-    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f);
+    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f - 100);
     mTitleArea.SetRequestedHeight(TITLE_HEIGHT);
     mTitleArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTitleArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
@@ -350,8 +350,8 @@ private:
       block.text.SetLayoutMode(LayoutMode::STANDALONE);
       block.text.SetPositionX(QUOTE_PADDING_LEFT);
       block.text.SetPositionY(QUOTE_PADDING_TOP);
-      block.text.SetRequestedWidth(std::max(0.0f, size.x - QUOTE_PADDING_LEFT - QUOTE_PADDING_RIGHT));
-      block.text.SetRequestedHeight(std::max(0.0f, size.y - QUOTE_PADDING_TOP - QUOTE_PADDING_BOTTOM));
+      block.text.SetRequestedWidth(MATCH_PARENT);
+      block.text.SetRequestedHeight(MATCH_PARENT);
       block.text.SetBackgroundColor(UiColor(Color::TRANSPARENT));
       block.text.SetText(text);
       block.text.SetFontSize(QUOTE_FONT_SIZE);
