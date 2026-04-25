@@ -19,6 +19,8 @@
 #include <dali/devel-api/object/type-registry-helper.h>
 #include <dali/integration-api/debug.h>
 
+#include <algorithm>
+
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/integration-api/property-registration-helper.h>
 #include <dali-ui-foundation/integration-api/text-visualizer-impl.h>
@@ -233,7 +235,7 @@ void TextVisualizerImpl::OnInitialize()
   Actor self = Self();
 
   self.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::WIDTH);
-  self.SetResizePolicy(ResizePolicy::FILL_TO_PARENT, Dimension::HEIGHT);
+  self.SetResizePolicy(ResizePolicy::DIMENSION_DEPENDENCY, Dimension::HEIGHT);
 }
 
 void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
@@ -246,7 +248,10 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     Prepare();
   }
 
-  if(mLastLayoutSize != size)
+  const float   layoutWidth = (size.x > 0.0f) ? size.x : GetNaturalTextWidth();
+  const Vector2 layoutSize(layoutWidth, size.y);
+
+  if(mLastLayoutSize.x != layoutSize.x || (size.y > 0.0f && mLastLayoutSize.y != size.y))
   {
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
@@ -254,7 +259,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mLayoutDirty)
   {
-    UpdateLayout(size.x, mLayoutResult);
+    UpdateLayout(layoutWidth, mLayoutResult);
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
     mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
@@ -262,11 +267,13 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     ClearLayoutDirty();
   }
 
-  SyncRenderStateToAdapter(size);
-  SyncRenderHostSize(size);
+  const Vector2 renderSize(layoutWidth, size.y > 0.0f ? size.y : mLayoutResult.height);
 
-  const bool     hasLayoutSignature      = !mLayoutResult.Empty();
-  const uint64_t currentLayoutSignature  = hasLayoutSignature ? mLayoutResult.CalculateSignature() : 0u;
+  SyncRenderStateToAdapter(renderSize);
+  SyncRenderHostSize(renderSize);
+
+  const bool     hasLayoutSignature        = !mLayoutResult.Empty();
+  const uint64_t currentLayoutSignature    = hasLayoutSignature ? mLayoutResult.CalculateSignature() : 0u;
   const bool     skipUnchangedLayoutRender = hasLayoutSignature && CanSkipRenderForUnchangedLayout(currentLayoutSignature);
 
   if(skipUnchangedLayoutRender)
@@ -280,7 +287,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     if(updateRenderDataResult)
     {
       EnsureRenderHost();
-      SyncRenderHostSize(size);
+      SyncRenderHostSize(renderSize);
 
       attachResult = mAtlasRendererBridge.AttachRendererToHost();
       if(IsRenderUpdateSuccessful(updateRenderDataResult, attachResult))
@@ -294,49 +301,63 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
     }
   }
 
-  LogRenderDiagnostics(size, updateRenderDataResult, attachResult);
+  LogRenderDiagnostics(renderSize, updateRenderDataResult, attachResult);
 
-  mLastLayoutSize = size;
+  mLastLayoutSize = renderSize;
   ViewImpl::OnRelayout(size, container);
 }
 
 MeasuredSize TextVisualizerImpl::OnMeasure(float widthConstraint, float heightConstraint)
 {
-  (void)heightConstraint;
-
   if(mPrepareDirty)
   {
     Prepare();
   }
 
-  if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
+  const float requestedWidth  = GetRequestedWidth();
+  const float requestedHeight = GetRequestedHeight();
+  const float minWidth        = GetMinimumWidth();
+  const float maxWidth        = GetMaximumWidth();
+  const float minHeight       = GetMinimumHeight();
+  const float maxHeight       = GetMaximumHeight();
+  const float naturalWidth    = GetNaturalTextWidth();
+
+  float measuredWidth  = 0.0f;
+  float measuredHeight = 0.0f;
+
+  if(requestedWidth >= 0.0f)
   {
-    mLayoutResult.Clear();
-    ClearLayoutDirty();
-    return MeasuredSize(0.0f, 0.0f);
+    measuredWidth = std::max(std::min(requestedWidth, maxWidth), minWidth);
+  }
+  else if(requestedWidth == MATCH_PARENT)
+  {
+    measuredWidth = (widthConstraint > 0.0f) ? widthConstraint : minWidth;
+    measuredWidth = std::max(std::min(measuredWidth, maxWidth), minWidth);
+  }
+  else
+  {
+    const float allowedMaxWidth = (widthConstraint > 0.0f) ? std::min(maxWidth, widthConstraint) : maxWidth;
+    measuredWidth               = std::max(std::min(naturalWidth, allowedMaxWidth), minWidth);
   }
 
-  const float clusterAdvance    = Internal::TextVisualizer::LayoutEngine::GetPlaceholderClusterAdvance(mPreparedText);
-  const float placeholderWidth  = static_cast<float>(mPreparedText.GetClusterCount()) * clusterAdvance;
-  const float glyphNaturalWidth = (mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics()) ? mPreparedText.GetTotalGlyphAdvance() : 0.0f;
-  const float naturalWidth      = glyphNaturalWidth > 0.0f ? glyphNaturalWidth : placeholderWidth;
-  const float layoutWidth       = widthConstraint > 0.0f ? widthConstraint : naturalWidth;
-
-  if(layoutWidth <= 0.0f)
+  if(requestedHeight >= 0.0f)
   {
-    return MeasuredSize(0.0f, 0.0f);
+    measuredHeight = std::max(std::min(requestedHeight, maxHeight), minHeight);
+  }
+  else if(requestedHeight == MATCH_PARENT)
+  {
+    measuredHeight = (heightConstraint > 0.0f) ? heightConstraint : minHeight;
+    measuredHeight = std::max(std::min(measuredHeight, maxHeight), minHeight);
+  }
+  else
+  {
+    const float allowedMaxHeight = (heightConstraint > 0.0f) ? std::min(maxHeight, heightConstraint) : maxHeight;
+    const float layoutWidth      = (requestedWidth == MATCH_PARENT && widthConstraint > 0.0f) ? widthConstraint : measuredWidth;
+    const float naturalHeight    = MeasureNaturalTextHeightForWidth(layoutWidth);
+    measuredHeight               = std::max(std::min(naturalHeight, allowedMaxHeight), minHeight);
   }
 
-  Internal::TextVisualizer::LayoutResult measuredLayoutResult;
-  UpdateLayout(layoutWidth, measuredLayoutResult);
-
-  if(measuredLayoutResult.Empty())
-  {
-    return MeasuredSize(0.0f, 0.0f);
-  }
-
-  const float measuredWidth = widthConstraint > 0.0f ? layoutWidth : measuredLayoutResult.width;
-  return MeasuredSize(measuredWidth, measuredLayoutResult.height);
+  return MeasuredSize(measuredWidth, measuredHeight);
 }
 
 void TextVisualizerImpl::OnPropertySet(Dali::Property::Index index, const Dali::Property::Value& propertyValue)
@@ -600,6 +621,34 @@ bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>
   }
 
   return true;
+}
+
+float TextVisualizerImpl::GetNaturalTextWidth() const
+{
+  if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
+  {
+    return 0.0f;
+  }
+
+  if(mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics())
+  {
+    return std::max(0.0f, mPreparedText.GetTotalGlyphAdvance());
+  }
+
+  const float clusterAdvance = Internal::TextVisualizer::LayoutEngine::GetPlaceholderClusterAdvance(mPreparedText);
+  return std::max(0.0f, static_cast<float>(mPreparedText.GetClusterCount()) * clusterAdvance);
+}
+
+float TextVisualizerImpl::MeasureNaturalTextHeightForWidth(float layoutWidth)
+{
+  if(layoutWidth <= 0.0f || mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
+  {
+    return 0.0f;
+  }
+
+  Internal::TextVisualizer::LayoutResult measuredLayoutResult;
+  UpdateLayout(layoutWidth, measuredLayoutResult);
+  return measuredLayoutResult.Empty() ? 0.0f : measuredLayoutResult.height;
 }
 
 void TextVisualizerImpl::UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result)

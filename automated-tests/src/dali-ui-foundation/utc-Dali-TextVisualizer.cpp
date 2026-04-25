@@ -2535,6 +2535,102 @@ int UtcDaliTextVisualizerMeasureNonZeroWithExplicitWidthP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerMeasureWrapContentNaturalSizeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer wrap content natural size");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(WRAP_CONTENT);
+  textVisualizer.SetRequestedHeight(WRAP_CONTENT);
+
+  const MeasuredSize measured = textVisualizer.Measure(0.0f, 0.0f);
+  DALI_TEST_CHECK(measured.GetWidth() > 0.0f);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasureFixedWidthWrapHeightP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer fixed width wrap height measure should wrap this text across several lines.");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(160.0f);
+  textVisualizer.SetRequestedHeight(WRAP_CONTENT);
+
+  const MeasuredSize measured = textVisualizer.Measure(160.0f, 0.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 160.0f, TEST_LOCATION);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasureFixedSizeP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer fixed size measure");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(220.0f);
+  textVisualizer.SetRequestedHeight(96.0f);
+
+  const MeasuredSize measured = textVisualizer.Measure(0.0f, 0.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 220.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(measured.GetHeight(), 96.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasureMatchParentP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("TextVisualizer match parent measure");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(MATCH_PARENT);
+  textVisualizer.SetRequestedHeight(MATCH_PARENT);
+
+  const MeasuredSize measured = textVisualizer.Measure(320.0f, 180.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 320.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(measured.GetHeight(), 180.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasureEmptyTextP(void)
+{
+  UiTestApplication application;
+  TextVisualizer    textVisualizer = TextVisualizer::New();
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("");
+  textVisualizer.SetRequestedWidth(WRAP_CONTENT);
+  textVisualizer.SetRequestedHeight(WRAP_CONTENT);
+
+  MeasuredSize measured = textVisualizer.Measure(0.0f, 0.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(measured.GetHeight(), 0.0f, TEST_LOCATION);
+
+  textVisualizer.SetRequestedWidth(120.0f);
+  textVisualizer.SetRequestedHeight(80.0f);
+
+  measured = textVisualizer.Measure(0.0f, 0.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 120.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(measured.GetHeight(), 80.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerRelayoutWithExplicitSizeP(void)
 {
   UiTestApplication application;

@@ -18,7 +18,6 @@
  */
 
 // EXTERNAL INCLUDES
-#include <cstdint>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
@@ -29,6 +28,7 @@
 #include <dali-ui-foundation/public-api/view-impl.h>
 #include <dali/public-api/actors/actor.h>
 #include <dali/public-api/math/rect.h>
+#include <cstdint>
 
 namespace Dali
 {
@@ -198,6 +198,8 @@ private:
   void  ResetLastRenderedLayoutSignature();
   void  StoreLastRenderedLayoutSignature(uint64_t layoutSignature);
   bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
+  float GetNaturalTextWidth() const;
+  float MeasureNaturalTextHeightForWidth(float layoutWidth);
   void  UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
   void  SyncRenderStateToAdapter(const Vector2& controlSize);
 

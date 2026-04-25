@@ -552,7 +552,32 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 매우 긴 텍스트에서는 cluster-level range cache나 partial layout이 필요할 수 있다.
 - complex cluster / ICU / bidi / hyphenation / ellipsis는 여전히 제외다.
 
-## 16. 다음 추천 작업
+## 16. Label-like Measure Policy 현재 상태
+
+`TextVisualizer` measure / relayout 기준을 editing control인 `InputField`가 아니라 display control인 `Label` 쪽 정책에 맞춰 정리했다.
+
+현재 정책:
+
+- `OnInitialize()`는 `LabelImpl` 기본 경로와 같이 width `FILL_TO_PARENT`, height `DIMENSION_DEPENDENCY`를 사용한다.
+- fixed requested width / height는 requested size를 존중한다.
+- `WRAP_CONTENT` width / height는 text natural width와 해당 width에서의 layout height를 기준으로 측정한다.
+- `MATCH_PARENT` / fill parent는 positive parent constraint가 있으면 그 constraint를 사용한다.
+- `OnRelayout()`은 실제 allocated size를 우선 사용하고, width가 0 이하이면 natural width를 fallback으로 사용한다.
+- empty text는 wrap 측정에서 `0x0`을 반환하지만 fixed requested size는 유지한다.
+
+범위에서 제외한 것:
+
+- `InputField`의 cursor / selection / decorator / IME / placeholder interaction
+- `Label`의 TextFit / ellipsis / rich style / async rendering / marquee 특수 경로
+- public API 추가
+
+남은 확인 필요:
+
+- 반복 `OnMeasure()` 비용을 줄이기 위한 measure cache 필요 여부
+- `MATCH_PARENT` 측정 정책을 Label과 더 엄밀히 맞출지 여부
+- fixed height overflow / clipping의 장기 정책
+
+## 17. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -585,7 +610,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
 - 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 17. 다음 커밋 금지 사항
+## 18. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -599,7 +624,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 18. 최신 성능 경로 구조
+## 19. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -634,7 +659,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 19. Compact 이후 복구 지침
+## 20. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

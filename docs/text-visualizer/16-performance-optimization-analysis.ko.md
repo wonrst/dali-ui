@@ -260,7 +260,42 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - 그래도 같은 build / 같은 machine / 같은 status setting의 상대 비교에는 사용할 수 있다.
 - status text 자체가 `SetText()` / prepare 비용을 만들 수 있으므로 status on/off 결과를 반드시 분리한다.
 
-## 8. 다음 커밋 금지 사항
+## 8. 진행: Label-like Measure Policy
+
+`TextVisualizer`의 기본 measure / relayout 정책은 `InputField`가 아니라 `Label`에 가까운 display control 정책으로 정리했다.
+
+조사한 `LabelImpl` 기본 경로는 다음과 같다.
+
+- `OnInitialize()`에서 width는 `FILL_TO_PARENT`, height는 `DIMENSION_DEPENDENCY`를 기본으로 둔다.
+- fixed requested width / height는 requested size를 우선한다.
+- `WRAP_CONTENT` width는 text natural width를 기준으로 측정한다.
+- `WRAP_CONTENT` height는 width-for-height 형태로 현재 width에서 text layout height를 계산한다.
+- TextFit / ellipsis / async rendering / marquee 등 특수 경로는 이번 `TextVisualizer` 정책에 포함하지 않는다.
+
+`TextVisualizerImpl`의 현재 정책은 다음과 같다.
+
+| 항목 | 정책 |
+|---|---|
+| `OnInitialize()` | width `FILL_TO_PARENT`, height `DIMENSION_DEPENDENCY` |
+| fixed width / fixed height | requested size를 반환 |
+| wrap width / wrap height | natural width와 해당 width에서의 layout height를 반환 |
+| match / fill parent | positive parent constraint가 있으면 그 constraint를 사용 |
+| `OnRelayout()` | 실제 allocated size를 우선 사용하고, width가 0 이하이면 natural width를 fallback으로 사용 |
+| empty text | wrap 측정은 `0x0`, fixed requested size는 유지 |
+
+`InputField`와 다르게 처리한 점:
+
+- cursor / selection / decorator / IME / placeholder interaction은 고려하지 않는다.
+- editing control 특유의 minimum editing surface나 focus behavior를 measure에 끌어오지 않는다.
+- `TextVisualizer`는 text display surface이므로 text natural size와 parent allocation을 기준으로만 판단한다.
+
+남은 확인 필요:
+
+- `Label`의 `MATCH_PARENT` 측정은 parent arrange phase와 결합되어 더 복잡하므로, 현재 TextVisualizer의 positive constraint 사용 정책이 장기적으로 충분한지 확인이 필요하다.
+- `OnMeasure()`는 local layout을 계산하므로, 반복 measure가 많아지면 별도 measure cache가 필요할 수 있다.
+- fixed height에서 overflow된 text는 현재 clipping / render host size 정책에 맡긴다.
+
+## 9. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -274,7 +309,7 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - sample 관측용 변경과 core 최적화 변경을 한 커밋에 섞지 않기
 
-## 9. Compact 이후 복구 지침
+## 10. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
