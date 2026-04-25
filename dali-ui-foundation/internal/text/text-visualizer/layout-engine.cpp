@@ -33,6 +33,15 @@ struct BlockedInterval
   float end{0.0f};
 };
 
+struct SortedExclusionRegion
+{
+  Rect<float> rect;
+  float       top{0.0f};
+  float       bottom{0.0f};
+};
+
+using SortedExclusionRegions = std::vector<SortedExclusionRegion>;
+
 bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& region)
 {
   return (region.y < lineBottom) && ((region.y + region.height) > lineTop);
@@ -41,6 +50,35 @@ bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& regi
 bool IsInsideLayoutWidth(const BlockedInterval& interval)
 {
   return interval.end > interval.start;
+}
+
+SortedExclusionRegions BuildSortedExclusionRegions(const Dali::Vector<Rect<float>>& exclusionRegions)
+{
+  SortedExclusionRegions sortedRegions;
+  sortedRegions.reserve(exclusionRegions.Count());
+
+  for(uint32_t index = 0u; index < exclusionRegions.Count(); ++index)
+  {
+    const Rect<float>& region = exclusionRegions[index];
+    const float        bottom = region.y + region.height;
+
+    SortedExclusionRegion sortedRegion;
+    sortedRegion.rect   = region;
+    sortedRegion.top    = std::min(region.y, bottom);
+    sortedRegion.bottom = std::max(region.y, bottom);
+    sortedRegions.push_back(sortedRegion);
+  }
+
+  std::sort(sortedRegions.begin(), sortedRegions.end(), [](const SortedExclusionRegion& lhs, const SortedExclusionRegion& rhs)
+  {
+    if(lhs.top == rhs.top)
+    {
+      return lhs.bottom < rhs.bottom;
+    }
+    return lhs.top < rhs.top;
+  });
+
+  return sortedRegions;
 }
 
 float GetEffectiveLineHeight(const PreparedText& preparedText, float lineHeight)
@@ -117,12 +155,11 @@ uint32_t GetGlyphCharacterEnd(const PreparedText& preparedText, uint32_t glyphIn
 
   return preparedText.GetCharacterCount();
 }
-} // namespace
 
-Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float                            layoutWidth,
-                                                                      float                            lineY,
-                                                                      float                            lineHeight,
-                                                                      const Dali::Vector<Rect<float>>& exclusionRegions)
+Dali::Vector<AvailableInterval> BuildAvailableIntervalsFromSorted(float                         layoutWidth,
+                                                                  float                         lineY,
+                                                                  float                         lineHeight,
+                                                                  const SortedExclusionRegions& exclusionRegions)
 {
   Dali::Vector<AvailableInterval> availableIntervals;
 
@@ -131,7 +168,7 @@ Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float     
     return availableIntervals;
   }
 
-  if(exclusionRegions.Empty())
+  if(exclusionRegions.empty())
   {
     availableIntervals.PushBack({0.0f, layoutWidth});
     return availableIntervals;
@@ -141,11 +178,21 @@ Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float     
   const float lineBottom = lineY + lineHeight;
 
   std::vector<BlockedInterval> blockedIntervals;
-  blockedIntervals.reserve(exclusionRegions.Count());
+  blockedIntervals.reserve(exclusionRegions.size());
 
-  for(uint32_t index = 0u; index < exclusionRegions.Count(); ++index)
+  for(SortedExclusionRegions::const_iterator it = exclusionRegions.begin(), endIt = exclusionRegions.end(); it != endIt; ++it)
   {
-    const Rect<float>& region = exclusionRegions[index];
+    if(it->bottom <= lineTop)
+    {
+      continue;
+    }
+
+    if(it->top >= lineBottom)
+    {
+      break;
+    }
+
+    const Rect<float>& region = it->rect;
     if(!HasVerticalOverlap(lineTop, lineBottom, region))
     {
       continue;
@@ -216,6 +263,16 @@ Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float     
 
   return availableIntervals;
 }
+} // namespace
+
+Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float                            layoutWidth,
+                                                                      float                            lineY,
+                                                                      float                            lineHeight,
+                                                                      const Dali::Vector<Rect<float>>& exclusionRegions)
+{
+  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
+  return BuildAvailableIntervalsFromSorted(layoutWidth, lineY, lineHeight, sortedExclusionRegions);
+}
 
 float LayoutEngine::GetPlaceholderClusterAdvance(const PreparedText& preparedText)
 {
@@ -250,13 +307,14 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
     return;
   }
 
-  uint32_t       currentCluster = 0u;
-  float          currentY       = 0.0f;
-  const uint32_t maxLineCount   = std::max(1u, clusterCount + static_cast<uint32_t>(exclusionRegions.Count()) + 1u);
+  uint32_t                     currentCluster         = 0u;
+  float                        currentY               = 0.0f;
+  const uint32_t               maxLineCount           = std::max(1u, clusterCount + static_cast<uint32_t>(exclusionRegions.Count()) + 1u);
+  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentCluster < clusterCount; ++lineIndex)
   {
-    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervals(layoutWidth, currentY, effectiveLineHeight, exclusionRegions);
+    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervalsFromSorted(layoutWidth, currentY, effectiveLineHeight, sortedExclusionRegions);
 
     TextLine textLine;
     textLine.y      = currentY;
@@ -335,13 +393,14 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     return;
   }
 
-  uint32_t       currentGlyph = 0u;
-  float          currentY     = 0.0f;
-  const uint32_t maxLineCount = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
+  uint32_t                     currentGlyph           = 0u;
+  float                        currentY               = 0.0f;
+  const uint32_t               maxLineCount           = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
+  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentGlyph < glyphCount; ++lineIndex)
   {
-    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervals(layoutWidth, currentY, effectiveLineHeight, exclusionRegions);
+    const Dali::Vector<AvailableInterval> availableIntervals = BuildAvailableIntervalsFromSorted(layoutWidth, currentY, effectiveLineHeight, sortedExclusionRegions);
 
     TextLine textLine;
     textLine.y      = currentY;
