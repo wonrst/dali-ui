@@ -22,6 +22,7 @@
 #include <dali/public-api/actors/actor.h>
 #include <dali/public-api/rendering/geometry.h>
 #include <dali/public-api/rendering/renderer.h>
+#include <dali/public-api/rendering/shader.h>
 #include <dali/public-api/rendering/vertex-buffer.h>
 
 #include <cstdint>
@@ -29,12 +30,16 @@
 
 namespace Dali::Ui::Internal::TextVisualizer
 {
+class AtlasViewAdapter;
+class LayoutResult;
+class PreparedText;
+
 /**
- * @brief Phase 2 skeleton for a TextVisualizer-only lightweight glyph renderer.
+ * @brief Phase 2 prototype for a TextVisualizer-only lightweight glyph renderer.
  *
- * This class intentionally only owns the output actor lifecycle for now. It does not
- * build glyph meshes, access atlas glyph cache, or connect to the active TextVisualizer
- * render path yet. The existing Text::AtlasRenderer path remains unchanged.
+ * This class is intentionally not connected to the active TextVisualizer render path yet.
+ * The current mesh MVP only uses already-cached atlas glyphs and returns false on cache miss.
+ * The existing Text::AtlasRenderer path remains unchanged.
  */
 class TextVisualizerGlyphRenderer
 {
@@ -61,6 +66,8 @@ public:
   bool HasMeshRecords() const;
   uint32_t GetMeshRecordCount() const;
 
+  bool Render(const PreparedText& preparedText, const LayoutResult& layoutResult, const AtlasViewAdapter& adapter, const Vector4& textColor);
+
 private:
   struct MeshRecord
   {
@@ -78,6 +85,8 @@ private:
   bool  mAttached;
 
   std::vector<MeshRecord> mMeshRecords;
+  Shader                  mShaderL8;
+  Shader                  mShaderRgba;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

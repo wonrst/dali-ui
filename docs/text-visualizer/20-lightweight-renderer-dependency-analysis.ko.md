@@ -557,7 +557,63 @@ Add simple TextVisualizer glyph mesh MVP
 
 이 단계에서는 atlas slot lookup, mesh page split, shader 선택, glyph ref count 관리 중 최소 범위를 정해서 별도 커밋으로 검증한다.
 
-## 15. Compact 이후 복구 지침
+## 15. 진행: Simple Glyph Mesh MVP
+
+`TextVisualizerGlyphRenderer`에 제한적인 glyph mesh MVP 경로를 추가했다.
+
+추가 API:
+
+```cpp
+bool Render(const PreparedText& preparedText,
+            const LayoutResult& layoutResult,
+            const AtlasViewAdapter& adapter,
+            const Vector4& textColor);
+```
+
+현재 구현 정책:
+
+- active `TextVisualizer` render path에는 연결하지 않는다.
+- 기존 `Text::AtlasRenderer` path와 fallback path는 변경하지 않는다.
+- `PreparedText` / `LayoutResult` / `AtlasViewAdapter`를 입력으로 받는다.
+- `AtlasViewAdapter`의 cached renderer glyph positions를 사용한다.
+- `AtlasGlyphManager::IsCached()`로 이미 atlas에 존재하는 glyph만 처리한다.
+- cache miss, invalid glyph, invalid position, empty mesh, texture/shader 생성 실패는 `false`로 안전하게 반환한다.
+- 성공 시 atlas id별 mesh를 만들고 output actor 아래 mesh actor를 붙인다.
+- vertex color는 single `textColor`만 사용한다.
+- L8 / BGRA atlas pixel format에 따라 기존 text atlas shader source를 사용한다.
+
+현재 MVP가 의도적으로 하지 않는 것:
+
+- glyph bitmap 생성
+- atlas cache add
+- glyph reference count 증가/감소
+- `TextCacheEntry` lifecycle
+- underline / strikethrough / shadow / outline / background / markup / ellipsis
+- geometry-only update
+- production active path 연결
+
+중요 제한:
+
+- 이 MVP는 already-cached glyph smoke path다.
+- standalone 상태에서 glyph가 atlas에 없으면 정상적으로 실패할 수 있다.
+- production path로 쓰려면 `CacheGlyph()`에 해당하는 cache add / ref count lifecycle을 별도 설계해야 한다.
+- 현재 mesh actor creation은 prototype 검증용이며, renderer lifecycle reuse와 geometry-only update는 다음 단계다.
+
+다음 단계 후보:
+
+```text
+Add TextVisualizer glyph cache warmup path
+```
+
+또는
+
+```text
+Prototype TextVisualizer geometry-only mesh update
+```
+
+cache add / ref count 정책이 정리되기 전까지는 active path 연결을 하지 않는다.
+
+## 16. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서로 읽는다.
 

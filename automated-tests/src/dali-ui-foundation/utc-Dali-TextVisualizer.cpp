@@ -1865,6 +1865,125 @@ int UtcDaliTextVisualizerGlyphRendererClearClearsMeshesP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerGlyphRendererRenderEmptyP(void)
+{
+  UiTestApplication                                               application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText                preparedText;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  DALI_TEST_CHECK(!renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE));
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void)
+{
+  UiTestApplication                                               application;
+  const auto                                                      preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                       exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+
+  const bool renderResult = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
+  DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
+
+  if(renderResult)
+  {
+    DALI_TEST_CHECK(renderer.HasOutputActor());
+    DALI_TEST_CHECK(renderer.GetOutputActor().GetChildCount() > 0u);
+    DALI_TEST_CHECK(renderer.GetMeshRecordCount() > 0u);
+  }
+  else
+  {
+    DALI_TEST_CHECK(!renderer.HasMeshRecords());
+    DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererRenderAfterAtlasRendererWarmupSmokeP(void)
+{
+  UiTestApplication                                               application;
+  const auto                                                      preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                       exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge         bridge;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+  bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(layoutResult.width, layoutResult.height, 0.0f));
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    DALI_TEST_CHECK(bridge.UpdateRenderData());
+    bridge.AttachRendererToHost();
+  }
+
+  const bool renderResult = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
+  DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
+
+  if(renderResult)
+  {
+    DALI_TEST_CHECK(renderer.HasOutputActor());
+    DALI_TEST_CHECK(renderer.GetOutputActor().GetChildCount() > 0u);
+    DALI_TEST_CHECK(renderer.GetMeshRecordCount() > 0u);
+  }
+  else
+  {
+    DALI_TEST_CHECK(!renderer.HasMeshRecords());
+    DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererClearAfterRenderSmokeP(void)
+{
+  UiTestApplication                                               application;
+  const auto                                                      preparedText = CreatePreparedText("abc", 10.0f);
+  Dali::Vector<Rect<float>>                                       exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+
+  renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
+  renderer.Clear();
+
+  DALI_TEST_CHECK(!renderer.HasRenderHost());
+  DALI_TEST_CHECK(!renderer.HasOutputActor());
+  DALI_TEST_CHECK(!renderer.IsAttached());
+  DALI_TEST_CHECK(!renderer.HasMeshRecords());
+  DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
 {
   UiTestApplication                                                 application;

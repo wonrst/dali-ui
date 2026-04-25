@@ -40,10 +40,11 @@
 - `Inspect TextVisualizer lightweight renderer dependencies`
 - `Add TextVisualizerGlyphRenderer skeleton`
 - `Add TextVisualizerGlyphRenderer mesh state skeleton`
+- `Add simple TextVisualizer glyph mesh MVP`
 
 이번 작업 포함 최신 커밋:
 
-- `Add TextVisualizerGlyphRenderer mesh state skeleton`
+- `Add simple TextVisualizer glyph mesh MVP`
 
 최근 최적화 상태:
 
@@ -76,8 +77,11 @@
 - active path에 연결하지 않는 `TextVisualizerGlyphRenderer` skeleton을 추가했다.
 - 현재 skeleton은 output actor / render host lifecycle만 보유하며 glyph mesh / atlas cache / geometry 생성은 아직 구현하지 않는다.
 - `TextVisualizerGlyphRenderer`에 private mesh record state와 clear lifecycle을 추가했다.
-- mesh record는 actor / renderer / geometry / vertex buffer handle을 담을 수 있지만, 아직 실제 glyph mesh를 생성하지 않는다.
-- 다음 low-risk 구현 후보는 simple glyph mesh MVP다.
+- `TextVisualizerGlyphRenderer::Render()` MVP를 추가해 already-cached glyph만 atlas id별 mesh actor로 만들 수 있게 했다.
+- MVP는 `PreparedText` / `LayoutResult` / `AtlasViewAdapter`를 입력으로 받고 cached renderer glyph positions를 사용한다.
+- glyph cache miss, invalid glyph, invalid position, empty mesh, texture/shader 생성 실패는 `false`로 안전하게 반환한다.
+- glyph bitmap 생성, atlas cache add, ref count lifecycle, geometry-only update, active path 연결은 아직 하지 않는다.
+- 다음 low-risk 구현 후보는 glyph cache warmup/add path 조사 또는 geometry-only mesh update prototype이다.
 
 현재 해석:
 
@@ -847,4 +851,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 `Add simple TextVisualizer glyph mesh MVP`이다. 새 세션에서는 이 문서 다음에 `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 `Add TextVisualizer glyph cache warmup path` 또는 `Prototype TextVisualizer geometry-only mesh update`이다. 새 세션에서는 이 문서 다음에 `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
