@@ -55,6 +55,7 @@ AtlasViewAdapter::AtlasViewAdapter()
 : mPreparedText(nullptr),
   mLayoutResult(nullptr),
   mLineMetricsCache(),
+  mRendererGlyphPositions(),
   mControlSize(Vector2::ZERO),
   mLayoutSize(Vector2::ZERO),
   mTextColor(0.0f, 0.0f, 0.0f, 1.0f)
@@ -64,14 +65,14 @@ AtlasViewAdapter::AtlasViewAdapter()
 void AtlasViewAdapter::SetPreparedText(const PreparedText* preparedText)
 {
   mPreparedText = preparedText;
-  RebuildLineMetricsCache();
+  RebuildRenderCaches();
 }
 
 void AtlasViewAdapter::SetLayoutResult(const LayoutResult* layoutResult)
 {
   mLayoutResult = layoutResult;
   mLayoutSize   = (nullptr != layoutResult) ? Vector2(layoutResult->width, layoutResult->height) : Vector2::ZERO;
-  RebuildLineMetricsCache();
+  RebuildRenderCaches();
 }
 
 void AtlasViewAdapter::SetControlSize(const Vector2& controlSize)
@@ -89,6 +90,7 @@ void AtlasViewAdapter::Clear()
   mPreparedText = nullptr;
   mLayoutResult = nullptr;
   mLineMetricsCache.clear();
+  mRendererGlyphPositions.Clear();
   mControlSize = Vector2::ZERO;
   mLayoutSize  = Vector2::ZERO;
   mTextColor   = Vector4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -117,6 +119,17 @@ bool AtlasViewAdapter::GetGlyphInfo(uint32_t glyphIndex, Text::GlyphInfo& glyphI
 }
 
 bool AtlasViewAdapter::GetRendererGlyphPosition(uint32_t index, Vector2& position) const
+{
+  if(index < mRendererGlyphPositions.Count())
+  {
+    position = mRendererGlyphPositions[index];
+    return std::isfinite(position.x) && std::isfinite(position.y);
+  }
+
+  return ComputeRendererGlyphPosition(index, position);
+}
+
+bool AtlasViewAdapter::ComputeRendererGlyphPosition(uint32_t index, Vector2& position) const
 {
   GlyphPlacement  placement;
   Text::GlyphInfo glyphInfo;
@@ -198,6 +211,11 @@ uint32_t AtlasViewAdapter::GetLineMetricsCacheCount() const
   return static_cast<uint32_t>(mLineMetricsCache.size());
 }
 
+uint32_t AtlasViewAdapter::GetRendererGlyphPositionCacheCount() const
+{
+  return mRendererGlyphPositions.Count();
+}
+
 const Vector2& AtlasViewAdapter::GetControlSize() const
 {
   return (mControlSize != Vector2::ZERO) ? mControlSize : mLayoutSize;
@@ -241,6 +259,12 @@ const Text::Character* AtlasViewAdapter::GetTextBuffer() const
   }
 
   return mPreparedText->GetCharacters().Begin();
+}
+
+void AtlasViewAdapter::RebuildRenderCaches()
+{
+  RebuildLineMetricsCache();
+  RebuildRendererGlyphPositionCache();
 }
 
 void AtlasViewAdapter::RebuildLineMetricsCache()
@@ -298,6 +322,31 @@ void AtlasViewAdapter::RebuildLineMetricsCache()
       cache.metrics = metrics;
       mLineMetricsCache.push_back(cache);
     }
+  }
+}
+
+void AtlasViewAdapter::RebuildRendererGlyphPositionCache()
+{
+  mRendererGlyphPositions.Clear();
+
+  if(!HasRenderableGlyphs())
+  {
+    return;
+  }
+
+  const uint32_t glyphPlacementCount = GetGlyphPlacementCount();
+  mRendererGlyphPositions.Reserve(glyphPlacementCount);
+
+  for(uint32_t placementIndex = 0u; placementIndex < glyphPlacementCount; ++placementIndex)
+  {
+    Vector2 position;
+    if(!ComputeRendererGlyphPosition(placementIndex, position))
+    {
+      mRendererGlyphPositions.Clear();
+      return;
+    }
+
+    mRendererGlyphPositions.PushBack(position);
   }
 }
 

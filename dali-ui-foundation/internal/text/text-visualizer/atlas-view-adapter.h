@@ -59,6 +59,7 @@ public:
   uint32_t GetGlyphPlacementCount() const;
   uint32_t GetRenderableGlyphCount() const;
   uint32_t GetLineMetricsCacheCount() const;
+  uint32_t GetRendererGlyphPositionCacheCount() const;
 
   const Vector2& GetControlSize() const;
   const Vector2& GetLayoutSize() const;
@@ -77,13 +78,17 @@ private:
     TextLineMetrics metrics;
   };
 
+  void  RebuildRenderCaches();
   void  RebuildLineMetricsCache();
+  void  RebuildRendererGlyphPositionCache();
+  bool  ComputeRendererGlyphPosition(uint32_t index, Vector2& position) const;
   bool  GetCachedLineMetrics(float lineTop, TextLineMetrics& metrics) const;
   float GetLineBaselineOffset(float lineTop) const;
 
   const PreparedText*           mPreparedText;
   const LayoutResult*           mLayoutResult;
   std::vector<LineMetricsCache> mLineMetricsCache;
+  Dali::Vector<Vector2>         mRendererGlyphPositions;
   Vector2                       mControlSize;
   Vector2                       mLayoutSize;
   Vector4                       mTextColor;
