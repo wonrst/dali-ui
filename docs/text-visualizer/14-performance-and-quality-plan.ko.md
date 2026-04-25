@@ -885,6 +885,58 @@ renderer position 우선순위:
 - cache build cost와 repeated scan 제거 이득의 균형
 - line metrics cache가 장기적으로 adapter에 남아야 할지, `LayoutResult`로 이동해야 할지
 
+## 진행: TextLine metrics cache
+
+최근 커밋:
+
+- `Add TextVisualizer TextLine metrics cache`
+
+목표:
+
+- line-level natural line height를 layout y progression에 직접 적용하기 전에, `LayoutResult`가 line별 metrics를 보유할 수 있는 기반을 만든다.
+- `AtlasViewAdapter`에서만 line metrics를 재계산하던 구조를 `TextLine` 중심으로 한 단계 앞으로 옮긴다.
+- public API, line break policy, `FontSize` / `LineHeight` semantics는 변경하지 않는다.
+
+추가된 구조:
+
+- `TextLine`에 `TextLineMetrics metrics`를 추가했다.
+- `LayoutGlyphs()`는 line placement를 완료한 뒤 해당 line fragment의 glyph range를 scan해 metrics를 채운다.
+  - `ascender = max(yBearing)`
+  - `descender = max(height - yBearing)`
+  - `baselineOffset = ascender`
+  - `naturalLineHeight = ascender + descender + PreparedText::LineMetrics.lineGap`
+- `LayoutPlaceholder()`는 glyph metrics가 없으므로 `TextLine.metrics.valid == false` 상태를 유지한다.
+
+renderer baseline 우선순위:
+
+1. `TextLine.metrics`
+2. adapter-local recalculation fallback
+3. `PreparedText::LineMetrics.baselineOffset`
+4. 기존 same-line scan fallback
+5. `0.0f`
+
+중요한 비적용 범위:
+
+- 이번 커밋은 variable line height를 도입하지 않는다.
+- `TextLine.metrics.naturalLineHeight`를 `TextLine.height`나 다음 line y progression에 반영하지 않는다.
+- explicit line height가 있으면 기존처럼 `TextLine.height`는 explicit 값으로 유지된다.
+
+variable line height를 아직 적용하지 않는 이유:
+
+- 현재 `LayoutGlyphs()`는 line 시작 전에 `lineHeight`로 exclusion interval vertical band를 계산한다.
+- line별 natural height는 line placement가 끝난 뒤에 알 수 있다.
+- 이를 y progression에 반영하려면 현재 line의 exclusion overlap 계산, 다음 line y 이동, max line guard 정책을 함께 다시 설계해야 한다.
+- 따라서 이번 단계는 `TextLine.metrics` 저장과 renderer baseline 품질 개선 기반까지만 진행한다.
+
+확인 필요:
+
+- `TextLine.metrics`를 `LayoutResult`에 유지하는 것이 장기적으로 맞는지
+- adapter cache와 `TextLine.metrics`의 역할 중복 정리
+- variable line height 지원 여부
+- line-level `naturalLineHeight`를 y progression에 적용하는 방식
+- exclusion vertical band와 variable line height 관계
+- `LayoutGlyphs()`에서 line metrics를 계산하는 비용
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
@@ -931,6 +983,7 @@ renderer position 우선순위:
 - performance sample에는 exclusion update threshold가 도입됐다.
 - layout unchanged render skip의 1차 조건은 도입됐다.
 - line-level metrics cache의 1차 적용은 완료됐다.
+- `TextLine.metrics` 저장 기반은 추가됐지만 variable line height는 아직 적용하지 않았다.
 - 다음 성능 후보는 core redundant update policy, partial relayout, geometry-only update처럼 더 큰 정책 판단이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 

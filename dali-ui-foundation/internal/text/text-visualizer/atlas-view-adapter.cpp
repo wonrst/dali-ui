@@ -258,17 +258,20 @@ void AtlasViewAdapter::RebuildLineMetricsCache()
   for(Vector<TextLine>::ConstIterator lineIt = mLayoutResult->lines.Begin(), lineEndIt = mLayoutResult->lines.End();
       lineIt != lineEndIt; ++lineIt)
   {
-    TextLineMetrics metrics;
+    TextLineMetrics metrics = lineIt->metrics;
 
-    for(Vector<TextLineFragment>::ConstIterator fragmentIt = lineIt->fragments.Begin(), fragmentEndIt = lineIt->fragments.End();
-        fragmentIt != fragmentEndIt; ++fragmentIt)
+    if(!metrics.valid)
     {
-      for(uint32_t glyphIndex = fragmentIt->glyphStart; glyphIndex < fragmentIt->glyphEnd && glyphIndex < glyphs.Count(); ++glyphIndex)
+      for(Vector<TextLineFragment>::ConstIterator fragmentIt = lineIt->fragments.Begin(), fragmentEndIt = lineIt->fragments.End();
+          fragmentIt != fragmentEndIt; ++fragmentIt)
       {
-        const Text::GlyphInfo& glyph = glyphs[glyphIndex];
-        metrics.ascender             = std::max(metrics.ascender, glyph.yBearing);
-        metrics.descender            = std::max(metrics.descender, std::max(0.0f, glyph.height - glyph.yBearing));
-        metrics.valid                = true;
+        for(uint32_t glyphIndex = fragmentIt->glyphStart; glyphIndex < fragmentIt->glyphEnd && glyphIndex < glyphs.Count(); ++glyphIndex)
+        {
+          const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+          metrics.ascender             = std::max(metrics.ascender, glyph.yBearing);
+          metrics.descender            = std::max(metrics.descender, std::max(0.0f, glyph.height - glyph.yBearing));
+          metrics.valid                = true;
+        }
       }
     }
 

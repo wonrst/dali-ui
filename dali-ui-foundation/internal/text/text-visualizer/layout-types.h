@@ -57,12 +57,14 @@ struct TextLine
 {
   float                          y{0.0f};
   float                          height{0.0f};
+  TextLineMetrics                metrics;
   Dali::Vector<TextLineFragment> fragments;
 
   void Clear()
   {
-    y      = 0.0f;
-    height = 0.0f;
+    y       = 0.0f;
+    height  = 0.0f;
+    metrics = TextLineMetrics{};
     fragments.Clear();
   }
 
@@ -139,6 +141,11 @@ struct LayoutResult
       const TextLine& line = lines[lineIndex];
       HashCombine(signature, Quantize(line.y, epsilon));
       HashCombine(signature, Quantize(line.height, epsilon));
+      HashCombine(signature, line.metrics.valid ? 1u : 0u);
+      HashCombine(signature, Quantize(line.metrics.ascender, epsilon));
+      HashCombine(signature, Quantize(line.metrics.descender, epsilon));
+      HashCombine(signature, Quantize(line.metrics.baselineOffset, epsilon));
+      HashCombine(signature, Quantize(line.metrics.naturalLineHeight, epsilon));
       HashCombine(signature, line.fragments.Count());
     }
 

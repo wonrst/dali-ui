@@ -156,6 +156,35 @@ uint32_t GetGlyphCharacterEnd(const PreparedText& preparedText, uint32_t glyphIn
   return preparedText.GetCharacterCount();
 }
 
+TextLineMetrics CalculateTextLineMetrics(const PreparedText& preparedText,
+                                         const TextLine&     textLine)
+{
+  TextLineMetrics                        metrics;
+  const Dali::Vector<Text::GlyphInfo>&   glyphs          = preparedText.GetGlyphs();
+  const PreparedText::LineMetrics* const fallbackMetrics = preparedText.HasLineMetrics() ? &preparedText.GetLineMetrics() : nullptr;
+
+  for(Vector<TextLineFragment>::ConstIterator fragmentIt = textLine.fragments.Begin(), fragmentEndIt = textLine.fragments.End();
+      fragmentIt != fragmentEndIt; ++fragmentIt)
+  {
+    for(uint32_t glyphIndex = fragmentIt->glyphStart; glyphIndex < fragmentIt->glyphEnd && glyphIndex < glyphs.Count(); ++glyphIndex)
+    {
+      const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+      metrics.ascender             = std::max(metrics.ascender, glyph.yBearing);
+      metrics.descender            = std::max(metrics.descender, std::max(0.0f, glyph.height - glyph.yBearing));
+      metrics.valid                = true;
+    }
+  }
+
+  if(metrics.valid)
+  {
+    const float lineGap       = (nullptr != fallbackMetrics) ? fallbackMetrics->lineGap : 0.0f;
+    metrics.baselineOffset    = metrics.ascender;
+    metrics.naturalLineHeight = metrics.ascender + metrics.descender + lineGap;
+  }
+
+  return metrics;
+}
+
 Dali::Vector<AvailableInterval> BuildAvailableIntervalsFromSorted(float                         layoutWidth,
                                                                   float                         lineY,
                                                                   float                         lineHeight,
@@ -480,6 +509,7 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
 
     if(lineHasPlacement)
     {
+      textLine.metrics = CalculateTextLineMetrics(preparedText, textLine);
       result.lines.PushBack(textLine);
       result.height = currentY + effectiveLineHeight;
     }

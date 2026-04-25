@@ -559,6 +559,25 @@ int UtcDaliTextVisualizerPreparedLineMetricsClearP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerTextLineMetricsDefaultP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextLineMetrics metrics;
+  Dali::Ui::Internal::TextVisualizer::TextLine        line;
+
+  DALI_TEST_CHECK(!metrics.valid);
+  DALI_TEST_EQUALS(metrics.naturalLineHeight, 0.0f, TEST_LOCATION);
+  DALI_TEST_CHECK(!line.metrics.valid);
+
+  line.metrics.valid             = true;
+  line.metrics.naturalLineHeight = 10.0f;
+  line.Clear();
+  DALI_TEST_CHECK(!line.metrics.valid);
+  DALI_TEST_EQUALS(line.metrics.naturalLineHeight, 0.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerLayoutGlyphsUsesLineMetricsHeightP(void)
 {
   UiTestApplication                                application;
@@ -572,6 +591,26 @@ int UtcDaliTextVisualizerLayoutGlyphsUsesLineMetricsHeightP(void)
   {
     DALI_TEST_CHECK(!layoutResult.Empty());
     DALI_TEST_CHECK(layoutResult.height >= preparedText.GetLineMetrics().naturalLineHeight);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutGlyphsFillsTextLineMetricsP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("abc", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 300.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u && layoutResult.GetLineCount() > 0u)
+  {
+    const Dali::Ui::Internal::TextVisualizer::TextLine& line = layoutResult.lines[0u];
+    DALI_TEST_CHECK(line.metrics.valid);
+    DALI_TEST_CHECK(line.metrics.naturalLineHeight > 0.0f);
+    DALI_TEST_CHECK(line.metrics.baselineOffset >= 0.0f);
   }
 
   END_TEST;
@@ -592,6 +631,7 @@ int UtcDaliTextVisualizerLayoutGlyphsExplicitLineHeightOverrideP(void)
     DALI_TEST_CHECK(!layoutResult.Empty());
     DALI_TEST_EQUALS(layoutResult.height, explicitLineHeight, TEST_LOCATION);
     DALI_TEST_EQUALS(layoutResult.lines[0u].height, explicitLineHeight, TEST_LOCATION);
+    DALI_TEST_CHECK(layoutResult.lines[0u].metrics.valid);
   }
 
   END_TEST;

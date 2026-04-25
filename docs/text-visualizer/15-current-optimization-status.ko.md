@@ -21,10 +21,11 @@
 - `Skip TextVisualizer render when layout is unchanged`
 - `Add TextVisualizer performance sample status toggle`
 - `Add TextVisualizer line-level metrics cache`
+- `Add TextVisualizer TextLine metrics cache`
 
 이번 작업 포함 최신 커밋:
 
-- `Add TextVisualizer line-level metrics cache`
+- `Add TextVisualizer TextLine metrics cache`
 
 최근 최적화 상태:
 
@@ -33,6 +34,7 @@
 - layout unchanged render skip을 도입했다.
 - performance sample status text update를 `0` 키로 끄고 켤 수 있게 했다.
 - renderer glyph position 계산에 line-level metrics cache를 우선 사용할 수 있게 했다.
+- `LayoutGlyphs()`가 `TextLine.metrics`를 채우도록 했다.
 
 현재 해석:
 
@@ -51,8 +53,9 @@
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
+- `LayoutResult`의 각 glyph line은 line별 metrics 후보를 보유할 수 있다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `121 tests, 0 failures` 상태다.
+- 전체 `TextVisualizer` UTC는 `123 tests, 0 failures` 상태다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -112,13 +115,15 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 line-level cache:
 
 - `TextLineMetrics` 구조가 추가됐다.
-- `AtlasViewAdapter`는 `LayoutResult::lines`의 fragment glyph 범위를 scan해 line별 ascender / descender / baselineOffset / naturalLineHeight 후보를 계산한다.
+- `TextLine`에 `metrics`가 추가됐다.
+- `LayoutGlyphs()`는 `LayoutResult::lines`의 fragment glyph 범위를 scan해 line별 ascender / descender / baselineOffset / naturalLineHeight 후보를 계산한다.
+- `AtlasViewAdapter`는 `TextLine.metrics`를 먼저 사용하고, 없으면 adapter-local 계산으로 fallback한다.
 - cache lookup은 line top 기준이며 `0.001f` tolerance를 사용한다.
-- 현재 cache는 renderer position 보정에만 사용하고, layout y progression은 바꾸지 않는다.
+- 현재 metrics는 renderer position 보정에만 사용하고, layout y progression은 바꾸지 않는다.
 
 남은 제한:
 
-- line별 baseline 보정 기반은 들어갔지만, line별 line height 적용은 아직 없다.
+- line별 metrics 저장 기반은 들어갔지만, line별 line height 적용은 아직 없다.
 - line별 fallback font / emoji 혼합 visual improvement는 sample/fixture로 추가 확인이 필요하다.
 - font-system 수준의 ascender / descender / lineGap 직접 조회는 아직 확인 필요다.
 
@@ -207,7 +212,7 @@ line-level cache:
 현재 결과:
 
 - targeted UTC passed
-- 전체 `TextVisualizer` UTC: `121 tests, 0 failures`
+- 전체 `TextVisualizer` UTC: `123 tests, 0 failures`
 
 커밋 참고:
 
@@ -219,7 +224,7 @@ line-level cache:
 | 후보 | 현재 상태 | 다음 조치 |
 |---|---|---|
 | diagnostics/log overhead | 정리 완료 | 유지 |
-| line metrics / baseline | line-level baseline cache 1차 적용 완료 | line-level line height 검토 |
+| line metrics / baseline | `TextLine.metrics` 기반 1차 적용 완료 | variable line height 설계 검토 |
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
@@ -358,6 +363,8 @@ line-level metrics cache는 `PreparedText` 전체 metrics의 한계를 보완하
 현재 구조:
 
 - `TextLineMetrics`는 ascender / descender / baselineOffset / naturalLineHeight / valid를 가진다.
+- `TextLine`이 `TextLineMetrics metrics`를 보유한다.
+- `LayoutGlyphs()`가 line placement 완료 후 glyph range를 scan해 `TextLine.metrics`를 채운다.
 - `AtlasViewAdapter`가 non-owning `PreparedText`와 `LayoutResult` 조합을 기준으로 cache를 만든다.
 - `SetPreparedText()` 또는 `SetLayoutResult()`가 호출되면 cache를 rebuild한다.
 - `Clear()`는 cache도 함께 비운다.
@@ -373,24 +380,34 @@ line-level metrics cache는 `PreparedText` 전체 metrics의 한계를 보완하
 
 renderer position 우선순위:
 
-1. line-level metrics cache
-2. `PreparedText::LineMetrics.baselineOffset`
-3. 기존 same-line scan fallback
-4. `0.0f`
+1. `TextLine.metrics`
+2. adapter-local line metrics recalculation
+3. `PreparedText::LineMetrics.baselineOffset`
+4. 기존 same-line scan fallback
+5. `0.0f`
 
 유지한 정책:
 
 - public API는 추가하지 않았다.
 - line break policy는 변경하지 않았다.
 - layout y progression과 line height semantics는 변경하지 않았다.
+- explicit line height가 있으면 `TextLine.height`는 기존 explicit 값을 유지한다.
 - render dirty clear 조건은 변경하지 않았다.
+
+variable line height를 아직 적용하지 않은 이유:
+
+- `LayoutGlyphs()`는 현재 line 시작 전에 line height로 exclusion interval vertical band를 계산한다.
+- line별 natural height는 line placement가 끝난 뒤 알 수 있다.
+- 이를 바로 y progression에 쓰면 exclusion overlap 계산과 다음 line y 이동 정책이 함께 바뀐다.
+- 따라서 이번 단계는 `TextLine.metrics` 저장과 renderer baseline 품질 기반까지만 진행한다.
 
 확인 필요:
 
 - line-level `naturalLineHeight`를 실제 layout height에 반영할지
 - variable line height를 허용할지
 - fallback font / emoji가 많은 line에서 visual improvement가 충분한지
-- cache build 비용과 renderer position fallback scan 제거 이득의 균형
+- `LayoutGlyphs()`에서 line metrics를 계산하는 비용
+- adapter cache와 `TextLine.metrics` 역할 중복 정리
 - cache 위치를 adapter에 유지할지, 장기적으로 `LayoutResult`에 포함할지
 
 ## 13. 다음 추천 작업
@@ -408,7 +425,7 @@ renderer position 우선순위:
 
 이유:
 
-- line-level baseline cache는 들어갔다.
+- `TextLine.metrics` 기반 line-level baseline cache는 들어갔다.
 - fallback font / emoji가 섞인 line의 height 품질을 더 올리려면 line-level `naturalLineHeight`를 layout에 연결할지 검토해야 한다.
 
 ### C. Word / cluster line break quality
