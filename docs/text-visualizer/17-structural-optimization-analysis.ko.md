@@ -602,12 +602,45 @@ cache invalidation:
 - `ViewInterface::GetGlyphs()`는 glyph info copy를 계속 수행한다.
 - geometry-only update 또는 `AtlasRenderer` 내부 mesh reuse는 데모 후 후보로 남긴다.
 
-## 9. 최적화 후보 risk / effect 표
+## 9. 진행: sample static / dynamic exclusion split
+
+이번 구현에서 performance sample의 exclusion vector build를 static / dynamic / combined cache로 나눴다.
+
+이전 구조:
+
+- `ApplyExclusionRegions()`가 매 tick local `Dali::Vector<Rect<float>>`를 새로 만들었다.
+- title exclusion, drop cap exclusion, fixed column bounds, moving orb bands, overlay text bounds를 모두 매번 append했다.
+- 이 중 title / drop cap / fixed columns는 runtime key 입력으로 바뀌지 않는 static exclusion이다.
+
+현재 구조:
+
+- `mStaticExclusionRegions`는 초기화 시 title / drop cap / fixed column bounds를 한 번 rebuild한다.
+- `mDynamicExclusionRegions`는 tick마다 moving orb ellipse bands와 overlay text bounds만 rebuild한다.
+- `mCombinedExclusionRegions`는 member vector로 재사용하고 static + dynamic을 합쳐 `SetExclusionRegions()`에 전달한다.
+
+유지한 정책:
+
+- core `TextVisualizer` public API는 변경하지 않았다.
+- layout / word wrap / render dirty clear 정책은 변경하지 않았다.
+- sample visual layout, font size, line height, body text, orb positions는 변경하지 않았다.
+
+남은 한계:
+
+- `SetExclusionRegions()`는 exclusion enabled 상태에서 여전히 tick마다 호출된다.
+- `LayoutGlyphs()` full relayout은 그대로 남아 있다.
+- core sorted exclusion cache나 static / dynamic API는 아직 없다.
+
+성격:
+
+- sample-only low-risk optimization이다.
+- 데모용 visual output을 유지하면서 vector allocation / repeated static append 비용을 줄이는 목적이다.
+
+## 10. 최적화 후보 risk / effect 표
 
 | 후보 | 효과 가능성 | 구현 난이도 | 회귀 위험 | 파일 영향 | 추천 단계 |
 |---|---|---|---|---|---|
 | Move stable `GlyphLayoutCache` fields into `PreparedText` | 중간~높음 | 중간 | 낮음~중간 | `prepared-text.*`, `text-preparer.cpp`, `layout-engine.cpp` | 1차 완료 |
-| sample static/dynamic exclusion split | 중간 | 낮음 | 낮음 | sample only | 데모 전 가능 |
+| sample static/dynamic exclusion split | 중간 | 낮음 | 낮음 | sample only | 1차 완료 |
 | combined exclusion vector reuse | 낮음~중간 | 낮음 | 낮음 | sample only | 데모 전 가능 |
 | cached sorted exclusion regions in `TextVisualizerImpl` | 중간 | 중간 | 중간 | `text-visualizer-impl.*`, `layout-engine.*` internal | 데모 전 후보, 신중 |
 | prefix advance binary search word wrap | 중간 | 중간 | 중간 | `layout-engine.cpp` | 데모 후 또는 충분한 UTC 후 |
@@ -619,27 +652,11 @@ cache invalidation:
 | `AtlasRenderer` geometry-only update investigation | 높음 | 높음 | 높음 | `text-atlas-renderer.*` | 데모 후 |
 | partial relayout prototype | 높음 | 높음 | 높음 | layout engine / impl 전반 | 데모 후 |
 
-## 10. 다음 바로 구현할 후보 3개
+## 11. 다음 바로 구현할 후보 3개
 
-### 1. Sample static / dynamic exclusion split and vector reuse
+### 1. Incremental `LayoutResult` signature
 
 현재 기준 추천 1순위다.
-
-이유:
-
-- 수요일 데모 전 가장 안전하다.
-- static title / drop cap / fixed columns를 매 tick 다시 push하는 비용을 줄인다.
-- core API나 layout algorithm에 영향이 없다.
-- sample visual behavior를 유지하면서 update path를 가볍게 만들 수 있다.
-
-주의:
-
-- sample-only라 engine 구조 개선은 제한적이다.
-- static bounds가 font size / title style 변경과 연동되는 경우 invalidation을 명확히 해야 한다.
-
-### 2. Incremental `LayoutResult` signature
-
-추천 2순위다.
 
 이유:
 
@@ -652,9 +669,9 @@ cache invalidation:
 - hash 갱신 누락이 correctness에 영향을 줄 수 있으므로 UTC를 충분히 유지한다.
 - signature policy 자체는 바꾸지 않는다.
 
-### 3. `ViewInterface::GetGlyphs()` copy path 분석
+### 2. `ViewInterface::GetGlyphs()` copy path 분석
 
-추천 3순위다.
+추천 2순위다.
 
 이유:
 
@@ -667,11 +684,25 @@ cache invalidation:
 - `Text::ViewInterface` contract를 바꾸지 않는다.
 - `AtlasRenderer` 변경이 필요해지면 데모 후 작업으로 분리한다.
 
-## 11. 수요일 데모 전 / 데모 후 작업 분리
+### 3. Core sorted exclusion cache 분석
+
+추천 3순위다.
+
+이유:
+
+- sample static / dynamic split은 완료됐지만 core layout pass에서는 여전히 combined vector를 매번 sort한다.
+- `TextVisualizerImpl`에 sorted exclusion cache를 둘 수 있으면 layout pass 시작 비용을 더 줄일 수 있다.
+- public API 없이 internal 경계에서 해결 가능한지 검토할 수 있다.
+
+주의:
+
+- internal `LayoutEngine` signature 조정이 필요할 수 있다.
+- static / dynamic invalidation을 core에서 어떻게 표현할지 먼저 정리해야 한다.
+
+## 12. 수요일 데모 전 / 데모 후 작업 분리
 
 ### 데모 전 안전 작업
 
-- sample static/dynamic exclusion split
 - sample combined exclusion vector reuse
 - incremental `LayoutResult` signature only if UTC scope is clear
 - optional debug status 유지 / FPS-only 기본 상태 유지
@@ -698,7 +729,7 @@ cache invalidation:
 - 효과가 큰 구조 변경은 별도 branch / fixture / screenshot 비교와 함께 진행한다.
 - 기존 renderer 공유 경로를 건드리는 변경은 충분한 regression 범위를 확보한다.
 
-## 12. 측정 / 검증 계획
+## 13. 측정 / 검증 계획
 
 ### 조건
 
@@ -734,7 +765,7 @@ cache invalidation:
 - debug counters는 off일 때 detailed formatting 비용이 없어야 한다.
 - 정확한 CPU profiling이 필요하면 sample-only timing 또는 external profiler로 분리한다.
 
-## 13. 결론
+## 14. 결론
 
 현재 남은 최적화는 단순 micro optimization보다 pipeline 구조 중복 제거가 중요하다.
 
@@ -757,6 +788,8 @@ exclusion 쪽은 static / dynamic 분리와 vector/cache 재사용이 수요일 
 
 이번 구현으로 **Reduce redundant `UpdateRenderData()`**도 1차 완료됐다. `UpdateRenderData()`는 더 이상 glyph count만큼 render data vector를 만들지 않고, renderer ensure와 lightweight validation gate 역할만 수행한다.
 
-이제 다음 구조 최적화 후보는 exclusion update path와 남은 render copy path 쪽이다. 데모 전에는 sample static / dynamic exclusion split처럼 visual output과 core policy를 건드리지 않는 작업이 가장 안전하다. render 쪽은 `ViewInterface::GetGlyphs()` copy path 분석과 incremental layout signature를 작은 커밋으로 이어갈 수 있다.
+이번 구현으로 sample-level **static / dynamic exclusion split**도 1차 완료됐다. sample은 static title / drop cap / fixed columns cache와 dynamic orb / overlay cache를 분리하고, combined vector를 member로 재사용한다.
+
+이제 다음 구조 최적화 후보는 core layout cache와 남은 render copy path 쪽이다. render 쪽은 `ViewInterface::GetGlyphs()` copy path 분석과 incremental layout signature를 작은 커밋으로 이어갈 수 있고, exclusion 쪽은 core sorted exclusion cache를 데모 후 후보로 검토하는 것이 좋다.
 
 다음 세션에서 구조 최적화를 시작한다면 이 문서와 `15-current-optimization-status.ko.md`를 먼저 읽고, 위 후보 중 demo risk가 낮은 항목부터 작은 커밋으로 진행하는 것을 권장한다.

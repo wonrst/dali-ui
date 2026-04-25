@@ -250,6 +250,7 @@ private:
 
     CreateScene(window);
     CreateTextSurface();
+    RebuildStaticExclusionRegions();
     CreateOverlayTextBlocks();
     CreateMovingOrbs();
     ApplyTextStyle();
@@ -582,6 +583,54 @@ private:
     AppendTitleLineExclusion(regions, TITLE_EXCLUSION_LINE_2_WIDTH, 2u);
   }
 
+  void RebuildStaticExclusionRegions()
+  {
+    mStaticExclusionRegions.Clear();
+    mStaticExclusionRegions.Reserve(5u);
+
+    AppendTitleExclusionRegions(mStaticExclusionRegions);
+    mStaticExclusionRegions.PushBack(GetDropCapExclusionRect());
+
+    for(uint32_t index = 0u; index < mFixedColumnBounds.Count(); ++index)
+    {
+      mStaticExclusionRegions.PushBack(mFixedColumnBounds[index]);
+    }
+  }
+
+  void RebuildDynamicExclusionRegions()
+  {
+    const uint32_t activeOrbCount = std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size()));
+
+    mDynamicExclusionRegions.Clear();
+    mDynamicExclusionRegions.Reserve((activeOrbCount * ORB_EXCLUSION_BAND_COUNT) + static_cast<uint32_t>(mOverlayTextBlocks.size()));
+
+    for(uint32_t orbIndex = 0u; orbIndex < activeOrbCount; ++orbIndex)
+    {
+      AppendOrbExclusionRegions(mDynamicExclusionRegions, mOrbs[orbIndex]);
+    }
+
+    for(uint32_t blockIndex = 0u; blockIndex < mOverlayTextBlocks.size(); ++blockIndex)
+    {
+      mDynamicExclusionRegions.PushBack(GetOverlayTextExclusionRect(mOverlayTextBlocks[blockIndex]));
+    }
+  }
+
+  void RebuildCombinedExclusionRegions()
+  {
+    mCombinedExclusionRegions.Clear();
+    mCombinedExclusionRegions.Reserve(mStaticExclusionRegions.Count() + mDynamicExclusionRegions.Count());
+
+    for(uint32_t index = 0u; index < mStaticExclusionRegions.Count(); ++index)
+    {
+      mCombinedExclusionRegions.PushBack(mStaticExclusionRegions[index]);
+    }
+
+    for(uint32_t index = 0u; index < mDynamicExclusionRegions.Count(); ++index)
+    {
+      mCombinedExclusionRegions.PushBack(mDynamicExclusionRegions[index]);
+    }
+  }
+
   void ApplyExclusionRegions()
   {
     ++mApplyExclusionCallCount;
@@ -597,27 +646,10 @@ private:
       return;
     }
 
-    Dali::Vector<Rect<float>> regions;
-    AppendTitleExclusionRegions(regions);
-    regions.PushBack(GetDropCapExclusionRect());
+    RebuildDynamicExclusionRegions();
+    RebuildCombinedExclusionRegions();
 
-    for(uint32_t index = 0u; index < mFixedColumnBounds.Count(); ++index)
-    {
-      regions.PushBack(mFixedColumnBounds[index]);
-    }
-
-    for(uint32_t orbIndex = 0u; orbIndex < std::min<uint32_t>(mActiveOrbCount, static_cast<uint32_t>(mOrbs.size())); ++orbIndex)
-    {
-      const MovingOrb& orb = mOrbs[orbIndex];
-      AppendOrbExclusionRegions(regions, orb);
-    }
-
-    for(uint32_t blockIndex = 0u; blockIndex < mOverlayTextBlocks.size(); ++blockIndex)
-    {
-      regions.PushBack(GetOverlayTextExclusionRect(mOverlayTextBlocks[blockIndex]));
-    }
-
-    mTextVisualizer.SetExclusionRegions(regions);
+    mTextVisualizer.SetExclusionRegions(mCombinedExclusionRegions);
     mHasAppliedExclusionRegions  = true;
     ++mAppliedExclusionUpdateCount;
     ++mSetExclusionRegionsCallCount;
@@ -819,6 +851,9 @@ private:
   TextVisualizer                        mTextVisualizer;
   TextVisualizer                        mDropCapText;
   Dali::Vector<Rect<float>>             mFixedColumnBounds;
+  Dali::Vector<Rect<float>>             mStaticExclusionRegions;
+  Dali::Vector<Rect<float>>             mDynamicExclusionRegions;
+  Dali::Vector<Rect<float>>             mCombinedExclusionRegions;
   std::vector<OverlayTextBlock>         mOverlayTextBlocks;
   std::vector<MovingOrb>                mOrbs;
   Timer                                 mTimer;

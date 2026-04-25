@@ -32,10 +32,11 @@
 - `Move TextVisualizer glyph layout cache into PreparedText`
 - `Precompute TextVisualizer renderer glyph positions`
 - `Reduce TextVisualizer redundant render data update`
+- `Split TextVisualizer sample static and dynamic exclusions`
 
 이번 작업 포함 최신 커밋:
 
-- `Reduce TextVisualizer redundant render data update`
+- `Split TextVisualizer sample static and dynamic exclusions`
 
 최근 최적화 상태:
 
@@ -56,6 +57,7 @@
 - `PreparedText`가 stable glyph layout cache를 보관하고 `LayoutGlyphs()`가 이를 재사용한다.
 - `AtlasViewAdapter`가 renderer glyph positions를 layout 연결 시점에 미리 계산하고 `GetGlyphs()` render path에서 재사용한다.
 - `AtlasRendererBridge::UpdateRenderData()`는 full render data vector build 대신 lightweight validation + renderer ensure 역할로 축소됐다.
+- performance sample은 static exclusions와 dynamic exclusions를 분리하고 combined exclusion vector를 member로 재사용한다.
 
 현재 해석:
 
@@ -76,6 +78,7 @@
 - performance demo sample은 기본 상태에서 FPS만 갱신하고 detailed counters는 만들지 않는다.
 - performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
 - moving orb exclusion은 orb 하나당 `11`개의 ellipse band를 사용한다.
+- static title / drop cap / fixed column exclusions는 sample 초기화 시 cache되고, moving orb / overlay text exclusions만 tick마다 dynamic cache로 rebuild된다.
 - body text는 title origin부터 status 영역 위까지 확장된 surface에서 layout된다.
 - title은 word-level exclusion으로 body text가 글자 형상에 더 가깝게 회피한다.
 - moving orb는 title 영역까지 포함한 확장 surface 안에서 이동한다.
@@ -674,29 +677,29 @@ basic word wrap 이후 `LayoutGlyphs()`는 glyph advance, glyph width, prefix ad
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Precompute renderer glyph positions in `AtlasViewAdapter`
+### A. Incremental `LayoutResult` signature
 
 이유:
 
-- `ViewInterface::GetGlyphs()`가 render path에서 glyph position을 다시 계산한다.
-- line metrics cache lookup이 glyph마다 발생한다.
-- layout result가 바뀐 시점에 renderer positions를 미리 만들면 render path를 더 가볍게 만들 수 있다.
+- layout unchanged render skip을 위해 현재 `LayoutResult::CalculateSignature()`가 placement 전체를 scan한다.
+- layout placement push 시 signature를 함께 누적하면 별도 full scan 비용을 줄일 수 있다.
+- public API 영향 없이 internal `LayoutResult` 확장으로 접근 가능하다.
 
-### B. Sample static/dynamic exclusion split
-
-이유:
-
-- title / drop cap / fixed columns 같은 static exclusions와 orb / overlay dynamic exclusions가 매 tick 다시 합쳐진다.
-- core API를 바꾸지 않고 sample update path를 줄일 수 있다.
-- 수요일 데모 전 risk가 낮다.
-
-### C. Analyze / reduce redundant `UpdateRenderData()`
+### B. `ViewInterface::GetGlyphs()` copy path 분석
 
 이유:
 
-- `UpdateRenderData()`가 만든 vector는 현재 `AtlasRenderer::Render()`의 직접 입력으로 쓰이지 않는다.
-- `Render()`는 `ViewInterface::GetGlyphs()`로 glyphs / positions를 다시 얻는다.
-- render dirty clear success condition과 분리해 줄일 수 있는지 분석할 가치가 있다.
+- renderer glyph position cache와 lightweight `UpdateRenderData()` 적용 후에도 render path의 glyph info copy는 남아 있다.
+- `Text::ViewInterface` contract를 유지하면서 adapter / view interface 경계에서 줄일 수 있는지 분석할 가치가 있다.
+- `AtlasRenderer` 수정이 필요하면 데모 후 작업으로 분리한다.
+
+### C. Core sorted exclusion cache 분석
+
+이유:
+
+- sample static / dynamic split은 완료됐지만 core layout pass에서는 combined exclusion vector를 매번 y-sort한다.
+- `TextVisualizerImpl`에 sorted exclusion cache를 둘 수 있으면 layout pass 시작 비용을 더 줄일 수 있다.
+- public API 없이 internal boundary에서 처리 가능한지 검토가 필요하다.
 
 ### D. Advanced word / cluster line break quality
 
