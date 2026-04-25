@@ -34,10 +34,13 @@
 - `Reduce TextVisualizer redundant render data update`
 - `Split TextVisualizer sample static and dynamic exclusions`
 - `Add TextVisualizer experimental sample`
+- `Analyze TextVisualizer atlas render update cost`
+- `Clean up TextVisualizer performance sample update path`
+- `Start TextVisualizer render optimization phase 2`
 
 이번 작업 포함 최신 커밋:
 
-- `Add TextVisualizer experimental sample`
+- `Start TextVisualizer render optimization phase 2`
 
 최근 최적화 상태:
 
@@ -60,6 +63,11 @@
 - `AtlasRendererBridge::UpdateRenderData()`는 full render data vector build 대신 lightweight validation + renderer ensure 역할로 축소됐다.
 - performance sample은 static exclusions와 dynamic exclusions를 분리하고 combined exclusion vector를 member로 재사용한다.
 - `text-visualizer-experimental-example.cpp`가 추가되어 기존 `text-experimental-example.cpp`의 visual simulation을 `TextVisualizer`로 비교할 수 있다.
+- `docs/text-visualizer/18-atlas-render-update-cost-analysis.ko.md`에서 `AtlasRenderer::Render()` full rebuild 비용을 분석했다.
+- Phase 1 stable branch는 별도로 보존됐고, 현재 작업은 Phase 2 render optimization으로 넘어간다.
+- Phase 2 primary target은 text content가 stable하고 exclusion / layout / glyph positions만 자주 바뀌는 layout-dynamic workload다.
+- content-dynamic ASCII raster / terminal-like workload는 Phase 2 primary target이 아니며 별도 renderer/cache 전략 후보로 둔다.
+- `docs/text-visualizer/19-render-optimization-phase2-plan.ko.md`에서 `TextVisualizerGlyphRenderer` prototype 방향을 시작점으로 잡았다.
 
 현재 해석:
 
@@ -707,42 +715,71 @@ render mode:
 - `TextVisualizer` word wrap이 monospace grid rendering에서 기대한 고정 셀 느낌을 충분히 유지하는지
 - 추후 fixed-cell / monospace-preserve layout option이 필요한지
 
-## 20. 다음 추천 작업
+## 20. Phase 2 시작 상태
+
+Phase 2의 목표는 layout 이후 render update 비용을 줄이는 것이다.
+
+Primary workload:
+
+- text content stable
+- glyph sequence stable
+- font / font size stable
+- moving exclusions
+- layout result 변경
+- glyph positions 변경
+- render output update 필요
+
+Non-primary workload:
+
+- text content가 매 frame 바뀌는 ASCII raster / terminal-like dynamic text
+- `SetText()` / prepare / shaping / string rebuild 자체가 dominant한 workload
+
+현재 결론:
+
+- Phase 1은 prepare / layout / adapter cache를 상당 부분 최적화했다.
+- 남은 큰 병목 후보는 `Text::AtlasRenderer::Render()`의 full rebuild path다.
+- `AtlasRenderer`는 `Label` / `InputField` / 기존 text pipeline과 공유되므로 바로 수정하지 않는다.
+- Phase 2 첫 방향은 `TextVisualizer` 전용 lightweight renderer prototype이다.
+- 추천 이름은 `TextVisualizerGlyphRenderer`다.
+- 첫 구현 전 `AtlasGlyphManager`, `AtlasMeshFactory`, `VertexBuffer`, `Geometry` reuse 가능성을 조사해야 한다.
+
+## 21. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Incremental `LayoutResult` signature
+### A. Inspect TextVisualizer lightweight renderer dependencies
 
 이유:
 
-- layout unchanged render skip을 위해 현재 `LayoutResult::CalculateSignature()`가 placement 전체를 scan한다.
-- layout placement push 시 signature를 함께 누적하면 별도 full scan 비용을 줄일 수 있다.
-- public API 영향 없이 internal `LayoutResult` 확장으로 접근 가능하다.
+- Phase 2의 첫 목표는 `TextVisualizerGlyphRenderer` prototype 가능성을 확인하는 것이다.
+- `AtlasGlyphManager` / `AtlasMeshFactory` / atlas slot / shader / texture path 접근성이 먼저 확인돼야 한다.
+- `text-atlas-renderer.*`를 바로 수정하지 않고 필요한 internal dependency를 문서화할 수 있다.
+- public API 영향이 없다.
 
-### B. `ViewInterface::GetGlyphs()` copy path 분석
-
-이유:
-
-- renderer glyph position cache와 lightweight `UpdateRenderData()` 적용 후에도 render path의 glyph info copy는 남아 있다.
-- `Text::ViewInterface` contract를 유지하면서 adapter / view interface 경계에서 줄일 수 있는지 분석할 가치가 있다.
-- `AtlasRenderer` 수정이 필요하면 데모 후 작업으로 분리한다.
-
-### C. Core sorted exclusion cache 분석
+### B. Add `TextVisualizerGlyphRenderer` skeleton
 
 이유:
 
-- sample static / dynamic split은 완료됐지만 core layout pass에서는 combined exclusion vector를 매번 y-sort한다.
-- `TextVisualizerImpl`에 sorted exclusion cache를 둘 수 있으면 layout pass 시작 비용을 더 줄일 수 있다.
-- public API 없이 internal boundary에서 처리 가능한지 검토가 필요하다.
+- dependency 조사 후 새 renderer class의 output actor lifecycle skeleton을 별도 커밋으로 만들 수 있다.
+- active rendering path에 연결하지 않으면 회귀 위험이 낮다.
+- empty state UTC부터 시작할 수 있다.
 
-### D. Advanced word / cluster line break quality
+### C. Prototype geometry-only update path
 
 이유:
 
-- 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
-- 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
+- Phase 2의 핵심 가치는 glyph identity가 stable하고 positions만 변하는 경우 full render rebuild를 피하는 것이다.
+- 같은 atlas pages / same glyph sequence 조건에서 vertex buffer만 update할 수 있는지 검증해야 한다.
+- 기존 `AtlasRenderer` path는 fallback으로 유지한다.
 
-## 21. 다음 커밋 금지 사항
+### D. Keep layout-side follow-ups separate
+
+이유:
+
+- incremental `LayoutResult` signature, core sorted exclusion cache, advanced line break quality는 여전히 후보지만 Phase 2의 첫 축은 render update다.
+- layout optimization과 renderer prototype을 한 커밋에 섞지 않는다.
+
+## 22. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -756,7 +793,7 @@ render mode:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 22. 최신 성능 경로 구조
+## 23. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -790,7 +827,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 23. Compact 이후 복구 지침
+## 24. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
@@ -800,4 +837,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 core redundant exclusion update policy 또는 line-level line height 적용 여부를 검토하는 것이다.
+현재 가장 자연스러운 다음 작업은 `Inspect TextVisualizer lightweight renderer dependencies`이다. 새 세션에서는 이 문서 다음에 `19-render-optimization-phase2-plan.ko.md`와 `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
