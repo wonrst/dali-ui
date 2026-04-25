@@ -59,7 +59,7 @@ flowchart LR
 | output actor/mesh regeneration | output actor 재사용 여부와 별개로 내부 child mesh actor/renderer update가 발생할 수 있다 | actor/renderer 구조가 커질수록 비용 증가 가능 | output actor/mesh actor 재사용 정책 조사 | 중간 |
 | `GetLineBaselineOffset()`의 same-line scan | `AtlasViewAdapter::GetRendererGlyphPosition()`가 glyph마다 같은 line의 glyph placements를 다시 훑는다 | 렌더 직전 좌표 보정에서 line당 반복 scan이 발생한다 | line baseline cache 추가 | 높음 |
 | exclusion interval 계산 시 line마다 모든 bounds scan | 기존에는 `BuildAvailableIntervals()`가 line마다 모든 exclusion region을 확인했다. 현재는 layout pass 시작 시 y축 기준 sorted cache를 만들고 line band와 겹칠 수 있는 후보만 검사한다 | bounds 수와 line 수가 모두 커질수록 비용이 커졌고, 1차 최적화 후에는 per-line 후보 scan 비용이 줄었다 | 더 큰 bounds 수에서는 spatial index / partial relayout 검토 | 1차 완료 |
-| `Dali::Vector` / `std::vector` 재할당 | layout 결과와 render data가 `Clear()` 후 반복 push-back 된다 | 긴 텍스트에서 allocation/reallocation이 잦을 수 있다 | glyph count 기반 reserve/preallocate | 중간 |
+| `Dali::Vector` / `std::vector` 재할당 | 기존에는 layout 결과와 render data가 `Clear()` 후 반복 push-back 됐다. 현재는 glyph / cluster / renderable glyph count 기반 reserve를 적용했다 | 긴 텍스트에서 allocation/reallocation이 잦을 수 있었고, reserve 적용 후 반복 relayout/update에서 capacity 재사용 여지가 생겼다 | 더 큰 효과가 필요하면 `LayoutResult` object reuse / renderer internal allocation 조사 | 1차 완료 |
 | logging / diagnostics overhead | 현재 `DALI_LOG_ERROR`와 diagnostics getter가 살아 있다 | sample/benchmark 시 관측값을 왜곡할 수 있다 | debug level 또는 compile-time flag로 낮춤 | 높음 |
 | `render dirty` 미해제 구조 | 현재는 성공 후에도 clear하지 않는다 | relayout이 다시 오면 render path가 계속 열린 상태다 | 별도 커밋에서 clear 조건 도입 | 중간 |
 | sample timer tick과 actual render frame mismatch | 16ms timer가 draw frame과 항상 맞지 않는다 | update 요청 수와 실제 frame rate 체감이 달라질 수 있다 | frame callback 또는 throttled status update 검토 | 낮음 |
@@ -114,8 +114,11 @@ flowchart LR
 
 ### E. `LayoutResult` / render data reserve
 
-- 현재 `LayoutResult` 내부 `Dali::Vector`와 `AtlasRendererBridge::Impl::mRenderData`는 반복 push-back 위주다.
-- glyph count를 이미 알고 있으므로 reserve 기반 최적화 여지가 크다.
+- 1차 최적화는 완료됐다.
+- `LayoutResult` 내부 `Dali::Vector`는 line / glyph placement / cluster placement count를 미리 reserve한다.
+- `TextLine.fragments`는 line별 available interval count를 기준으로 reserve한다.
+- `AtlasRendererBridge::Impl::mRenderData`는 renderable glyph count를 기준으로 reserve한다.
+- 결과 정책은 바꾸지 않고 반복 allocation/reallocation 비용만 줄이는 방향이다.
 
 ### F. line baseline cache
 
@@ -622,29 +625,58 @@ flowchart LR
 
 다음 성능 최적화 후보:
 
-- `LayoutResult` / render data reserve
 - `render dirty` clear 조건 도입
 - `SetExclusionRegions()` epsilon compare 또는 upstream unchanged skip 정책
 - layout unchanged 시 render skip
+
+## 진행: layout/render buffer reserve
+
+최근 커밋:
+
+- `Reserve TextVisualizer layout and render buffers`
+
+기존 문제:
+
+- `LayoutResult`의 `lines`, `glyphPlacements`, `clusterPlacements`는 `Clear()` 이후 반복 `PushBack()`으로 채워졌다.
+- 각 `TextLine`의 `fragments`도 line마다 available interval 결과에 따라 반복 `PushBack()`으로 채워졌다.
+- `AtlasRendererBridge::Impl::mRenderData`도 매 render data update마다 clear 후 glyph별 `push_back()`으로 채워졌다.
+- 긴 텍스트와 moving bounds relayout 상황에서는 같은 규모의 layout/render data를 반복 생성하므로 allocation/reallocation 비용이 누적될 수 있다.
+
+변경된 구조:
+
+- `LayoutResult::Reserve()` helper를 추가해 line / glyph placement / cluster placement vector capacity를 미리 확보한다.
+- `LayoutGlyphs()`는 glyph count와 estimated line count를 기준으로 `glyphPlacements`와 `lines`를 reserve한다.
+- `LayoutPlaceholder()`는 cluster count와 estimated line count를 기준으로 `clusterPlacements`와 `lines`를 reserve한다.
+- 각 line의 `TextLine.fragments`는 `availableIntervals.Count()`를 기준으로 reserve한다.
+- `AtlasRendererBridge::UpdateRenderData()`는 renderable glyph count를 기준으로 `mRenderData.reserve()`를 호출한다.
+
+유지한 정책:
+
+- glyph placement / cluster placement 결과는 바꾸지 않는다.
+- line break policy는 바꾸지 않는다.
+- line height / font size semantics는 바꾸지 않는다.
+- exclusion interval algorithm은 바꾸지 않는다.
+- `Renderer::Render()` 호출 정책과 `render dirty` 정책은 바꾸지 않는다.
+
+기대 효과:
+
+- 같은 `LayoutResult` 객체를 반복 재사용하는 relayout path에서 `Dali::Vector` capacity 재사용 가능성이 생긴다.
+- bridge render data는 `std::vector::clear()`가 capacity를 유지하므로 moving bounds update 중 repeated allocation을 줄일 수 있다.
+- 효과는 glyph count / line count / renderable glyph count가 클수록 커질 수 있다.
+
+남은 한계 / 확인 필요:
+
+- `Dali::Vector::Clear()` 이후 capacity 유지 정책은 현재 사용 패턴상 reserve API를 믿고 사용하지만, 장기적으로 정확한 retention 정책 확인이 필요하다.
+- `TextLine.fragments` reserve는 line-local copy/move 과정의 실제 효과를 더 확인해야 한다.
+- render data vector capacity가 long-running moving bounds 상황에서 기대대로 유지되는지 sample/profiler 관찰이 필요하다.
+- renderer 내부 mesh / actor / atlas allocation은 이번 변경 범위 밖에 남아 있다.
+- 더 큰 최적화가 필요하면 `LayoutResult` object reuse 방식, partial relayout, geometry-only update를 별도로 검토해야 한다.
 
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Reserve / preallocate layout and render buffers
-
-이유:
-
-- exclusion scan 1차 최적화 이후에는 반복 allocation 비용을 줄이는 안전한 성능 커밋이 다음 후보가 될 수 있다.
-- glyph count / cluster count를 알고 있으므로 `LayoutResult`와 bridge render data에 reserve 여지가 있다.
-- public API나 render lifecycle을 건드리지 않고 작게 가져갈 수 있다.
-
-주의:
-
-- buffer reserve와 layout 정책 변경을 섞지 않는다.
-- `Renderer::Render()` 호출 정책이나 `render dirty` clear는 건드리지 않는다.
-
-### B. Add render dirty clear condition
+### A. Add render dirty clear condition
 
 이유:
 
@@ -656,7 +688,7 @@ flowchart LR
 - 최소한 `UpdateRenderData()` 성공, `Renderer::Render()` 성공, output actor attach/parent 상태, glyph count 일관성을 함께 확인해야 한다.
 - 별도 커밋으로만 다룬다.
 
-### C. Redundant exclusion region update skip
+### B. Redundant exclusion region update skip
 
 이유:
 
@@ -668,7 +700,7 @@ flowchart LR
 - core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
 - sample-level upstream skip과 core API policy를 분리해서 검토한다.
 
-### D. Layout unchanged 시 render skip
+### C. Layout unchanged 시 render skip
 
 이유:
 
@@ -680,21 +712,21 @@ flowchart LR
 - float 비교 정책, layout hash/version, glyph placement 비교 기준이 필요하다.
 - `render dirty` clear 조건보다 뒤에서 다루는 것이 안전하다.
 
-### E. Add line-level metrics if needed
+### D. Add line-level metrics if needed
 
 이유:
 
 - 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
 - `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
 
-### F. Clarify FontSize unit and conversion
+### E. Clarify FontSize unit and conversion
 
 이유:
 
 - public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
 - line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
 
-### G. Improve word/cluster line break
+### F. Improve word/cluster line break
 
 이유:
 
@@ -705,7 +737,8 @@ flowchart LR
 - line height 품질은 이제 한 단계 올라왔다.
 - `FontSize` pixel size와 relative line height 정책은 고정됐다.
 - exclusion interval scanning의 1차 최적화는 완료됐다.
-- 다음 성능 후보는 reserve / preallocate처럼 안전한 allocation 비용 절감 또는 render dirty clear처럼 별도 correctness 조건이 필요한 작업으로 나눠서 다룬다.
+- layout/render buffer reserve의 1차 최적화는 완료됐다.
+- 다음 성능 후보는 render dirty clear처럼 별도 correctness 조건이 필요한 작업과 redundant update/layout unchanged skip처럼 float/layout 비교 정책이 필요한 작업으로 나눠서 다룬다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 
 ## 금지 사항

@@ -310,7 +310,9 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
   uint32_t                     currentCluster         = 0u;
   float                        currentY               = 0.0f;
   const uint32_t               maxLineCount           = std::max(1u, clusterCount + static_cast<uint32_t>(exclusionRegions.Count()) + 1u);
+  const uint32_t               estimatedLineCount     = std::min(maxLineCount, clusterCount);
   const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
+  result.Reserve(estimatedLineCount, 0u, clusterCount);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentCluster < clusterCount; ++lineIndex)
   {
@@ -319,6 +321,7 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
     TextLine textLine;
     textLine.y      = currentY;
     textLine.height = effectiveLineHeight;
+    textLine.fragments.Reserve(availableIntervals.Count());
 
     bool lineHasPlacement = false;
 
@@ -396,7 +399,9 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
   uint32_t                     currentGlyph           = 0u;
   float                        currentY               = 0.0f;
   const uint32_t               maxLineCount           = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
+  const uint32_t               estimatedLineCount     = std::min(maxLineCount, glyphCount);
   const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
+  result.Reserve(estimatedLineCount, glyphCount, 0u);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentGlyph < glyphCount; ++lineIndex)
   {
@@ -405,6 +410,7 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     TextLine textLine;
     textLine.y      = currentY;
     textLine.height = effectiveLineHeight;
+    textLine.fragments.Reserve(availableIntervals.Count());
 
     bool lineHasPlacement = false;
 

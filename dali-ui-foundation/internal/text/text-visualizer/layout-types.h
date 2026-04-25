@@ -97,6 +97,13 @@ struct LayoutResult
     height = 0.0f;
   }
 
+  void Reserve(uint32_t lineCount, uint32_t glyphPlacementCount, uint32_t clusterPlacementCount)
+  {
+    lines.Reserve(lineCount);
+    glyphPlacements.Reserve(glyphPlacementCount);
+    clusterPlacements.Reserve(clusterPlacementCount);
+  }
+
   bool Empty() const
   {
     return lines.Empty() && clusterPlacements.Empty() && glyphPlacements.Empty();

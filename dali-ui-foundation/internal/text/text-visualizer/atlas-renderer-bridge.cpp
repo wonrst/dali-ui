@@ -268,9 +268,10 @@ bool AtlasRendererBridge::UpdateRenderData()
     return false;
   }
 
-  mImpl->Clear();
-
   const uint32_t renderableGlyphCount = mAdapter->GetRenderableGlyphCount();
+  mImpl->Clear();
+  mImpl->mRenderData.reserve(renderableGlyphCount);
+
   for(uint32_t index = 0u; index < renderableGlyphCount; ++index)
   {
     GlyphPlacement  placement;
