@@ -54,6 +54,7 @@ const Dali::Vector<Text::CharacterIndex>& EmptyCharacterIndices()
 AtlasViewAdapter::AtlasViewAdapter()
 : mPreparedText(nullptr),
   mLayoutResult(nullptr),
+  mLineMetricsCache(),
   mControlSize(Vector2::ZERO),
   mLayoutSize(Vector2::ZERO),
   mTextColor(0.0f, 0.0f, 0.0f, 1.0f)
@@ -63,12 +64,14 @@ AtlasViewAdapter::AtlasViewAdapter()
 void AtlasViewAdapter::SetPreparedText(const PreparedText* preparedText)
 {
   mPreparedText = preparedText;
+  RebuildLineMetricsCache();
 }
 
 void AtlasViewAdapter::SetLayoutResult(const LayoutResult* layoutResult)
 {
   mLayoutResult = layoutResult;
   mLayoutSize   = (nullptr != layoutResult) ? Vector2(layoutResult->width, layoutResult->height) : Vector2::ZERO;
+  RebuildLineMetricsCache();
 }
 
 void AtlasViewAdapter::SetControlSize(const Vector2& controlSize)
@@ -85,9 +88,10 @@ void AtlasViewAdapter::Clear()
 {
   mPreparedText = nullptr;
   mLayoutResult = nullptr;
-  mControlSize  = Vector2::ZERO;
-  mLayoutSize   = Vector2::ZERO;
-  mTextColor    = Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+  mLineMetricsCache.clear();
+  mControlSize = Vector2::ZERO;
+  mLayoutSize  = Vector2::ZERO;
+  mTextColor   = Vector4(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 bool AtlasViewAdapter::GetGlyphPlacement(uint32_t index, GlyphPlacement& placement) const
@@ -123,11 +127,23 @@ bool AtlasViewAdapter::GetRendererGlyphPosition(uint32_t index, Vector2& positio
   }
 
   // AtlasRenderer expects the glyph quad origin, not the pen position stored by LayoutResult.
-  const float baselineOffset = (nullptr != mPreparedText) && mPreparedText->HasLineMetrics()
-                                 ? mPreparedText->GetLineMetrics().baselineOffset
-                                 : GetLineBaselineOffset(placement.y);
-  position.x                 = placement.x + glyphInfo.xBearing;
-  position.y                 = placement.y + baselineOffset - glyphInfo.yBearing;
+  TextLineMetrics lineMetrics;
+  float           baselineOffset = 0.0f;
+  if(GetCachedLineMetrics(placement.y, lineMetrics))
+  {
+    baselineOffset = lineMetrics.baselineOffset;
+  }
+  else if((nullptr != mPreparedText) && mPreparedText->HasLineMetrics())
+  {
+    baselineOffset = mPreparedText->GetLineMetrics().baselineOffset;
+  }
+  else
+  {
+    baselineOffset = GetLineBaselineOffset(placement.y);
+  }
+
+  position.x = placement.x + glyphInfo.xBearing;
+  position.y = placement.y + baselineOffset - glyphInfo.yBearing;
 
   return std::isfinite(position.x) && std::isfinite(position.y);
 }
@@ -177,6 +193,11 @@ uint32_t AtlasViewAdapter::GetRenderableGlyphCount() const
   return HasRenderableGlyphs() ? GetGlyphPlacementCount() : 0u;
 }
 
+uint32_t AtlasViewAdapter::GetLineMetricsCacheCount() const
+{
+  return static_cast<uint32_t>(mLineMetricsCache.size());
+}
+
 const Vector2& AtlasViewAdapter::GetControlSize() const
 {
   return (mControlSize != Vector2::ZERO) ? mControlSize : mLayoutSize;
@@ -220,6 +241,77 @@ const Text::Character* AtlasViewAdapter::GetTextBuffer() const
   }
 
   return mPreparedText->GetCharacters().Begin();
+}
+
+void AtlasViewAdapter::RebuildLineMetricsCache()
+{
+  mLineMetricsCache.clear();
+
+  if((nullptr == mPreparedText) || (nullptr == mLayoutResult) || !mPreparedText->HasGlyphMetrics() || mLayoutResult->lines.Empty())
+  {
+    return;
+  }
+
+  const Dali::Vector<Text::GlyphInfo>& glyphs = mPreparedText->GetGlyphs();
+  mLineMetricsCache.reserve(mLayoutResult->lines.Count());
+
+  for(Vector<TextLine>::ConstIterator lineIt = mLayoutResult->lines.Begin(), lineEndIt = mLayoutResult->lines.End();
+      lineIt != lineEndIt; ++lineIt)
+  {
+    TextLineMetrics metrics;
+
+    for(Vector<TextLineFragment>::ConstIterator fragmentIt = lineIt->fragments.Begin(), fragmentEndIt = lineIt->fragments.End();
+        fragmentIt != fragmentEndIt; ++fragmentIt)
+    {
+      for(uint32_t glyphIndex = fragmentIt->glyphStart; glyphIndex < fragmentIt->glyphEnd && glyphIndex < glyphs.Count(); ++glyphIndex)
+      {
+        const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+        metrics.ascender             = std::max(metrics.ascender, glyph.yBearing);
+        metrics.descender            = std::max(metrics.descender, std::max(0.0f, glyph.height - glyph.yBearing));
+        metrics.valid                = true;
+      }
+    }
+
+    if(!metrics.valid && mPreparedText->HasLineMetrics())
+    {
+      const PreparedText::LineMetrics& preparedMetrics = mPreparedText->GetLineMetrics();
+      metrics.ascender                                 = preparedMetrics.ascender;
+      metrics.descender                                = preparedMetrics.descender;
+      metrics.baselineOffset                           = preparedMetrics.baselineOffset;
+      metrics.naturalLineHeight                        = preparedMetrics.naturalLineHeight;
+      metrics.valid                                    = preparedMetrics.naturalLineHeight > 0.0f || preparedMetrics.baselineOffset > 0.0f;
+    }
+    else if(metrics.valid)
+    {
+      const float lineGap       = mPreparedText->HasLineMetrics() ? mPreparedText->GetLineMetrics().lineGap : 0.0f;
+      metrics.baselineOffset    = metrics.ascender;
+      metrics.naturalLineHeight = metrics.ascender + metrics.descender + lineGap;
+    }
+
+    if(metrics.valid)
+    {
+      LineMetricsCache cache;
+      cache.lineTop = lineIt->y;
+      cache.metrics = metrics;
+      mLineMetricsCache.push_back(cache);
+    }
+  }
+}
+
+bool AtlasViewAdapter::GetCachedLineMetrics(float lineTop, TextLineMetrics& metrics) const
+{
+  constexpr float LINE_TOLERANCE = 0.001f;
+
+  for(std::vector<LineMetricsCache>::const_iterator it = mLineMetricsCache.begin(), endIt = mLineMetricsCache.end(); it != endIt; ++it)
+  {
+    if(std::fabs(it->lineTop - lineTop) <= LINE_TOLERANCE && it->metrics.valid)
+    {
+      metrics = it->metrics;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 float AtlasViewAdapter::GetLineBaselineOffset(float lineTop) const

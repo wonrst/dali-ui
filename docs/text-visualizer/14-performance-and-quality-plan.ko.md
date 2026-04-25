@@ -830,6 +830,61 @@ render 성공 후:
 - color / style 변화가 계속 force render로 확실히 분리되는지 확인
 - future per-glyph color / style 도입 시 signature에 포함할 항목 재검토
 
+## 진행: line-level metrics cache
+
+최근 커밋:
+
+- `Add TextVisualizer line-level metrics cache`
+
+목표:
+
+- `PreparedText` 전체 단위 metrics 하나만 쓰는 한계를 줄인다.
+- fallback font / emoji / mixed script가 특정 line에만 섞이는 경우, renderer glyph position 보정에서 line별 baseline 후보를 우선 사용할 수 있게 한다.
+- line break policy, line height progression, public API는 변경하지 않는다.
+
+추가된 구조:
+
+- `TextLineMetrics` 구조를 추가했다.
+  - `ascender`
+  - `descender`
+  - `baselineOffset`
+  - `naturalLineHeight`
+  - `valid`
+- `AtlasViewAdapter`가 `LayoutResult::lines`와 `PreparedText::glyphs`를 바탕으로 line-level metrics cache를 만든다.
+- cache key는 현재 line의 `lineTop` 값이며, lookup은 `0.001f` tolerance를 사용한다.
+
+cache build 정책:
+
+- `SetPreparedText()` 또는 `SetLayoutResult()` 호출 시 cache를 다시 만든다.
+- 각 `TextLine`의 fragment가 가리키는 glyph 범위를 scan한다.
+- line별 계산은 glyph metrics 기반이다.
+  - `ascender = max(yBearing)`
+  - `descender = max(height - yBearing)`
+  - `baselineOffset = ascender`
+  - `naturalLineHeight = ascender + descender + PreparedText::LineMetrics.lineGap`
+- line에 유효한 glyph metric이 없으면 `PreparedText::LineMetrics` fallback을 사용할 수 있다.
+
+renderer position 우선순위:
+
+1. `AtlasViewAdapter` line-level metrics cache
+2. `PreparedText::LineMetrics.baselineOffset`
+3. 기존 same-line scan fallback
+4. `0.0f`
+
+의미:
+
+- renderer 좌표 계산은 이제 line별 glyph metrics를 우선 반영할 수 있다.
+- fallback font / emoji가 일부 line에만 섞인 경우 baseline 품질 개선의 기반이 생겼다.
+- 이번 커밋은 line별 `naturalLineHeight`를 layout y progression에 반영하지 않는다.
+
+확인 필요:
+
+- line-level `naturalLineHeight`를 `LayoutGlyphs()` y progression에도 반영할지 여부
+- line마다 높이가 달라지는 variable line height 정책을 지원할지 여부
+- fallback font / emoji가 많은 line에서 실제 visual improvement 확인
+- cache build cost와 repeated scan 제거 이득의 균형
+- line metrics cache가 장기적으로 adapter에 남아야 할지, `LayoutResult`로 이동해야 할지
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
@@ -846,12 +901,12 @@ render 성공 후:
 - core API에 epsilon compare를 바로 넣으면 layout correctness 정책이 흐려질 수 있다.
 - public behavior를 바꾸지 않는 방향으로 별도 검토한다.
 
-### B. Add line-level metrics if needed
+### B. Line-level line height 검토
 
 이유:
 
-- 지금은 `PreparedText` level metrics 하나만 쓰므로 line별 fallback font / emoji 혼합 정확도가 부족하다.
-- `FontSize` / relative line height 의미를 먼저 고정했으므로, 다음은 line-level metrics 필요성을 보는 쪽이 자연스럽다.
+- line-level baseline cache는 들어갔지만 layout y progression은 여전히 `PreparedText` level line height를 사용한다.
+- 다음 단계는 line-level `naturalLineHeight`를 실제 layout height에 반영할지 검토하는 것이다.
 
 ### C. Clarify FontSize unit and conversion
 
@@ -875,6 +930,7 @@ render 성공 후:
 - render dirty clear의 1차 조건은 도입됐다.
 - performance sample에는 exclusion update threshold가 도입됐다.
 - layout unchanged render skip의 1차 조건은 도입됐다.
+- line-level metrics cache의 1차 적용은 완료됐다.
 - 다음 성능 후보는 core redundant update policy, partial relayout, geometry-only update처럼 더 큰 정책 판단이 필요한 작업이다.
 - 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
 

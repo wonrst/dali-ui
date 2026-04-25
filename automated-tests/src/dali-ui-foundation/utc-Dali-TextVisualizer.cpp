@@ -700,6 +700,70 @@ int UtcDaliTextVisualizerAtlasViewAdapterRendererGlyphPositionFallbackWithoutMet
   END_TEST;
 }
 
+int UtcDaliTextVisualizerAtlasViewAdapterLineMetricsCacheBuildsP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("line metrics cache smoke", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+  Vector2                                          position;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 160.0f, 0.0f, exclusionRegions, layoutResult);
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u && !layoutResult.glyphPlacements.Empty())
+  {
+    DALI_TEST_CHECK(adapter.GetLineMetricsCacheCount() > 0u);
+    DALI_TEST_CHECK(adapter.GetRendererGlyphPosition(0u, position));
+    DALI_TEST_CHECK(std::isfinite(position.x));
+    DALI_TEST_CHECK(std::isfinite(position.y));
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterLineMetricsCacheClearP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("line metrics clear", 20.0f);
+  Dali::Vector<Rect<float>>                        exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 160.0f, 0.0f, exclusionRegions, layoutResult);
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u && !layoutResult.glyphPlacements.Empty())
+  {
+    DALI_TEST_CHECK(adapter.GetLineMetricsCacheCount() > 0u);
+  }
+
+  adapter.Clear();
+  DALI_TEST_EQUALS(adapter.GetLineMetricsCacheCount(), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerAtlasViewAdapterLineMetricsCacheEmptyLayoutP(void)
+{
+  UiTestApplication                                application;
+  Dali::Ui::Internal::TextVisualizer::PreparedText preparedText = CreatePreparedText("line metrics empty", 20.0f);
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter adapter;
+  Vector2                                          position;
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+
+  DALI_TEST_EQUALS(adapter.GetLineMetricsCacheCount(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!adapter.GetRendererGlyphPosition(0u, position));
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerPreparedLineBreakInfoSmokeP(void)
 {
   UiTestApplication application;

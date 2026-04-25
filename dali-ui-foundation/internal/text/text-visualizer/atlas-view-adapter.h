@@ -18,6 +18,9 @@
  *
  */
 
+// EXTERNAL INCLUDES
+#include <vector>
+
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
@@ -55,6 +58,7 @@ public:
   uint32_t GetGlyphCount() const;
   uint32_t GetGlyphPlacementCount() const;
   uint32_t GetRenderableGlyphCount() const;
+  uint32_t GetLineMetricsCacheCount() const;
 
   const Vector2& GetControlSize() const;
   const Vector2& GetLayoutSize() const;
@@ -67,13 +71,22 @@ public:
   const Text::Character*                    GetTextBuffer() const;
 
 private:
+  struct LineMetricsCache
+  {
+    float           lineTop{0.0f};
+    TextLineMetrics metrics;
+  };
+
+  void  RebuildLineMetricsCache();
+  bool  GetCachedLineMetrics(float lineTop, TextLineMetrics& metrics) const;
   float GetLineBaselineOffset(float lineTop) const;
 
-  const PreparedText* mPreparedText;
-  const LayoutResult* mLayoutResult;
-  Vector2             mControlSize;
-  Vector2             mLayoutSize;
-  Vector4             mTextColor;
+  const PreparedText*           mPreparedText;
+  const LayoutResult*           mLayoutResult;
+  std::vector<LineMetricsCache> mLineMetricsCache;
+  Vector2                       mControlSize;
+  Vector2                       mLayoutSize;
+  Vector4                       mTextColor;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

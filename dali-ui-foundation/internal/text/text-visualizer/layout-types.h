@@ -44,6 +44,15 @@ struct TextLineFragment
   float    width{0.0f};
 };
 
+struct TextLineMetrics
+{
+  float ascender{0.0f};
+  float descender{0.0f};
+  float baselineOffset{0.0f};
+  float naturalLineHeight{0.0f};
+  bool  valid{false};
+};
+
 struct TextLine
 {
   float                          y{0.0f};

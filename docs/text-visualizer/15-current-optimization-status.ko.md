@@ -19,16 +19,20 @@
 - `Add TextVisualizer render dirty clear condition`
 - `Add TextVisualizer performance sample exclusion update threshold`
 - `Skip TextVisualizer render when layout is unchanged`
+- `Add TextVisualizer performance sample status toggle`
+- `Add TextVisualizer line-level metrics cache`
 
-이번 작업 이전 최신 커밋:
+이번 작업 포함 최신 커밋:
 
-- `9b3f286` `Add TextVisualizer performance sample exclusion update threshold`
+- `Add TextVisualizer line-level metrics cache`
 
 최근 최적화 상태:
 
 - render dirty clear 조건을 전용 커밋으로 도입했다.
 - performance sample에 exclusion update threshold를 도입했다.
 - layout unchanged render skip을 도입했다.
+- performance sample status text update를 `0` 키로 끄고 켤 수 있게 했다.
+- renderer glyph position 계산에 line-level metrics cache를 우선 사용할 수 있게 했다.
 
 현재 해석:
 
@@ -46,8 +50,9 @@
 - performance demo sample이 존재한다.
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
+- line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `118 tests, 0 failures` 상태다.
+- 전체 `TextVisualizer` UTC는 `121 tests, 0 failures` 상태다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -100,13 +105,21 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 
 - `LayoutGlyphs()`와 `LayoutPlaceholder()`는 natural line height를 사용할 수 있다.
 - explicit line height가 있으면 explicit 값이 우선한다.
-- `AtlasViewAdapter`는 renderer glyph position 계산 시 `baselineOffset`을 우선 사용한다.
+- `AtlasViewAdapter`는 renderer glyph position 계산 시 line-level metrics cache를 먼저 사용한다.
+- line cache가 없으면 `PreparedText::LineMetrics.baselineOffset`을 사용한다.
 - metrics가 없으면 기존 same-line scan fallback을 유지한다.
+
+line-level cache:
+
+- `TextLineMetrics` 구조가 추가됐다.
+- `AtlasViewAdapter`는 `LayoutResult::lines`의 fragment glyph 범위를 scan해 line별 ascender / descender / baselineOffset / naturalLineHeight 후보를 계산한다.
+- cache lookup은 line top 기준이며 `0.001f` tolerance를 사용한다.
+- 현재 cache는 renderer position 보정에만 사용하고, layout y progression은 바꾸지 않는다.
 
 남은 제한:
 
-- 현재는 `PreparedText` level metrics 하나만 사용한다.
-- line별 fallback font / emoji 혼합 정확도는 제한적이다.
+- line별 baseline 보정 기반은 들어갔지만, line별 line height 적용은 아직 없다.
+- line별 fallback font / emoji 혼합 visual improvement는 sample/fixture로 추가 확인이 필요하다.
 - font-system 수준의 ascender / descender / lineGap 직접 조회는 아직 확인 필요다.
 
 ## 5. Exclusion Interval Scan Optimization 현재 상태
@@ -194,7 +207,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 현재 결과:
 
 - targeted UTC passed
-- 전체 `TextVisualizer` UTC: `118 tests, 0 failures`
+- 전체 `TextVisualizer` UTC: `121 tests, 0 failures`
 
 커밋 참고:
 
@@ -206,7 +219,7 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 | 후보 | 현재 상태 | 다음 조치 |
 |---|---|---|
 | diagnostics/log overhead | 정리 완료 | 유지 |
-| line metrics / baseline | 1차 적용 완료 | line-level metrics 검토 |
+| line metrics / baseline | line-level baseline cache 1차 적용 완료 | line-level line height 검토 |
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
@@ -338,7 +351,49 @@ render 성공 후:
 - very large glyph count에서 signature 계산 비용이 skip 이득보다 큰 경우가 있는지
 - future per-glyph color / style 도입 시 signature와 force-render reason 확장 필요 여부
 
-## 12. 다음 추천 작업
+## 12. Line-level Metrics Cache 현재 상태
+
+line-level metrics cache는 `PreparedText` 전체 metrics의 한계를 보완하는 품질 개선 기반이다.
+
+현재 구조:
+
+- `TextLineMetrics`는 ascender / descender / baselineOffset / naturalLineHeight / valid를 가진다.
+- `AtlasViewAdapter`가 non-owning `PreparedText`와 `LayoutResult` 조합을 기준으로 cache를 만든다.
+- `SetPreparedText()` 또는 `SetLayoutResult()`가 호출되면 cache를 rebuild한다.
+- `Clear()`는 cache도 함께 비운다.
+
+계산 정책:
+
+- line fragment의 `glyphStart`부터 `glyphEnd`까지 glyph metrics를 scan한다.
+- `ascender = max(yBearing)`
+- `descender = max(height - yBearing)`
+- `baselineOffset = ascender`
+- `naturalLineHeight = ascender + descender + PreparedText::LineMetrics.lineGap`
+- glyph 기반 metrics를 만들 수 없으면 `PreparedText::LineMetrics` fallback을 사용할 수 있다.
+
+renderer position 우선순위:
+
+1. line-level metrics cache
+2. `PreparedText::LineMetrics.baselineOffset`
+3. 기존 same-line scan fallback
+4. `0.0f`
+
+유지한 정책:
+
+- public API는 추가하지 않았다.
+- line break policy는 변경하지 않았다.
+- layout y progression과 line height semantics는 변경하지 않았다.
+- render dirty clear 조건은 변경하지 않았다.
+
+확인 필요:
+
+- line-level `naturalLineHeight`를 실제 layout height에 반영할지
+- variable line height를 허용할지
+- fallback font / emoji가 많은 line에서 visual improvement가 충분한지
+- cache build 비용과 renderer position fallback scan 제거 이득의 균형
+- cache 위치를 adapter에 유지할지, 장기적으로 `LayoutResult`에 포함할지
+
+## 13. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -349,12 +404,12 @@ render 성공 후:
 - performance sample threshold는 upstream skip 실험으로 완료됐다.
 - core API에 epsilon compare를 넣을지는 layout correctness 정책을 따로 세워야 한다.
 
-### B. Line-level metrics
+### B. Line-level line height
 
 이유:
 
-- 현재는 `PreparedText` level metrics 하나만 사용한다.
-- fallback font / emoji가 섞인 line의 line height / baseline 품질 개선이 필요하다.
+- line-level baseline cache는 들어갔다.
+- fallback font / emoji가 섞인 line의 height 품질을 더 올리려면 line-level `naturalLineHeight`를 layout에 연결할지 검토해야 한다.
 
 ### C. Word / cluster line break quality
 
@@ -363,7 +418,7 @@ render 성공 후:
 - 현재 line break는 glyph advance sequential placement에 가깝다.
 - 실제 텍스트 품질을 올리려면 word / cluster break 후보를 더 정교하게 사용해야 한다.
 
-## 13. 다음 커밋 금지 사항
+## 14. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -377,7 +432,7 @@ render 성공 후:
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 14. 최신 성능 경로 구조
+## 15. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -387,7 +442,8 @@ flowchart LR
   B --> C[LayoutDirty / RenderDirty]
   C --> D[y-sorted exclusion cache]
   D --> E[LayoutGlyphs with reserved buffers]
-  E --> L{Layout signature unchanged}
+  E --> M[Line-level metrics cache]
+  M --> L{Layout signature unchanged}
   L -->|yes| K[Skip render path]
   L -->|no| F[UpdateRenderData with reserved render data]
   F --> G[Renderer::Render]
@@ -403,12 +459,13 @@ flowchart LR
 - `SetExclusionRegions()`는 layout dirty / render dirty를 발생시킨다.
 - layout pass에서 exclusion regions를 y-sorted cache로 준비한다.
 - `LayoutGlyphs()`는 reserved `LayoutResult` buffer를 사용한다.
+- `AtlasViewAdapter`는 renderer position 계산 전 line-level metrics cache를 준비한다.
 - placement-only dirty에서 layout signature가 마지막 render와 같으면 render path를 skip할 수 있다.
 - `UpdateRenderData()`는 renderable glyph count 기반 reserved render data를 사용한다.
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 15. Compact 이후 복구 지침
+## 16. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 
@@ -418,4 +475,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 core redundant exclusion update policy 또는 line-level metrics를 검토하는 것이다.
+현재 가장 자연스러운 다음 작업은 core redundant exclusion update policy 또는 line-level line height 적용 여부를 검토하는 것이다.
