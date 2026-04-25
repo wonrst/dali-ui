@@ -22,10 +22,11 @@
 - `Add TextVisualizer performance sample status toggle`
 - `Add TextVisualizer line-level metrics cache`
 - `Add TextVisualizer TextLine metrics cache`
+- `Replace performance sample labels with TextVisualizer`
 
 이번 작업 포함 최신 커밋:
 
-- `Add TextVisualizer TextLine metrics cache`
+- `Replace performance sample labels with TextVisualizer`
 
 최근 최적화 상태:
 
@@ -35,6 +36,7 @@
 - performance sample status text update를 `0` 키로 끄고 켤 수 있게 했다.
 - renderer glyph position 계산에 line-level metrics cache를 우선 사용할 수 있게 했다.
 - `LayoutGlyphs()`가 `TextLine.metrics`를 채우도록 했다.
+- performance sample의 title / status / quote text를 `Label`에서 `TextVisualizer`로 교체했다.
 
 현재 해석:
 
@@ -50,6 +52,7 @@
 - exclusion region을 피해서 layout된다.
 - moving bounds 이동 시 glyph가 재배치된다.
 - performance demo sample이 존재한다.
+- performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
 - diagnostics/log cleanup은 완료됐다.
 - line metrics 적용 후 line height가 더 자연스러워졌고, visible line 수 감소로 성능도 일부 개선됐다.
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
@@ -230,6 +233,7 @@ line-level cache:
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
 | redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
+| sample Label overhead | title/status/quote TextVisualizer 교체 완료 | sample visual fidelity 확인 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
 ## 9. Render Dirty Clear 현재 상태
@@ -414,21 +418,29 @@ variable line height를 아직 적용하지 않은 이유:
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Core redundant exclusion region update policy
+### A. Performance sample visual / FPS 확인
+
+이유:
+
+- sample의 title / status / quote text를 `TextVisualizer`로 교체해 `Label` measure / arrange / relayout 영향을 줄였다.
+- italic / alignment / async rendering / padding 같은 `Label` 스타일은 단순화했으므로, sample 목적에 충분한 시각 품질인지 확인해야 한다.
+- status text는 여전히 `SetText()` prepare 비용이 있으므로 `0` key toggle과 FPS 차이를 함께 확인한다.
+
+### B. Core redundant exclusion region update policy
 
 이유:
 
 - performance sample threshold는 upstream skip 실험으로 완료됐다.
 - core API에 epsilon compare를 넣을지는 layout correctness 정책을 따로 세워야 한다.
 
-### B. Line-level line height
+### C. Line-level line height
 
 이유:
 
 - `TextLine.metrics` 기반 line-level baseline cache는 들어갔다.
 - fallback font / emoji가 섞인 line의 height 품질을 더 올리려면 line-level `naturalLineHeight`를 layout에 연결할지 검토해야 한다.
 
-### C. Word / cluster line break quality
+### D. Word / cluster line break quality
 
 이유:
 
@@ -471,6 +483,7 @@ flowchart LR
 
 현재 의미:
 
+- sample의 title / status / quote text도 `TextVisualizer`를 사용한다.
 - timer tick마다 moving bounds가 갱신된다.
 - performance sample은 threshold 이하의 exclusion 변화면 `SetExclusionRegions()` 호출을 skip할 수 있다.
 - `SetExclusionRegions()`는 layout dirty / render dirty를 발생시킨다.

@@ -937,6 +937,41 @@ variable line height를 아직 적용하지 않는 이유:
 - exclusion vertical band와 variable line height 관계
 - `LayoutGlyphs()`에서 line metrics를 계산하는 비용
 
+## 진행: performance sample label removal
+
+최근 커밋:
+
+- `Replace performance sample labels with TextVisualizer`
+
+목표:
+
+- performance sample에서 `TextVisualizer` 본문 성능을 볼 때, 주변 `Label`들의 measure / arrange / relayout 비용이 관찰값을 왜곡할 가능성을 줄인다.
+- sample의 주요 text UI를 가능한 한 `TextVisualizer`로 통일한다.
+- core `TextVisualizer` 구현이나 public API는 변경하지 않는다.
+
+변경 내용:
+
+- title text를 `Label`에서 `TextVisualizer`로 교체했다.
+- status text를 `Label`에서 `TextVisualizer`로 교체했다.
+- quote block text를 `Label`에서 `TextVisualizer`로 교체했다.
+- quote exclusion rect는 text actor의 current property를 읽지 않고, 기존 quote block의 `position / size` 영역을 기준으로 계산한다.
+
+단순화한 스타일:
+
+- `TextVisualizer`가 아직 제공하지 않는 italic, async rendering, horizontal / vertical alignment, padding API는 sample에서 사용하지 않는다.
+- quote padding은 `TextVisualizer`의 position / size를 직접 보정하는 방식으로 처리한다.
+
+의미:
+
+- sample이 `Label` 성능 영향보다 `TextVisualizer` layout / render 경로를 더 직접적으로 관찰하는 쪽에 가까워졌다.
+- status text는 여전히 `SetText()`를 통해 prepare 비용을 만들 수 있으므로 기존 `STATUS_INTERVAL`과 `0` key status update toggle을 유지한다.
+
+확인 필요:
+
+- title / quote의 visual fidelity가 sample 목적에 충분한지 확인
+- status `TextVisualizer` 업데이트 비용이 FPS 관찰에 주는 영향
+- `TextVisualizer` 자체 alignment / padding / style API가 필요한지 여부
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
@@ -981,6 +1016,7 @@ variable line height를 아직 적용하지 않는 이유:
 - layout/render buffer reserve의 1차 최적화는 완료됐다.
 - render dirty clear의 1차 조건은 도입됐다.
 - performance sample에는 exclusion update threshold가 도입됐다.
+- performance sample의 title / status / quote text는 `Label` 대신 `TextVisualizer`를 사용한다.
 - layout unchanged render skip의 1차 조건은 도입됐다.
 - line-level metrics cache의 1차 적용은 완료됐다.
 - `TextLine.metrics` 저장 기반은 추가됐지만 variable line height는 아직 적용하지 않았다.

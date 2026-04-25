@@ -194,10 +194,10 @@ struct MovingOrb
 
 struct QuoteBlock
 {
-  View    accent;
-  Label   label;
-  Vector2 position{Vector2::ZERO};
-  Vector2 size{Vector2::ZERO};
+  View           accent;
+  TextVisualizer text;
+  Vector2        position{Vector2::ZERO};
+  Vector2        size{Vector2::ZERO};
 };
 } // namespace
 
@@ -242,18 +242,17 @@ private:
     mRoot.SetRequestedHeight(MATCH_PARENT);
     mRoot.SetBackgroundColor(WINDOW_BG_COLOR);
 
-    mTitleLabel = Label::New(BuildTitleText())
-                    .SetLayoutMode(LayoutMode::STANDALONE)
-                    .SetPositionX(SIDE_MARGIN - 6.0f)
-                    .SetPositionY(TITLE_TOP)
-                    .SetRequestedWidth(WINDOW_WIDTH - (SIDE_MARGIN * 2.0f))
-                    .SetRequestedHeight(TITLE_HEIGHT)
-                    .SetFontSize(TITLE_FONT_SIZE)
-                    .SetTextColor(TITLE_COLOR)
-                    .SetMultiLine(true)
-                    .SetLineHeight(0.88f)
-                    .SetHorizontalTextAlignment(Text::Alignment::START)
-                    .SetAsyncRendering(true);
+    mTitleText = TextVisualizer::New();
+    mTitleText.SetLayoutMode(LayoutMode::STANDALONE);
+    mTitleText.SetPositionX(SIDE_MARGIN - 6.0f);
+    mTitleText.SetPositionY(TITLE_TOP);
+    mTitleText.SetRequestedWidth(WINDOW_WIDTH - (SIDE_MARGIN * 2.0f));
+    mTitleText.SetRequestedHeight(TITLE_HEIGHT);
+    mTitleText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mTitleText.SetText(BuildTitleText());
+    mTitleText.SetFontSize(TITLE_FONT_SIZE);
+    mTitleText.SetLineHeight(0.88f);
+    mTitleText.SetTextColor(TITLE_COLOR);
 
     mContentArea = View::New();
     mContentArea.SetLayoutMode(LayoutMode::STANDALONE);
@@ -264,21 +263,20 @@ private:
     mContentArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mContentArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
 
-    mStatusLabel = Label::New("")
-                     .SetLayoutMode(LayoutMode::STANDALONE)
-                     .SetPositionX(SIDE_MARGIN)
-                     .SetPositionY(WINDOW_HEIGHT - STATUS_HEIGHT - STATUS_BOTTOM)
-                     .SetRequestedWidth(CONTENT_WIDTH)
-                     .SetRequestedHeight(STATUS_HEIGHT)
-                     .SetFontSize(15.0f)
-                     .SetTextColor(STATUS_TEXT_COLOR)
-                     .SetHorizontalTextAlignment(Text::Alignment::START)
-                     .SetVerticalTextAlignment(Text::Alignment::CENTER)
-                     .SetAsyncRendering(true);
+    mStatusText = TextVisualizer::New();
+    mStatusText.SetLayoutMode(LayoutMode::STANDALONE);
+    mStatusText.SetPositionX(SIDE_MARGIN);
+    mStatusText.SetPositionY(WINDOW_HEIGHT - STATUS_HEIGHT - STATUS_BOTTOM);
+    mStatusText.SetRequestedWidth(CONTENT_WIDTH);
+    mStatusText.SetRequestedHeight(STATUS_HEIGHT);
+    mStatusText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mStatusText.SetFontSize(15.0f);
+    mStatusText.SetLineHeight(1.2f);
+    mStatusText.SetTextColor(STATUS_TEXT_COLOR);
 
-    mRoot.Add(mTitleLabel);
+    mRoot.Add(mTitleText);
     mRoot.Add(mContentArea);
-    mRoot.Add(mStatusLabel);
+    mRoot.Add(mStatusText);
     window.Add(mRoot);
   }
 
@@ -322,23 +320,25 @@ private:
       block.accent.SetRequestedHeight(accentHeight);
       block.accent.SetBackgroundColor(ACCENT_COLOR.WithAlpha(0.65f));
 
-      block.label = Label::New(text)
-                      .SetLayoutMode(LayoutMode::STANDALONE)
-                      .SetPositionX(position.x)
-                      .SetPositionY(position.y)
-                      .SetRequestedWidth(size.x)
-                      .SetRequestedHeight(size.y)
-                      .SetPadding(Extents(34, 12, 8, 8))
-                      .SetFontSize(QUOTE_FONT_SIZE)
-                      .SetLineHeight(QUOTE_LINE_HEIGHT)
-                      .SetTextColor(QUOTE_TEXT_COLOR)
-                      .SetFontSlant(Text::FontSlant::ITALIC)
-                      .SetMultiLine(true)
-                      .SetHorizontalTextAlignment(Text::Alignment::START)
-                      .SetAsyncRendering(true);
+      constexpr float QUOTE_PADDING_LEFT   = 34.0f;
+      constexpr float QUOTE_PADDING_RIGHT  = 12.0f;
+      constexpr float QUOTE_PADDING_TOP    = 8.0f;
+      constexpr float QUOTE_PADDING_BOTTOM = 8.0f;
+
+      block.text = TextVisualizer::New();
+      block.text.SetLayoutMode(LayoutMode::STANDALONE);
+      block.text.SetPositionX(position.x + QUOTE_PADDING_LEFT);
+      block.text.SetPositionY(position.y + QUOTE_PADDING_TOP);
+      block.text.SetRequestedWidth(std::max(0.0f, size.x - QUOTE_PADDING_LEFT - QUOTE_PADDING_RIGHT));
+      block.text.SetRequestedHeight(std::max(0.0f, size.y - QUOTE_PADDING_TOP - QUOTE_PADDING_BOTTOM));
+      block.text.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+      block.text.SetText(text);
+      block.text.SetFontSize(QUOTE_FONT_SIZE);
+      block.text.SetLineHeight(QUOTE_LINE_HEIGHT);
+      block.text.SetTextColor(QUOTE_TEXT_COLOR);
 
       mContentArea.Add(block.accent);
-      mContentArea.Add(block.label);
+      mContentArea.Add(block.text);
       mQuoteBlocks.push_back(block);
     };
 
@@ -504,9 +504,7 @@ private:
 
   Rect<float> GetQuoteExclusionRect(const QuoteBlock& block) const
   {
-    const Vector3 position = block.label.GetCurrentProperty<Vector3>(Actor::Property::POSITION);
-    const Vector3 size     = block.label.GetCurrentProperty<Vector3>(Actor::Property::SIZE);
-    return InflateRect(Vector2(position.x, position.y), Vector2(size.x, size.y), 3.0f);
+    return InflateRect(block.position, block.size, 3.0f);
   }
 
   void AppendOrbExclusionRegions(Dali::Vector<Rect<float>>& regions, const MovingOrb& orb) const
@@ -663,7 +661,7 @@ private:
             << "   DRAG ORBS"
             << "   0 status · Space pause · 1/2 orbs · 3/4 font · 5 exclusion · 6 color · 7/8/9 threshold";
 
-    mStatusLabel.SetText(builder.str().c_str());
+    mStatusText.SetText(builder.str().c_str());
   }
 
   void ToggleStatusTextUpdates()
@@ -675,7 +673,7 @@ private:
       return;
     }
 
-    mStatusLabel.SetText("STATUS OFF   Press 0 to enable status updates");
+    mStatusText.SetText("STATUS OFF   Press 0 to enable status updates");
   }
 
   void ToggleAnimation()
@@ -791,8 +789,8 @@ private:
 private:
   Application&                          mApplication;
   View                                  mRoot;
-  Label                                 mTitleLabel;
-  Label                                 mStatusLabel;
+  TextVisualizer                        mTitleText;
+  TextVisualizer                        mStatusText;
   View                                  mContentArea;
   TextVisualizer                        mTextVisualizer;
   Dali::Vector<Rect<float>>             mFixedColumnBounds;
