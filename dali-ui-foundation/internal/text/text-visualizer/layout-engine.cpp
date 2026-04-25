@@ -48,6 +48,17 @@ struct GlyphFitResult
   bool     forceLineBreak{false};
 };
 
+struct GlyphLayoutCache
+{
+  std::vector<float>    advances;
+  std::vector<float>    widths;
+  std::vector<float>    prefixAdvances;
+  std::vector<uint32_t> characterStarts;
+  std::vector<uint32_t> characterEnds;
+  std::vector<uint8_t>  breakAllowedAfterGlyph;
+  std::vector<uint8_t>  breakMandatoryAfterGlyph;
+};
+
 using SortedExclusionRegions = std::vector<SortedExclusionRegion>;
 
 bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& region)
@@ -138,88 +149,87 @@ uint32_t GetEstimatedLineGuard(float lineHeight, const Dali::Vector<Rect<float>>
   return std::max(1u, glyphCount + blockedLineCount + 2u);
 }
 
-uint32_t GetGlyphCharacterStart(const PreparedText& preparedText, uint32_t glyphIndex)
+GlyphLayoutCache BuildGlyphLayoutCache(const PreparedText&                  preparedText,
+                                       const Dali::Vector<Text::GlyphInfo>& glyphs)
 {
-  const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap = preparedText.GetGlyphToCharacterMap();
-  if(glyphIndex < glyphToCharacterMap.Count())
-  {
-    return glyphToCharacterMap[glyphIndex];
-  }
+  const uint32_t   glyphCount = glyphs.Count();
+  GlyphLayoutCache cache;
+  cache.advances.resize(glyphCount);
+  cache.widths.resize(glyphCount);
+  cache.prefixAdvances.resize(glyphCount + 1u, 0.0f);
+  cache.characterStarts.resize(glyphCount);
+  cache.characterEnds.resize(glyphCount);
+  cache.breakAllowedAfterGlyph.resize(glyphCount, 0u);
+  cache.breakMandatoryAfterGlyph.resize(glyphCount, 0u);
 
-  return preparedText.GetCharacterCount();
-}
-
-uint32_t GetGlyphCharacterEnd(const PreparedText& preparedText, uint32_t glyphIndex)
-{
+  const uint32_t                            characterCount      = preparedText.GetCharacterCount();
   const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap = preparedText.GetGlyphToCharacterMap();
   const Dali::Vector<Text::Length>&         charactersPerGlyph  = preparedText.GetCharactersPerGlyph();
+  const Dali::Vector<Text::LineBreakInfo>&  lineBreakInfo       = preparedText.GetLineBreakInfo();
 
-  if(glyphIndex < glyphToCharacterMap.Count())
+  for(uint32_t glyphIndex = 0u; glyphIndex < glyphCount; ++glyphIndex)
   {
-    const uint32_t characterStart = glyphToCharacterMap[glyphIndex];
-    const uint32_t characterSpan  = glyphIndex < charactersPerGlyph.Count() ? charactersPerGlyph[glyphIndex] : 0u;
-    return std::min(preparedText.GetCharacterCount(), characterStart + characterSpan);
+    const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+    cache.advances[glyphIndex]   = GetGlyphPlacementAdvance(glyph);
+    cache.widths[glyphIndex]     = GetGlyphPlacementWidth(glyph);
+
+    uint32_t characterStart = characterCount;
+    uint32_t characterEnd   = characterCount;
+
+    if(glyphIndex < glyphToCharacterMap.Count())
+    {
+      characterStart               = glyphToCharacterMap[glyphIndex];
+      const uint32_t characterSpan = glyphIndex < charactersPerGlyph.Count() ? charactersPerGlyph[glyphIndex] : 0u;
+      characterEnd                 = std::min(characterCount, characterStart + characterSpan);
+    }
+
+    cache.characterStarts[glyphIndex] = characterStart;
+    cache.characterEnds[glyphIndex]   = characterEnd;
+
+    if(characterEnd > 0u)
+    {
+      const uint32_t characterIndex = characterEnd - 1u;
+      if(characterIndex < lineBreakInfo.Count())
+      {
+        const Text::LineBreakInfo glyphLineBreakInfo = lineBreakInfo[characterIndex];
+        cache.breakAllowedAfterGlyph[glyphIndex]     = (glyphLineBreakInfo == TextAbstraction::LINE_ALLOW_BREAK) ||
+                                                   (glyphLineBreakInfo == TextAbstraction::LINE_MUST_BREAK);
+        cache.breakMandatoryAfterGlyph[glyphIndex] = glyphLineBreakInfo == TextAbstraction::LINE_MUST_BREAK;
+      }
+    }
+
+    cache.prefixAdvances[glyphIndex + 1u] = cache.prefixAdvances[glyphIndex] + cache.advances[glyphIndex];
   }
 
-  return preparedText.GetCharacterCount();
+  return cache;
 }
 
-Text::LineBreakInfo GetLineBreakInfoAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
-{
-  const uint32_t characterEnd = GetGlyphCharacterEnd(preparedText, glyphIndex);
-  if(characterEnd == 0u)
-  {
-    return TextAbstraction::LINE_NO_BREAK;
-  }
-
-  const uint32_t                           characterIndex = characterEnd - 1u;
-  const Dali::Vector<Text::LineBreakInfo>& lineBreakInfo  = preparedText.GetLineBreakInfo();
-  if(characterIndex < lineBreakInfo.Count())
-  {
-    return lineBreakInfo[characterIndex];
-  }
-
-  return TextAbstraction::LINE_NO_BREAK;
-}
-
-bool IsLineBreakAllowedAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
-{
-  const Text::LineBreakInfo lineBreakInfo = GetLineBreakInfoAfterGlyph(preparedText, glyphIndex);
-  return (lineBreakInfo == TextAbstraction::LINE_ALLOW_BREAK) || (lineBreakInfo == TextAbstraction::LINE_MUST_BREAK);
-}
-
-bool IsLineBreakMandatoryAfterGlyph(const PreparedText& preparedText, uint32_t glyphIndex)
-{
-  return GetLineBreakInfoAfterGlyph(preparedText, glyphIndex) == TextAbstraction::LINE_MUST_BREAK;
-}
-
-GlyphFitResult FindGlyphRangeForInterval(const PreparedText&                  preparedText,
-                                         const Dali::Vector<Text::GlyphInfo>& glyphs,
-                                         uint32_t                             glyphStart,
-                                         float                                availableWidth,
-                                         bool                                 allowOversizedFirstGlyph)
+GlyphFitResult FindGlyphRangeForInterval(const GlyphLayoutCache& cache,
+                                         uint32_t                glyphStart,
+                                         float                   availableWidth,
+                                         bool                    allowOversizedFirstGlyph)
 {
   GlyphFitResult result;
   result.glyphEnd = glyphStart;
 
-  if(glyphStart >= glyphs.Count())
+  const uint32_t glyphCount = static_cast<uint32_t>(cache.advances.size());
+  if(glyphStart >= glyphCount)
   {
     return result;
   }
 
-  float    cursorX        = 0.0f;
   float    fragmentWidth  = 0.0f;
   uint32_t lastBreakEnd   = glyphStart;
   float    lastBreakWidth = 0.0f;
 
-  for(uint32_t glyphIndex = glyphStart; glyphIndex < glyphs.Count(); ++glyphIndex)
+  for(uint32_t glyphIndex = glyphStart; glyphIndex < glyphCount; ++glyphIndex)
   {
-    const Text::GlyphInfo& glyph         = glyphs[glyphIndex];
-    const float            glyphAdvance  = GetGlyphPlacementAdvance(glyph);
-    const float            glyphWidth    = GetGlyphPlacementWidth(glyph);
-    const float            requiredWidth = std::max(glyphAdvance, glyphWidth);
-    const bool             canFit        = (requiredWidth <= 0.0f) || ((cursorX + requiredWidth) <= availableWidth);
-    const bool             isFirstGlyph  = (glyphIndex == glyphStart);
+    const float cursorX       = cache.prefixAdvances[glyphIndex] - cache.prefixAdvances[glyphStart];
+    const float glyphAdvance  = cache.advances[glyphIndex];
+    const float glyphWidth    = cache.widths[glyphIndex];
+    const float requiredWidth = std::max(glyphAdvance, glyphWidth);
+    const bool  canFit        = (requiredWidth <= 0.0f) || ((cursorX + requiredWidth) <= availableWidth);
+    const bool  isFirstGlyph  = (glyphIndex == glyphStart);
 
     if(!canFit)
     {
@@ -247,19 +257,18 @@ GlyphFitResult FindGlyphRangeForInterval(const PreparedText&                  pr
 
     const float placementRight = std::max(cursorX + glyphWidth, cursorX + glyphAdvance);
     fragmentWidth              = std::max(fragmentWidth, placementRight);
-    cursorX += glyphAdvance;
 
     result.glyphEnd  = glyphIndex + 1u;
     result.width     = fragmentWidth;
     result.hasGlyphs = true;
 
-    if(IsLineBreakAllowedAfterGlyph(preparedText, glyphIndex))
+    if(cache.breakAllowedAfterGlyph[glyphIndex])
     {
       lastBreakEnd   = glyphIndex + 1u;
       lastBreakWidth = fragmentWidth;
     }
 
-    if(IsLineBreakMandatoryAfterGlyph(preparedText, glyphIndex))
+    if(cache.breakMandatoryAfterGlyph[glyphIndex])
     {
       result.forceLineBreak = true;
       return result;
@@ -543,6 +552,7 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     return;
   }
 
+  const GlyphLayoutCache       glyphLayoutCache       = BuildGlyphLayoutCache(preparedText, glyphs);
   uint32_t                     currentGlyph           = 0u;
   float                        currentY               = 0.0f;
   const uint32_t               maxLineCount           = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
@@ -565,7 +575,7 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     {
       const AvailableInterval& availableInterval = availableIntervals[intervalIndex];
       const bool               allowOversized    = !lineHasPlacement;
-      const GlyphFitResult     fitResult         = FindGlyphRangeForInterval(preparedText, glyphs, currentGlyph, availableInterval.width, allowOversized);
+      const GlyphFitResult     fitResult         = FindGlyphRangeForInterval(glyphLayoutCache, currentGlyph, availableInterval.width, allowOversized);
 
       if(!fitResult.hasGlyphs || fitResult.glyphEnd <= currentGlyph)
       {
@@ -577,8 +587,8 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
       float          cursorX    = availableInterval.x;
 
       TextLineFragment fragment;
-      fragment.clusterStart = GetGlyphCharacterStart(preparedText, glyphStart);
-      fragment.clusterEnd   = GetGlyphCharacterEnd(preparedText, glyphEnd - 1u);
+      fragment.clusterStart = glyphStart < glyphLayoutCache.characterStarts.size() ? glyphLayoutCache.characterStarts[glyphStart] : preparedText.GetCharacterCount();
+      fragment.clusterEnd   = (glyphEnd - 1u) < glyphLayoutCache.characterEnds.size() ? glyphLayoutCache.characterEnds[glyphEnd - 1u] : preparedText.GetCharacterCount();
       fragment.glyphStart   = glyphStart;
       fragment.glyphEnd     = glyphEnd;
       fragment.x            = availableInterval.x;
@@ -588,7 +598,7 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
       for(uint32_t glyphIndex = glyphStart; glyphIndex < glyphEnd; ++glyphIndex)
       {
         const Text::GlyphInfo& glyph        = glyphs[glyphIndex];
-        const float            glyphAdvance = GetGlyphPlacementAdvance(glyph);
+        const float            glyphAdvance = glyphLayoutCache.advances[glyphIndex];
 
         GlyphPlacement placement;
         placement.glyphIndex = glyphIndex;

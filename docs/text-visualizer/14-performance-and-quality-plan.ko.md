@@ -1097,6 +1097,33 @@ exclusion interval 정책:
 - Thai / Korean / Japanese word break 품질
 - bidi / RTL text에서 line break 후보와 visual order 연결
 
+## 진행: word wrap lookup optimization
+
+basic word wrap 도입 후 performance sample에서 layout 비용이 증가하는 현상이 관찰됐다. 원인은 interval range 계산 중 glyph마다 `glyphToCharacterMap`, `charactersPerGlyph`, `lineBreakInfo`를 반복 조회하고, advance 누적도 매 interval에서 다시 계산하는 데 있다.
+
+변경된 구조:
+
+- `LayoutGlyphs()` 시작 시 layout pass-local `GlyphLayoutCache`를 만든다.
+- cache는 glyph count 기준으로 한 번만 준비한다.
+- glyph별 placement advance와 placement width를 저장한다.
+- `prefixAdvances[glyphIndex + 1]`에 누적 advance를 저장해 interval range 계산에서 cursor x를 빠르게 얻는다.
+- glyph 뒤 character boundary의 `LINE_ALLOW_BREAK` / `LINE_MUST_BREAK` 여부를 `breakAllowedAfterGlyph`, `breakMandatoryAfterGlyph`로 저장한다.
+- fragment의 character start / end도 cache에서 가져와 반복 mapping lookup을 줄인다.
+
+유지한 정책:
+
+- word wrap policy는 바꾸지 않는다.
+- overflow 시 마지막 allowed break 후보를 우선 사용한다.
+- break 후보가 없으면 glyph 단위 fallback을 유지한다.
+- oversized first glyph fallback을 유지한다.
+- line height, baseline, exclusion interval merge, render dirty clear 조건은 변경하지 않는다.
+
+남은 한계:
+
+- interval마다 glyph range scan 자체는 남아 있다.
+- very long text에서 더 큰 효과를 내려면 cluster range cache나 affected-line partial layout이 필요할 수 있다.
+- complex cluster / ICU / bidi / hyphenation / ellipsis는 여전히 제외다.
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.

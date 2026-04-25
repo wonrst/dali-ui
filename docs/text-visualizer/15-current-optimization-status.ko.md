@@ -26,10 +26,11 @@
 - `Use pixel font size conversion for TextVisualizer`
 - `Improve TextVisualizer performance sample visual quality`
 - `Add TextVisualizer basic word wrap`
+- `Optimize TextVisualizer word wrap lookup`
 
 이번 작업 포함 최신 커밋:
 
-- `Add TextVisualizer basic word wrap`
+- `Optimize TextVisualizer word wrap lookup`
 
 최근 최적화 상태:
 
@@ -44,6 +45,7 @@
 - performance sample의 orb exclusion을 ellipse band 기반으로 세분화하고 title / quote `TextVisualizer`를 parent `View` 안에서 layout되도록 조정했다.
 - body `TextVisualizer` surface를 title origin부터 시작하도록 넓히고, title word-level exclusion과 full-surface orb movement를 적용했다.
 - `LayoutGlyphs()`가 `PreparedText::LineBreakInfo`를 사용해 interval overflow 시 마지막 word break 후보를 우선 사용한다.
+- word wrap lookup은 layout pass-local glyph cache를 사용해 repeated line break / glyph mapping lookup을 줄인다.
 
 현재 해석:
 
@@ -262,7 +264,7 @@ line-level cache:
 | redundant exclusion update | sample threshold 적용 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
 | sample Label overhead | title/status/quote TextVisualizer 교체 완료 | sample visual fidelity 확인 |
-| word wrap 품질 | 기본 lineBreakInfo 기반 wrap 적용 완료 | cluster-perfect / bidi / emoji 품질 검토 |
+| word wrap 품질 | 기본 lineBreakInfo 기반 wrap + lookup cache 적용 완료 | cluster-perfect / bidi / emoji 품질 검토 |
 | `Renderer::Render` full call | 아직 남음 | geometry-only update 장기 검토 |
 
 ## 9. Render Dirty Clear 현재 상태
@@ -524,7 +526,33 @@ basic word wrap은 `TextVisualizer` 전용 `LayoutGlyphs()`에만 적용된 1차
 - Korean / Japanese / Thai word break 품질
 - bidi / RTL text와 visual order
 
-## 15. 다음 추천 작업
+## 15. Word Wrap Lookup Optimization 현재 상태
+
+basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관찰되어, word wrap lookup을 layout pass-local cache로 최적화했다.
+
+현재 구조:
+
+- `LayoutGlyphs()` 시작 시 `GlyphLayoutCache`를 glyph count 기준으로 한 번 생성한다.
+- glyph별 placement advance와 placement width를 cache한다.
+- `prefixAdvances`를 사용해 interval scan 중 cursor x를 반복 누적 없이 계산한다.
+- glyph 뒤 character boundary의 `LINE_ALLOW_BREAK` / `LINE_MUST_BREAK` 여부를 glyph index 기준 cache로 변환한다.
+- fragment character start / end도 cache된 glyph-to-character 범위를 사용한다.
+
+유지한 정책:
+
+- word wrap 결과 정책은 바꾸지 않았다.
+- overflow 시 마지막 allowed break 후보를 우선 사용한다.
+- break 후보가 없으면 glyph 단위 fallback을 유지한다.
+- oversized first glyph fallback을 유지한다.
+- public API, line height, baseline, render dirty clear 조건은 변경하지 않았다.
+
+남은 한계:
+
+- interval마다 range scan 자체는 남아 있다.
+- 매우 긴 텍스트에서는 cluster-level range cache나 partial layout이 필요할 수 있다.
+- complex cluster / ICU / bidi / hyphenation / ellipsis는 여전히 제외다.
+
+## 16. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
@@ -557,7 +585,7 @@ basic word wrap은 `TextVisualizer` 전용 `LayoutGlyphs()`에만 적용된 1차
 - 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
 - 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 16. 다음 커밋 금지 사항
+## 17. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -571,7 +599,7 @@ basic word wrap은 `TextVisualizer` 전용 `LayoutGlyphs()`에만 적용된 1차
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 17. 최신 성능 경로 구조
+## 18. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
@@ -580,7 +608,8 @@ flowchart LR
   B0 -->|skip| S[Skip exclusion update]
   B --> C[LayoutDirty / RenderDirty]
   C --> D[y-sorted exclusion cache]
-  D --> E[LayoutGlyphs with reserved buffers]
+  D --> W[Glyph word-wrap lookup cache]
+  W --> E[LayoutGlyphs with reserved buffers]
   E --> M[Line-level metrics cache]
   M --> L{Layout signature unchanged}
   L -->|yes| K[Skip render path]
@@ -605,7 +634,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 18. Compact 이후 복구 지침
+## 19. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

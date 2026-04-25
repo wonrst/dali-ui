@@ -1310,6 +1310,28 @@ int UtcDaliTextVisualizerGlyphLayoutWordWrapMixedTextSmokeP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerGlyphLayoutWordWrapSameResultP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("hello world dynamic text", 16.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult firstLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult secondLayoutResult;
+
+  exclusionRegions.PushBack(Rect<float>(55.0f, 0.0f, 45.0f, 24.0f));
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 180.0f, 0.0f, exclusionRegions, firstLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 180.0f, 0.0f, exclusionRegions, secondLayoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(firstLayoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(firstLayoutResult.CalculateSignature(), secondLayoutResult.CalculateSignature(), TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerLayoutResultSignatureSameForSameLayoutP(void)
 {
   UiTestApplication application;
