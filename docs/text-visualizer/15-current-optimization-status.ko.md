@@ -29,15 +29,16 @@
 - `Optimize TextVisualizer word wrap lookup`
 - `Optimize TextVisualizer exclusion region storage update`
 - `Add optional TextVisualizer performance debug status`
+- `Move TextVisualizer glyph layout cache into PreparedText`
 
 이번 작업 포함 최신 커밋:
 
-- `Add optional TextVisualizer performance debug status`
+- `Move TextVisualizer glyph layout cache into PreparedText`
 
 최근 최적화 상태:
 
 - render dirty clear 조건을 전용 커밋으로 도입했다.
-- performance sample에 exclusion update threshold를 도입했다.
+- performance sample exclusion update threshold는 실험 후 데모 단순화를 위해 제거됐다.
 - layout unchanged render skip을 도입했다.
 - performance sample status text update를 `0` 키로 끄고 켤 수 있게 했다.
 - renderer glyph position 계산에 line-level metrics cache를 우선 사용할 수 있게 했다.
@@ -50,6 +51,7 @@
 - word wrap lookup은 layout pass-local glyph cache를 사용해 repeated line break / glyph mapping lookup을 줄인다.
 - `SetExclusionRegions()`는 exact compare 후 same-count region update를 in-place로 처리한다.
 - performance sample의 detailed status는 기본 off이며, `0` key로 켠 경우에만 counters 문자열을 갱신한다.
+- `PreparedText`가 stable glyph layout cache를 보관하고 `LayoutGlyphs()`가 이를 재사용한다.
 
 현재 해석:
 
@@ -78,6 +80,7 @@
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
 - `LayoutResult`의 각 glyph line은 line별 metrics 후보를 보유할 수 있다.
 - 기본 word wrap이 추가되어 space 등 unibreak 기반 line break 후보에서 줄바꿈할 수 있다.
+- word wrap lookup에 필요한 stable glyph layout data는 prepare 단계에서 만들어진다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
 - basic word wrap 이전 전체 `TextVisualizer` UTC는 `126 tests, 0 failures` 상태였고, 이번 변경 후 전체 UTC는 재검증이 필요하다.
 
@@ -267,7 +270,7 @@ line-level cache:
 | exclusion interval scan | 1차 최적화 완료 | spatial/partial relayout 검토 |
 | buffer allocation | 1차 reserve 완료 | object reuse 검토 |
 | render dirty 미해제 | 1차 clear 조건 적용 완료 | 장기 안정성 / renderer invalidation 검토 |
-| redundant exclusion update | sample threshold 적용 + core storage update 최적화 완료 | core epsilon/unchanged 정책 별도 검토 |
+| redundant exclusion update | sample threshold 실험은 제거, core storage update 최적화 완료 | core epsilon/unchanged 정책 별도 검토 |
 | layout unchanged render skip | 1차 signature skip 적용 완료 | epsilon / signature cost 검토 |
 | sample Label overhead | title/status/quote TextVisualizer 교체 완료 | sample visual fidelity 확인 |
 | word wrap 품질 | 기본 lineBreakInfo 기반 wrap + lookup cache 적용 완료 | cluster-perfect / bidi / emoji 품질 검토 |
@@ -318,40 +321,25 @@ dirty가 다시 set되는 경로:
 
 ## 10. Performance Sample Exclusion Update Threshold 현재 상태
 
-performance sample에는 sample-level exclusion update threshold가 적용됐다.
+performance sample의 sample-level exclusion update threshold는 데모 단순화를 위해 제거됐다.
 
 현재 정책:
 
-- core `TextVisualizer::SetExclusionRegions()` 정책은 변경하지 않는다.
-- sample이 마지막으로 적용한 exclusion regions를 저장한다.
-- 새 regions와 마지막 적용 regions의 `x / y / width / height` 차이가 모두 threshold 이하이면 `SetExclusionRegions()` 호출을 skip한다.
-- region count가 다르면 skip하지 않는다.
-- threshold가 `0.0f` 이하이면 close로 보지 않아 매번 update를 시도하는 동작에 가깝게 만든다.
-
-기본값과 조작:
-
-- 기본 threshold: `0.5px`
-- `7`: threshold 감소
-- `8`: threshold 증가
-- `9`: threshold reset
-
-status 표시:
-
-- `APPLIED`: 실제 `SetExclusionRegions()` 또는 clear가 적용된 횟수
-- `SKIPPED`: threshold로 update를 생략한 횟수
-- `THRESH`: 현재 threshold 값
+- core `TextVisualizer::SetExclusionRegions()` exact compare 정책은 유지한다.
+- sample은 moving bounds 상태를 매 tick 반영한다.
+- threshold 관련 키 조작과 status 항목은 현재 sample에서 사용하지 않는다.
+- redundant update 감소는 core storage update 최적화와 향후 static/dynamic exclusion split 쪽에서 다룬다.
 
 의미:
 
-- moving bounds의 변화가 sub-pixel 또는 매우 작은 경우 sample에서 relayout/render dirty를 여는 호출 자체를 줄인다.
-- core API의 epsilon compare 정책을 의미하지 않는다.
-- threshold가 너무 크면 visual fidelity가 떨어질 수 있다.
+- 데모 화면과 조작을 단순하게 유지한다.
+- threshold가 visual fidelity에 영향을 줄 가능성을 제거했다.
+- core API의 epsilon compare 정책은 여전히 별도 설계 대상이다.
 
 확인 필요:
 
-- threshold별 FPS 변화
-- applied/skipped 비율과 체감 reflow 지연 사이의 균형
-- core API에 epsilon 정책이 필요한지, upstream skip만으로 충분한지
+- core epsilon 정책이 필요한지, caller-level skip으로 충분한지
+- sample static/dynamic exclusion split으로 threshold 없이 충분히 가벼워지는지
 
 ## 11. Layout Unchanged Render Skip 현재 상태
 
@@ -389,7 +377,7 @@ render 성공 후:
 기대 효과:
 
 - moving bounds가 계속 변해도 최종 glyph placement가 같으면 `UpdateRenderData()` / `Renderer::Render()` 호출을 생략한다.
-- performance sample threshold보다 core 쪽에서 더 직접적으로 “결과가 같은 layout”을 걸러낸다.
+- 기존 sample threshold 실험보다 core 쪽에서 더 직접적으로 “결과가 같은 layout”을 걸러낸다.
 
 확인 필요:
 
@@ -640,31 +628,69 @@ performance sample의 status 출력은 데모 기본 성능을 해치지 않도�
 - rough FPS와 실제 compositor / GPU frame rate의 차이
 - 더 정밀한 stage timing을 sample-only로 추가할지 여부
 
-## 19. 다음 추천 작업
+## 19. PreparedText glyph layout cache 현재 상태
+
+basic word wrap 이후 `LayoutGlyphs()`는 glyph advance, glyph width, prefix advance, glyph별 character range, line break 가능 여부를 layout pass마다 cache로 만들고 있었다.
+
+현재는 이 stable cache를 `PreparedText`로 이동했다.
+
+현재 `PreparedText::GlyphLayoutData` 항목:
+
+- `advances`
+- `widths`
+- `prefixAdvances`
+- `characterStarts`
+- `characterEnds`
+- `breakAllowedAfterGlyph`
+- `breakMandatoryAfterGlyph`
+
+현재 정책:
+
+- `TextPreparer`가 shaping / glyph metrics / glyph mapping / line break info를 만든 뒤 `GlyphLayoutData`를 구성한다.
+- `LayoutGlyphs()`는 `PreparedText`에 glyph layout data가 있으면 이를 우선 사용한다.
+- test fixture 등에서 glyph layout data가 없는 `PreparedText`가 들어오면 기존 계산과 동일한 local fallback을 사용한다.
+- glyph / mapping / line break setter는 stale cache를 피하기 위해 glyph layout data를 clear한다.
+- word wrap, line break, exclusion, render dirty 정책은 변경하지 않았다.
+
+의미:
+
+- moving bounds처럼 text / font / font size는 그대로이고 exclusion만 바뀌는 상황에서 layout pass 시작 비용을 줄인다.
+- memory 사용량은 glyph count에 비례해 증가한다.
+- 다음 후보인 prefix advance binary search나 renderer glyph position cache의 기반이 된다.
+
+확인 필요:
+
+- 긴 텍스트에서 memory 증가와 CPU 감소의 균형
+- glyph layout data와 future layout result / renderer position cache의 역할 분리
+- word wrap range scan 자체를 더 줄일지 여부
+
+## 20. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Performance sample visual / FPS 확인
+### A. Precompute renderer glyph positions in `AtlasViewAdapter`
 
 이유:
 
-- sample의 title / quote parent 구조와 orb ellipse band exclusion을 추가했다.
-- 실제 device에서 visual 품질과 FPS 균형을 확인해야 한다.
-- status text는 여전히 `SetText()` prepare 비용이 있으므로 `0` key toggle과 FPS 차이를 함께 확인한다.
+- `ViewInterface::GetGlyphs()`가 render path에서 glyph position을 다시 계산한다.
+- line metrics cache lookup이 glyph마다 발생한다.
+- layout result가 바뀐 시점에 renderer positions를 미리 만들면 render path를 더 가볍게 만들 수 있다.
 
-### B. Core redundant exclusion region update policy
-
-이유:
-
-- performance sample threshold는 upstream skip 실험으로 완료됐다.
-- core API에 epsilon compare를 넣을지는 layout correctness 정책을 따로 세워야 한다.
-
-### C. Line-level line height
+### B. Sample static/dynamic exclusion split
 
 이유:
 
-- `TextLine.metrics` 기반 line-level baseline cache는 들어갔다.
-- fallback font / emoji가 섞인 line의 height 품질을 더 올리려면 line-level `naturalLineHeight`를 layout에 연결할지 검토해야 한다.
+- title / drop cap / fixed columns 같은 static exclusions와 orb / overlay dynamic exclusions가 매 tick 다시 합쳐진다.
+- core API를 바꾸지 않고 sample update path를 줄일 수 있다.
+- 수요일 데모 전 risk가 낮다.
+
+### C. Analyze / reduce redundant `UpdateRenderData()`
+
+이유:
+
+- `UpdateRenderData()`가 만든 vector는 현재 `AtlasRenderer::Render()`의 직접 입력으로 쓰이지 않는다.
+- `Render()`는 `ViewInterface::GetGlyphs()`로 glyphs / positions를 다시 얻는다.
+- render dirty clear success condition과 분리해 줄일 수 있는지 분석할 가치가 있다.
 
 ### D. Advanced word / cluster line break quality
 
@@ -673,7 +699,7 @@ performance sample의 status 출력은 데모 기본 성능을 해치지 않도�
 - 기본 word wrap은 들어갔지만 glyph / character map 기반의 1차 구현이다.
 - 실제 텍스트 품질을 더 올리려면 cluster-perfect break, emoji ZWJ sequence, bidi / RTL, hyphenation 등을 별도 설계해야 한다.
 
-## 20. 다음 커밋 금지 사항
+## 21. 다음 커밋 금지 사항
 
 계속 유지할 원칙:
 
@@ -687,16 +713,15 @@ performance sample의 status 출력은 데모 기본 성능을 해치지 않도�
 - 성능 최적화와 품질 개선을 한 커밋에 섞지 않기
 - `utc-Dali-TextVisualizer.cpp` formatter churn 주의
 
-## 21. 최신 성능 경로 구조
+## 22. 최신 성능 경로 구조
 
 ```mermaid
 flowchart LR
-  A[Timer Tick] --> B0{Sample threshold}
-  B0 -->|apply| B
-  B0 -->|skip| S[Skip exclusion update]
+  A[Timer Tick] --> B[SetExclusionRegions]
   B --> C[LayoutDirty / RenderDirty]
-  C --> D[y-sorted exclusion cache]
-  D --> W[Glyph word-wrap lookup cache]
+  C --> D[PreparedText glyph layout cache]
+  D --> Y[y-sorted exclusion cache]
+  Y --> W[Word wrap range scan]
   W --> E[LayoutGlyphs with reserved buffers]
   E --> M[Line-level metrics cache]
   M --> L{Layout signature unchanged}
@@ -712,8 +737,8 @@ flowchart LR
 
 - sample의 title / status / quote text도 `TextVisualizer`를 사용한다.
 - timer tick마다 moving bounds가 갱신된다.
-- performance sample은 threshold 이하의 exclusion 변화면 `SetExclusionRegions()` 호출을 skip할 수 있다.
 - `SetExclusionRegions()`는 layout dirty / render dirty를 발생시킨다.
+- `LayoutGlyphs()`는 `PreparedText`에 저장된 glyph layout cache를 사용한다.
 - layout pass에서 exclusion regions를 y-sorted cache로 준비한다.
 - `LayoutGlyphs()`는 reserved `LayoutResult` buffer를 사용한다.
 - `AtlasViewAdapter`는 renderer position 계산 전 line-level metrics cache를 준비한다.
@@ -722,7 +747,7 @@ flowchart LR
 - render 성공 조건을 만족하면 render dirty를 clear한다.
 - 현재도 필요한 경우 `Renderer::Render()` full call은 남아 있다.
 
-## 22. Compact 이후 복구 지침
+## 23. Compact 이후 복구 지침
 
 새 세션에서는 다음 순서를 따른다.
 

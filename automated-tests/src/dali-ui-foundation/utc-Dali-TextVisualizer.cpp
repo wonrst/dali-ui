@@ -1221,6 +1221,52 @@ int UtcDaliTextVisualizerPreparedEmojiGlyphMetricsP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerPreparedGlyphLayoutDataAsciiP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abc", 18.0f);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    const auto& glyphLayoutData = preparedText.GetGlyphLayoutData();
+    DALI_TEST_CHECK(preparedText.HasGlyphLayoutData());
+    DALI_TEST_EQUALS(glyphLayoutData.advances.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.widths.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.prefixAdvances.Count(), preparedText.GetGlyphCount() + 1u, TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.characterStarts.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.characterEnds.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.breakAllowedAfterGlyph.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(glyphLayoutData.breakMandatoryAfterGlyph.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+    DALI_TEST_CHECK(std::fabs(glyphLayoutData.prefixAdvances[0u]) < 0.001f);
+    DALI_TEST_CHECK(std::fabs(glyphLayoutData.prefixAdvances[preparedText.GetGlyphCount()] - preparedText.GetTotalGlyphAdvance()) < 0.001f);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerPreparedGlyphLayoutDataBreakInfoP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("hello world", 18.0f);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    const auto& glyphLayoutData = preparedText.GetGlyphLayoutData();
+    bool        hasAllowedBreak = false;
+
+    DALI_TEST_CHECK(preparedText.HasGlyphLayoutData());
+
+    for(uint32_t glyphIndex = 0u; glyphIndex < glyphLayoutData.breakAllowedAfterGlyph.Count(); ++glyphIndex)
+    {
+      hasAllowedBreak = hasAllowedBreak || (glyphLayoutData.breakAllowedAfterGlyph[glyphIndex] != 0u);
+    }
+
+    DALI_TEST_CHECK(hasAllowedBreak);
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerGlyphLayoutBasicAsciiP(void)
 {
   UiTestApplication application;
@@ -1235,6 +1281,45 @@ int UtcDaliTextVisualizerGlyphLayoutBasicAsciiP(void)
     DALI_TEST_EQUALS(layoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
     DALI_TEST_CHECK(layoutResult.GetLineCount() >= 1u);
     DALI_TEST_CHECK(layoutResult.height > 0.0f);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutUsesPreparedGlyphLayoutDataSmokeP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("hello world", 18.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  DALI_TEST_CHECK(preparedText.HasGlyphLayoutData());
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(layoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphLayoutFallbackWithoutPreparedGlyphLayoutDataP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("hello world", 18.0f);
+  Dali::Vector<Rect<float>> exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult layoutResult;
+
+  preparedText.ClearGlyphLayoutData();
+  DALI_TEST_CHECK(!preparedText.HasGlyphLayoutData());
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(layoutResult.glyphPlacements.Count(), preparedText.GetGlyphCount(), TEST_LOCATION);
   }
 
   END_TEST;

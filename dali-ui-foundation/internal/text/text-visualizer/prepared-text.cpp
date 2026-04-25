@@ -37,6 +37,8 @@ PreparedText::PreparedText()
   mCharacterToGlyphTable(),
   mGlyphsPerCharacterTable(),
   mNewParagraphGlyphs(),
+  mGlyphLayoutData(),
+  mHasGlyphLayoutData(false),
   mLineMetrics(),
   mHasLineMetrics(false),
   mPrepared(false)
@@ -86,6 +88,7 @@ uint32_t PreparedText::GetClusterCount() const
 void PreparedText::SetCharacters(const Dali::Vector<Text::Character>& characters)
 {
   mCharacters = characters;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::Character>& PreparedText::GetCharacters() const
@@ -101,6 +104,7 @@ uint32_t PreparedText::GetCharacterCount() const
 void PreparedText::SetLineBreakInfo(const Dali::Vector<Text::LineBreakInfo>& lineBreakInfo)
 {
   mLineBreakInfo = lineBreakInfo;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::LineBreakInfo>& PreparedText::GetLineBreakInfo() const
@@ -161,6 +165,7 @@ uint32_t PreparedText::GetFontRunCount() const
 void PreparedText::SetGlyphs(const Dali::Vector<Text::GlyphInfo>& glyphs)
 {
   mGlyphs = glyphs;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::GlyphInfo>& PreparedText::GetGlyphs() const
@@ -176,6 +181,7 @@ uint32_t PreparedText::GetGlyphCount() const
 void PreparedText::SetGlyphToCharacterMap(const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap)
 {
   mGlyphToCharacterMap = glyphToCharacterMap;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::CharacterIndex>& PreparedText::GetGlyphToCharacterMap() const
@@ -186,6 +192,7 @@ const Dali::Vector<Text::CharacterIndex>& PreparedText::GetGlyphToCharacterMap()
 void PreparedText::SetCharactersPerGlyph(const Dali::Vector<Text::Length>& charactersPerGlyph)
 {
   mCharactersPerGlyph = charactersPerGlyph;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::Length>& PreparedText::GetCharactersPerGlyph() const
@@ -196,6 +203,7 @@ const Dali::Vector<Text::Length>& PreparedText::GetCharactersPerGlyph() const
 void PreparedText::SetCharacterToGlyphTable(const Dali::Vector<Text::GlyphIndex>& characterToGlyphTable)
 {
   mCharacterToGlyphTable = characterToGlyphTable;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::GlyphIndex>& PreparedText::GetCharacterToGlyphTable() const
@@ -206,6 +214,7 @@ const Dali::Vector<Text::GlyphIndex>& PreparedText::GetCharacterToGlyphTable() c
 void PreparedText::SetGlyphsPerCharacterTable(const Dali::Vector<Text::Length>& glyphsPerCharacterTable)
 {
   mGlyphsPerCharacterTable = glyphsPerCharacterTable;
+  ClearGlyphLayoutData();
 }
 
 const Dali::Vector<Text::Length>& PreparedText::GetGlyphsPerCharacterTable() const
@@ -221,6 +230,43 @@ void PreparedText::SetNewParagraphGlyphs(const Dali::Vector<Text::GlyphIndex>& n
 const Dali::Vector<Text::GlyphIndex>& PreparedText::GetNewParagraphGlyphs() const
 {
   return mNewParagraphGlyphs;
+}
+
+void PreparedText::SetGlyphLayoutData(const GlyphLayoutData& glyphLayoutData)
+{
+  const uint32_t glyphCount = GetGlyphCount();
+
+  mGlyphLayoutData    = glyphLayoutData;
+  mHasGlyphLayoutData = (glyphCount > 0u) &&
+                        (mGlyphLayoutData.advances.Count() == glyphCount) &&
+                        (mGlyphLayoutData.widths.Count() == glyphCount) &&
+                        (mGlyphLayoutData.prefixAdvances.Count() == (glyphCount + 1u)) &&
+                        (mGlyphLayoutData.characterStarts.Count() == glyphCount) &&
+                        (mGlyphLayoutData.characterEnds.Count() == glyphCount) &&
+                        (mGlyphLayoutData.breakAllowedAfterGlyph.Count() == glyphCount) &&
+                        (mGlyphLayoutData.breakMandatoryAfterGlyph.Count() == glyphCount);
+}
+
+const PreparedText::GlyphLayoutData& PreparedText::GetGlyphLayoutData() const
+{
+  return mGlyphLayoutData;
+}
+
+bool PreparedText::HasGlyphLayoutData() const
+{
+  return mHasGlyphLayoutData;
+}
+
+void PreparedText::ClearGlyphLayoutData()
+{
+  mGlyphLayoutData.advances.Clear();
+  mGlyphLayoutData.widths.Clear();
+  mGlyphLayoutData.prefixAdvances.Clear();
+  mGlyphLayoutData.characterStarts.Clear();
+  mGlyphLayoutData.characterEnds.Clear();
+  mGlyphLayoutData.breakAllowedAfterGlyph.Clear();
+  mGlyphLayoutData.breakMandatoryAfterGlyph.Clear();
+  mHasGlyphLayoutData = false;
 }
 
 bool PreparedText::HasGlyphData() const
@@ -306,6 +352,7 @@ void PreparedText::Clear()
   mCharacterToGlyphTable.Clear();
   mGlyphsPerCharacterTable.Clear();
   mNewParagraphGlyphs.Clear();
+  ClearGlyphLayoutData();
   mLineMetrics    = LineMetrics{};
   mHasLineMetrics = false;
   mPrepared       = false;

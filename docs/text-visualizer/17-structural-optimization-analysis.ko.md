@@ -475,16 +475,62 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
    - 효과: render path 비용 감소
    - 위험: cache invalidation 필요
 
-## 6. 최적화 후보 risk / effect 표
+## 6. 진행: stable glyph layout cache in `PreparedText`
+
+이번 구현에서 layout pass마다 만들던 stable glyph layout cache를 `PreparedText`로 이동했다.
+
+이전 구조:
+
+- `LayoutGlyphs()` 시작 시마다 layout-local `GlyphLayoutCache`를 만들었다.
+- cache에는 glyph advance, glyph width, prefix advance, glyph별 character range, glyph 이후 line break 가능 여부가 들어 있었다.
+- 이 값들은 text / font / font size / shaping 결과가 바뀌지 않으면 동일하지만, moving bounds relayout 때마다 다시 계산됐다.
+
+현재 구조:
+
+- `PreparedText::GlyphLayoutData`가 stable glyph layout cache를 보관한다.
+- `TextPreparer`가 shaping, glyph metrics, glyph-to-character mapping, line break info 준비 후 `GlyphLayoutData`를 만든다.
+- `LayoutGlyphs()`는 `preparedText.HasGlyphLayoutData()`가 true이면 이 cache를 사용한다.
+- 수동 test fixture나 legacy prepared object처럼 cache가 없는 경우에는 기존 계산과 같은 local fallback을 사용한다.
+
+cache fields:
+
+- `advances`
+- `widths`
+- `prefixAdvances`
+- `characterStarts`
+- `characterEnds`
+- `breakAllowedAfterGlyph`
+- `breakMandatoryAfterGlyph`
+
+유지한 정책:
+
+- word wrap policy는 변경하지 않았다.
+- glyph placement, line break, exclusion interval, render dirty 정책은 변경하지 않았다.
+- layout width / exclusion region에 의존하는 데이터는 여전히 `LayoutEngine` / `LayoutResult`에 남긴다.
+- `PreparedText`의 glyph / mapping / line break setter는 stale cache 방지를 위해 glyph layout cache를 clear한다.
+
+효과:
+
+- moving bounds처럼 text / font / font size는 그대로이고 exclusion만 바뀌는 경우, `LayoutGlyphs()` 진입 시 반복 계산이 줄어든다.
+- memory 사용은 glyph count에 비례해 증가한다.
+- word wrap 이후 늘어난 layout pass 시작 비용을 prepare 단계로 올리는 1차 구조 개선이다.
+
+확인 필요:
+
+- 매우 긴 텍스트에서 memory 증가량과 layout CPU 감소의 균형
+- prefix advance cache를 이용한 binary search word wrap으로 이어갈지 여부
+- glyph layout cache와 future line start / renderer position cache의 역할 분리
+
+## 7. 최적화 후보 risk / effect 표
 
 | 후보 | 효과 가능성 | 구현 난이도 | 회귀 위험 | 파일 영향 | 추천 단계 |
 |---|---|---|---|---|---|
-| Move stable `GlyphLayoutCache` fields into `PreparedText` | 중간~높음 | 중간 | 낮음~중간 | `prepared-text.*`, `text-preparer.cpp`, `layout-engine.cpp` | 데모 전 가능 |
+| Move stable `GlyphLayoutCache` fields into `PreparedText` | 중간~높음 | 중간 | 낮음~중간 | `prepared-text.*`, `text-preparer.cpp`, `layout-engine.cpp` | 1차 완료 |
 | sample static/dynamic exclusion split | 중간 | 낮음 | 낮음 | sample only | 데모 전 가능 |
 | combined exclusion vector reuse | 낮음~중간 | 낮음 | 낮음 | sample only | 데모 전 가능 |
 | cached sorted exclusion regions in `TextVisualizerImpl` | 중간 | 중간 | 중간 | `text-visualizer-impl.*`, `layout-engine.*` internal | 데모 전 후보, 신중 |
 | prefix advance binary search word wrap | 중간 | 중간 | 중간 | `layout-engine.cpp` | 데모 후 또는 충분한 UTC 후 |
-| next / previous break candidate cache | 중간 | 중간 | 중간 | `PreparedText` or `layout-engine.cpp` | PreparedText cache와 함께 |
+| next / previous break candidate cache | 중간 | 중간 | 중간 | `PreparedText` or `layout-engine.cpp` | 데모 후 또는 별도 최적화 |
 | reduce `UpdateRenderData()` if redundant | 중간~높음 | 중간 | 중간 | `atlas-renderer-bridge.*`, dirty success 조건 | 데모 전 분석 후 가능 |
 | precomputed renderer glyph positions | 중간~높음 | 중간 | 중간 | `atlas-view-adapter.*`, view interface | 데모 전 후보, 테스트 필요 |
 | glyph placement line index | 중간 | 중간 | 중간 | `layout-types.h`, `layout-engine.cpp`, adapter | 데모 후 권장 |
@@ -492,29 +538,11 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 | `AtlasRenderer` geometry-only update investigation | 높음 | 높음 | 높음 | `text-atlas-renderer.*` | 데모 후 |
 | partial relayout prototype | 높음 | 높음 | 높음 | layout engine / impl 전반 | 데모 후 |
 
-## 7. 다음 바로 구현할 후보 3개
+## 8. 다음 바로 구현할 후보 3개
 
-### 1. Move stable `GlyphLayoutCache` fields into `PreparedText`
+### 1. Precompute renderer glyph positions in `AtlasViewAdapter`
 
-추천 1순위다.
-
-이유:
-
-- word wrap 도입 이후 layout pass마다 stable cache를 다시 만든다.
-- moving bounds use case에서는 text / font / fontSize가 그대로라 prepare cache 재사용 효과가 크다.
-- public API 영향이 없다.
-- `AtlasRenderer`를 건드리지 않는다.
-- partial relayout보다 위험이 낮다.
-
-주의:
-
-- memory 증가를 문서화해야 한다.
-- `TextPreparer` 또는 `PreparedText` lazy build 중 어디서 cache를 만들지 결정해야 한다.
-- 기존 word wrap UTC를 충분히 유지해야 한다.
-
-### 2. Precompute renderer glyph positions in `AtlasViewAdapter`
-
-추천 2순위다.
+현재 기준 추천 1순위다.
 
 이유:
 
@@ -528,9 +556,9 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 - textColor 변경은 position cache를 invalidate할 필요가 없다.
 - layout / line metrics 변경 때만 position cache를 rebuild하면 된다.
 
-### 3. Sample static/dynamic exclusion split and vector reuse
+### 2. Sample static/dynamic exclusion split and vector reuse
 
-추천 3순위다.
+추천 2순위다.
 
 이유:
 
@@ -544,11 +572,25 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 - sample-only라 engine 구조 개선은 제한적이다.
 - static bounds가 font size / title style 변경과 연동되는 경우 invalidation을 명확히 해야 한다.
 
-## 8. 수요일 데모 전 / 데모 후 작업 분리
+### 3. Analyze / reduce redundant `UpdateRenderData()`
+
+추천 3순위다.
+
+이유:
+
+- 현재 `UpdateRenderData()`가 만든 vector는 `AtlasRenderer::Render()`에 직접 전달되지 않는다.
+- render path가 `ViewInterface::GetGlyphs()`로 glyphs / positions를 다시 얻는다면 중복 계산일 수 있다.
+- render dirty clear 조건에서 사용하는 validation 역할을 대체할 수 있으면 비용을 줄일 수 있다.
+
+주의:
+
+- render dirty clear 조건과 연결되어 있으므로 별도 커밋에서 신중히 다룬다.
+- `AtlasRenderer` 자체는 데모 전에는 수정하지 않는다.
+
+## 9. 수요일 데모 전 / 데모 후 작업 분리
 
 ### 데모 전 안전 작업
 
-- Move stable `GlyphLayoutCache` fields into `PreparedText`
 - precompute renderer glyph positions in `AtlasViewAdapter`
 - sample static/dynamic exclusion split
 - sample combined exclusion vector reuse
@@ -576,7 +618,7 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 - 효과가 큰 구조 변경은 별도 branch / fixture / screenshot 비교와 함께 진행한다.
 - 기존 renderer 공유 경로를 건드리는 변경은 충분한 regression 범위를 확보한다.
 
-## 9. 측정 / 검증 계획
+## 10. 측정 / 검증 계획
 
 ### 조건
 
@@ -612,7 +654,7 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 - debug counters는 off일 때 detailed formatting 비용이 없어야 한다.
 - 정확한 CPU profiling이 필요하면 sample-only timing 또는 external profiler로 분리한다.
 
-## 10. 결론
+## 11. 결론
 
 현재 남은 최적화는 단순 micro optimization보다 pipeline 구조 중복 제거가 중요하다.
 
@@ -620,9 +662,9 @@ sample과 실제 use case 모두 static / dynamic exclusion이 섞일 수 있다
 
 exclusion 쪽은 static / dynamic 분리와 vector/cache 재사용이 수요일 전 low-risk 후보에 가깝다. 반면 partial relayout은 효과 가능성은 크지만 word wrap 전파 때문에 데모 후 prototype으로 분리하는 것이 맞다.
 
-가장 자연스러운 다음 구현 후보는 **Move stable `GlyphLayoutCache` fields into `PreparedText`**다.
+이번 구현으로 가장 자연스러웠던 1순위 후보인 **Move stable `GlyphLayoutCache` fields into `PreparedText`**는 1차 완료됐다.
 
-이 후보를 1순위로 보는 이유:
+이 변경의 의미:
 
 - `TextVisualizer`의 핵심 설계인 prepare / layout 분리에 가장 잘 맞는다.
 - word wrap 이후 layout pass마다 반복 생성되는 stable cache 비용을 줄인다.
@@ -631,4 +673,6 @@ exclusion 쪽은 static / dynamic 분리와 vector/cache 재사용이 수요일 
 - `AtlasRenderer` 수정 없이 적용 가능하다.
 - partial relayout이나 geometry-only update보다 위험이 낮다.
 
-다음 세션에서 구조 최적화를 시작한다면 이 문서와 `15-current-optimization-status.ko.md`를 먼저 읽고, 위 1순위 후보부터 작은 커밋으로 진행하는 것을 권장한다.
+다음 구조 최적화 후보는 render path 중복 제거 쪽이다. 특히 `AtlasViewAdapter`에서 renderer glyph positions를 미리 계산하거나, `UpdateRenderData()`가 실제 render 입력과 중복되는지 더 줄이는 작업을 작은 커밋으로 진행하는 것을 권장한다.
+
+다음 세션에서 구조 최적화를 시작한다면 이 문서와 `15-current-optimization-status.ko.md`를 먼저 읽고, 위 후보 중 demo risk가 낮은 항목부터 작은 커밋으로 진행하는 것을 권장한다.

@@ -49,6 +49,17 @@ public:
     float baselineOffset{0.0f};
   };
 
+  struct GlyphLayoutData
+  {
+    Dali::Vector<float>    advances;
+    Dali::Vector<float>    widths;
+    Dali::Vector<float>    prefixAdvances;
+    Dali::Vector<uint32_t> characterStarts;
+    Dali::Vector<uint32_t> characterEnds;
+    Dali::Vector<uint8_t>  breakAllowedAfterGlyph;
+    Dali::Vector<uint8_t>  breakMandatoryAfterGlyph;
+  };
+
   PreparedText();
 
   void                SetOriginalText(const Dali::String& text);
@@ -102,6 +113,11 @@ public:
   void                                  SetNewParagraphGlyphs(const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs);
   const Dali::Vector<Text::GlyphIndex>& GetNewParagraphGlyphs() const;
 
+  void                   SetGlyphLayoutData(const GlyphLayoutData& glyphLayoutData);
+  const GlyphLayoutData& GetGlyphLayoutData() const;
+  bool                   HasGlyphLayoutData() const;
+  void                   ClearGlyphLayoutData();
+
   bool  HasGlyphData() const;
   bool  HasGlyphMetrics() const;
   float GetTotalGlyphAdvance() const;
@@ -132,6 +148,8 @@ private:
   Dali::Vector<Text::GlyphIndex>     mCharacterToGlyphTable;
   Dali::Vector<Text::Length>         mGlyphsPerCharacterTable;
   Dali::Vector<Text::GlyphIndex>     mNewParagraphGlyphs;
+  GlyphLayoutData                    mGlyphLayoutData;
+  bool                               mHasGlyphLayoutData;
   LineMetrics                        mLineMetrics;
   bool                               mHasLineMetrics;
   bool                               mPrepared;

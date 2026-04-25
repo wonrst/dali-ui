@@ -80,6 +80,81 @@ Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClien
   return static_cast<Text::PointSize26Dot6>(TextAbstraction::FontClient::DEFAULT_POINT_SIZE * FONT_SIZE_SCALE);
 }
 
+float GetGlyphPlacementWidth(const Text::GlyphInfo& glyph)
+{
+  if(glyph.width > 0.0f)
+  {
+    return glyph.width;
+  }
+
+  return glyph.advance > 0.0f ? glyph.advance : 0.0f;
+}
+
+float GetGlyphPlacementAdvance(const Text::GlyphInfo& glyph)
+{
+  if(glyph.advance > 0.0f)
+  {
+    return glyph.advance;
+  }
+
+  return glyph.width > 0.0f ? glyph.width : 0.0f;
+}
+
+PreparedText::GlyphLayoutData BuildGlyphLayoutData(const Dali::Vector<Text::GlyphInfo>&      glyphs,
+                                                   const Dali::Vector<Text::CharacterIndex>& glyphToCharacterMap,
+                                                   const Dali::Vector<Text::Length>&         charactersPerGlyph,
+                                                   const Dali::Vector<Text::LineBreakInfo>&  lineBreakInfo,
+                                                   uint32_t                                  characterCount)
+{
+  const uint32_t glyphCount = glyphs.Count();
+
+  PreparedText::GlyphLayoutData glyphLayoutData;
+  glyphLayoutData.advances.Resize(glyphCount);
+  glyphLayoutData.widths.Resize(glyphCount);
+  glyphLayoutData.prefixAdvances.Resize(glyphCount + 1u, 0.0f);
+  glyphLayoutData.characterStarts.Resize(glyphCount);
+  glyphLayoutData.characterEnds.Resize(glyphCount);
+  glyphLayoutData.breakAllowedAfterGlyph.Resize(glyphCount, static_cast<uint8_t>(0u));
+  glyphLayoutData.breakMandatoryAfterGlyph.Resize(glyphCount, static_cast<uint8_t>(0u));
+
+  for(uint32_t glyphIndex = 0u; glyphIndex < glyphCount; ++glyphIndex)
+  {
+    const Text::GlyphInfo& glyph = glyphs[glyphIndex];
+
+    glyphLayoutData.advances[glyphIndex] = GetGlyphPlacementAdvance(glyph);
+    glyphLayoutData.widths[glyphIndex]   = GetGlyphPlacementWidth(glyph);
+
+    uint32_t characterStart = characterCount;
+    uint32_t characterEnd   = characterCount;
+
+    if(glyphIndex < glyphToCharacterMap.Count())
+    {
+      characterStart               = glyphToCharacterMap[glyphIndex];
+      const uint32_t characterSpan = glyphIndex < charactersPerGlyph.Count() ? charactersPerGlyph[glyphIndex] : 0u;
+      characterEnd                 = std::min(characterCount, characterStart + characterSpan);
+    }
+
+    glyphLayoutData.characterStarts[glyphIndex] = characterStart;
+    glyphLayoutData.characterEnds[glyphIndex]   = characterEnd;
+
+    if(characterEnd > 0u)
+    {
+      const uint32_t characterIndex = characterEnd - 1u;
+      if(characterIndex < lineBreakInfo.Count())
+      {
+        const Text::LineBreakInfo glyphLineBreakInfo       = lineBreakInfo[characterIndex];
+        glyphLayoutData.breakAllowedAfterGlyph[glyphIndex] = (glyphLineBreakInfo == TextAbstraction::LINE_ALLOW_BREAK) ||
+                                                             (glyphLineBreakInfo == TextAbstraction::LINE_MUST_BREAK);
+        glyphLayoutData.breakMandatoryAfterGlyph[glyphIndex] = glyphLineBreakInfo == TextAbstraction::LINE_MUST_BREAK;
+      }
+    }
+
+    glyphLayoutData.prefixAdvances[glyphIndex + 1u] = glyphLayoutData.prefixAdvances[glyphIndex] + glyphLayoutData.advances[glyphIndex];
+  }
+
+  return glyphLayoutData;
+}
+
 bool IsNewParagraphGlyph(Text::GlyphIndex glyphIndex, const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs)
 {
   for(Vector<Text::GlyphIndex>::ConstIterator it = newParagraphGlyphs.Begin(), endIt = newParagraphGlyphs.End(); it != endIt; ++it)
@@ -250,6 +325,15 @@ PreparedText TextPreparer::Prepare(const Input& input)
   preparedText.SetCharacterToGlyphTable(characterToGlyphTable);
   preparedText.SetGlyphsPerCharacterTable(glyphsPerCharacterTable);
   preparedText.SetNewParagraphGlyphs(newParagraphGlyphs);
+
+  if(!glyphs.Empty())
+  {
+    preparedText.SetGlyphLayoutData(BuildGlyphLayoutData(glyphs,
+                                                         glyphToCharacterMap,
+                                                         charactersPerGlyph,
+                                                         lineBreakInfo,
+                                                         preparedText.GetCharacterCount()));
+  }
 
   if(!glyphs.Empty())
   {
