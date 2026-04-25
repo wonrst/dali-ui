@@ -258,6 +258,7 @@ private:
 
     mStartTime    = std::chrono::steady_clock::now();
     mLastTickTime = mStartTime;
+    UpdateStatusText(true);
 
     mTimer = Timer::New(TIMER_INTERVAL_MS);
     mTimer.TickSignal().Connect(this, &TextVisualizerPerformanceController::OnTimerTick);
@@ -684,11 +685,6 @@ private:
 
   void UpdateStatusText(bool force)
   {
-    if(!mDetailedStatusEnabled)
-    {
-      return;
-    }
-
     if(!force && (mFrameCount % STATUS_INTERVAL) != 0u)
     {
       return;
@@ -704,6 +700,12 @@ private:
     builder.setf(std::ios::fixed);
     builder.precision(1);
     builder << "FPS " << fps;
+    if(!mDetailedStatusEnabled)
+    {
+      mStatusText.SetText(builder.str().c_str());
+      return;
+    }
+
     builder << "   FRAME " << mFrameCount
             << "   ORBS " << mActiveOrbCount
             << "   APPLIED " << mAppliedExclusionUpdateCount
@@ -730,7 +732,7 @@ private:
     }
     else
     {
-      mStatusText.SetText("");
+      UpdateStatusText(true);
     }
   }
 

@@ -67,7 +67,7 @@
 - moving bounds 이동 시 glyph가 재배치된다.
 - performance demo sample이 존재한다.
 - performance demo sample은 주요 text UI를 `TextVisualizer` 중심으로 구성한다.
-- performance demo sample은 기본 상태에서 status text update overhead를 만들지 않는다.
+- performance demo sample은 기본 상태에서 FPS만 갱신하고 detailed counters는 만들지 않는다.
 - performance demo sample의 title / quote text는 parent `View` 크기를 받아 multiline layout된다.
 - moving orb exclusion은 orb 하나당 `11`개의 ellipse band를 사용한다.
 - body text는 title origin부터 status 영역 위까지 확장된 surface에서 layout된다.
@@ -622,17 +622,17 @@ performance sample의 status 출력은 데모 기본 성능을 해치지 않도�
 현재 정책:
 
 - `mDetailedStatusEnabled` 기본값은 `false`다.
-- status off 상태에서는 `UpdateStatusText()`가 즉시 return한다.
-- status off 상태에서는 FPS 계산 / elapsed time 계산 / stringstream formatting / 반복 `SetText()`를 수행하지 않는다.
+- status off 상태에서는 `UpdateStatusText()`가 FPS만 짧게 갱신한다.
+- status off 상태에서는 detailed counters 문자열을 만들지 않는다.
 - `0` key를 누르면 debug status를 켠다.
 - debug status on 상태에서는 rough FPS, frame, orb, exclusion, font, color 관련 counters를 `STATUS_INTERVAL`마다 표시한다.
-- 다시 `0` key를 누르면 status text를 빈 문자열로 한 번 설정한 뒤 이후 update를 멈춘다.
+- 다시 `0` key를 누르면 detailed counters를 끄고 FPS-only 표시로 돌아간다.
 
 의미:
 
 - 수요일 데모 기본 상태에서는 visual/performance를 우선한다.
 - 필요할 때만 counters를 켜서 현재 sample update 경향을 확인할 수 있다.
-- status `TextVisualizer` 자체의 prepare 비용은 debug on 상태에서만 감수한다.
+- status `TextVisualizer`는 기본 상태에서도 FPS-only text 갱신 비용은 감수하지만, detailed counter formatting 비용은 debug on 상태로 제한한다.
 
 확인 필요:
 

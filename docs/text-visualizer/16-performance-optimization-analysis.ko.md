@@ -348,10 +348,10 @@ performance sample은 수요일 데모용 visual performance를 우선하기 위
 
 - debug status 기본값은 off다.
 - `0` key로 debug status를 toggle한다.
-- debug status off 상태에서는 `UpdateStatusText()`가 초반에 return한다.
-- off 상태에서는 FPS 계산, stringstream formatting, 반복 `mStatusText.SetText()`를 수행하지 않는다.
+- debug status off 상태에서는 `UpdateStatusText()`가 FPS-only 문자열만 갱신한다.
+- off 상태에서는 detailed counters formatting을 수행하지 않는다.
 - debug status on 상태에서만 `STATUS_INTERVAL`마다 counters/details를 표시한다.
-- debug status를 끄면 status text를 빈 문자열로 한 번만 설정한다.
+- debug status를 끄면 FPS-only 표시로 돌아간다.
 
 debug on에서 표시하는 counters:
 
