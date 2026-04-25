@@ -972,6 +972,48 @@ variable line height를 아직 적용하지 않는 이유:
 - status `TextVisualizer` 업데이트 비용이 FPS 관찰에 주는 영향
 - `TextVisualizer` 자체 alignment / padding / style API가 필요한지 여부
 
+## 진행: pixel font size conversion
+
+최근 커밋:
+
+- `Use pixel font size conversion for TextVisualizer`
+
+목표:
+
+- `TextVisualizer` public `FontSize`를 pixel size로 명확히 취급한다.
+- shaping / font validation으로 넘기는 내부 size는 기존 text stack과 같은 pixel-to-point 변환을 거친다.
+- `LineHeight` relative 공식은 계속 public pixel font size 기준으로 유지한다.
+
+기존 `Label` / `Controller` 조사 결과:
+
+- `LabelImpl::SetFontSize()`와 `InputFieldImpl::SetFontSize()`는 public 값을 `Text::Controller::PIXEL_SIZE`로 `Controller::SetDefaultFontSize()`에 전달한다.
+- `Controller::SetDefaultFontSize(fontSize, PIXEL_SIZE)`는 `ConvertPixelToPoint(fontSize)`를 통해 point 단위로 저장한다.
+- 변환 공식은 `point = pixel * 72 / DPI`이다.
+- model update 단계에서는 저장된 point size에 `GetAdjustedFontSizeScale()`과 `FontClient::GetNumberOfPointsPerOneUnitOfPointSize()`를 곱해 shaping용 `PointSize26Dot6` 값을 만든다.
+
+`TextVisualizer` 적용 정책:
+
+- `TextPreparer`는 `fontSize > 0.0f`인 경우 public pixel value를 `pixel * 72 / DPI`로 point size로 변환한 뒤 `PointSize26Dot6`로 확장한다.
+- `fontSize <= 0.0f` fallback은 `TextAbstraction::FontClient::DEFAULT_POINT_SIZE`를 사용한다.
+- `DEFAULT_POINT_SIZE`는 이미 26.6 point-size 값이므로 다시 `GetNumberOfPointsPerOneUnitOfPointSize()`를 곱하지 않는다.
+- `PreparedText::SetFontSize()`에 저장되는 값은 public pixel font size 그대로 유지한다.
+- `TextVisualizerImpl::CalculateEffectiveLineHeight()`의 relative 계산은 그대로 `FontSize(px) * lineHeight`를 사용한다.
+
+변경하지 않은 범위:
+
+- public API는 추가하지 않는다.
+- `LineHeight` relative / auto semantics는 변경하지 않는다.
+- line break / layout policy는 변경하지 않는다.
+- 기존 `TextController`, `TextView`, `Label`, `InputField`, `AtlasRenderer` 구현은 수정하지 않는다.
+
+확인 필요:
+
+- `TextVisualizer`의 default font size fallback이 `Label`의 default configuration과 완전히 같은지 확인
+- system / user font size scale을 `TextVisualizer`에 반영할지 여부
+- DPI 변경 시 cached DPI를 갱신할 필요가 있는지 여부
+- font variation / fallback font가 pixel conversion과 결합될 때의 visual consistency
+- sample에서 font size 12 / 24 / 36 비교 시 기대한 visual scale이 나오는지 확인
+
 ## 다음 권장 작업 재정렬
 
 현재 기준 추천 순서는 다음과 같다.
@@ -995,12 +1037,13 @@ variable line height를 아직 적용하지 않는 이유:
 - line-level baseline cache는 들어갔지만 layout y progression은 여전히 `PreparedText` level line height를 사용한다.
 - 다음 단계는 line-level `naturalLineHeight`를 실제 layout height에 반영할지 검토하는 것이다.
 
-### C. Clarify FontSize unit and conversion
+### C. Verify FontSize visual scale
 
 이유:
 
-- public API 의미는 pixel size로 고정했지만, internal point-size conversion과 기존 `Label` semantics 일치 여부는 여전히 더 확인이 필요하다.
-- line-level metrics와 함께 보더라도, 후속 품질 튜닝 전에 변환 의미를 문서/주석 수준에서 더 명확히 다듬는 게 좋다.
+- public API 의미와 internal point-size conversion은 기존 `Label` / `Controller` pixel path에 맞췄다.
+- 다음 단계는 sample에서 font size 12 / 24 / 36 정도의 visual scale이 기대와 맞는지 확인하는 것이다.
+- system / user font size scale 반영 여부는 별도 정책 판단이 필요하다.
 
 ### D. Improve word/cluster line break
 
@@ -1020,8 +1063,9 @@ variable line height를 아직 적용하지 않는 이유:
 - layout unchanged render skip의 1차 조건은 도입됐다.
 - line-level metrics cache의 1차 적용은 완료됐다.
 - `TextLine.metrics` 저장 기반은 추가됐지만 variable line height는 아직 적용하지 않았다.
+- `TextVisualizer` public `FontSize`는 기존 `Label` / `Controller`와 같은 pixel-to-point conversion을 거쳐 shaping에 사용된다.
 - 다음 성능 후보는 core redundant update policy, partial relayout, geometry-only update처럼 더 큰 정책 판단이 필요한 작업이다.
-- 품질 후보는 line-level metrics 필요성 확인과 conversion 의미 보강을 계속 분리해서 다룬다.
+- 품질 후보는 line-level metrics 필요성 확인, visual font scale 확인, word / cluster line break 개선을 계속 분리해서 다룬다.
 
 ## 금지 사항
 

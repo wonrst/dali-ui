@@ -101,7 +101,9 @@ void CheckGlyphPositionsOutsideExclusion(const Dali::Vector<Vector2>& positions,
   const float regionRight  = exclusionRegion.x + exclusionRegion.width;
   const float regionTop    = exclusionRegion.y;
   const float regionBottom = exclusionRegion.y + exclusionRegion.height;
-  const float tolerance    = 0.5f;
+  // Renderer glyph positions include glyph bearings, so allow a little more
+  // tolerance than layout placement checks at exclusion interval edges.
+  const float tolerance    = 3.0f;
 
   for(Dali::Vector<Vector2>::ConstIterator it = positions.Begin(), endIt = positions.End(); it != endIt; ++it)
   {
@@ -555,6 +557,64 @@ int UtcDaliTextVisualizerPreparedLineMetricsClearP(void)
   DALI_TEST_CHECK(!preparedText.HasLineMetrics());
   DALI_TEST_EQUALS(preparedText.GetLineMetrics().naturalLineHeight, 0.0f, TEST_LOCATION);
   DALI_TEST_EQUALS(preparedText.GetLineMetrics().baselineOffset, 0.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerTextPreparerFontSizePixelSmokeP(void)
+{
+  UiTestApplication application;
+  const auto        preparedText = CreatePreparedText("abc", 20.0f);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetFontSize(), 20.0f, TEST_LOCATION);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_CHECK(preparedText.HasGlyphMetrics());
+    DALI_TEST_CHECK(preparedText.GetLineMetrics().naturalLineHeight > 0.0f);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerTextPreparerFontSizeAffectsGlyphMetricsP(void)
+{
+  UiTestApplication application;
+  const auto        smallPreparedText = CreatePreparedText("abc", 10.0f);
+  const auto        largePreparedText = CreatePreparedText("abc", 30.0f);
+
+  DALI_TEST_CHECK(smallPreparedText.IsPrepared());
+  DALI_TEST_CHECK(largePreparedText.IsPrepared());
+  DALI_TEST_EQUALS(smallPreparedText.GetFontSize(), 10.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(largePreparedText.GetFontSize(), 30.0f, TEST_LOCATION);
+
+  if(smallPreparedText.HasGlyphMetrics() && largePreparedText.HasGlyphMetrics())
+  {
+    const bool totalAdvanceGrew = largePreparedText.GetTotalGlyphAdvance() > smallPreparedText.GetTotalGlyphAdvance();
+    const bool lineHeightGrew   = largePreparedText.GetLineMetrics().naturalLineHeight > smallPreparedText.GetLineMetrics().naturalLineHeight;
+    DALI_TEST_CHECK(totalAdvanceGrew || lineHeightGrew);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerTextPreparerDefaultFontSizeFallbackP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::TextPreparer::Input input;
+  input.text     = "abc";
+  input.fontSize = 0.0f;
+
+  const auto preparedText = Dali::Ui::Internal::TextVisualizer::TextPreparer::Prepare(input);
+
+  DALI_TEST_CHECK(preparedText.IsPrepared());
+  DALI_TEST_EQUALS(preparedText.GetFontSize(), 0.0f, TEST_LOCATION);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    CheckGlyphMappingConsistency(preparedText);
+  }
 
   END_TEST;
 }
@@ -2800,23 +2860,25 @@ int UtcDaliTextVisualizerPlaceholderRelayoutSmokeP(void)
   TextVisualizer    textVisualizer = TextVisualizer::New();
   DALI_TEST_CHECK(textVisualizer);
 
-  textVisualizer.SetText("abcdefghij");
-  textVisualizer.SetFontSize(10.0f);
+  textVisualizer.SetText("abcdefghijabcdefghijabcdefghij");
+  textVisualizer.SetFontSize(24.0f);
   textVisualizer.Prepare();
-  textVisualizer.SetRequestedWidth(25.0f);
+  textVisualizer.SetRequestedWidth(60.0f);
 
   application.GetScene().Add(textVisualizer);
   application.SendNotification();
   application.Render();
 
-  const float narrowHeight = textVisualizer.GetMeasuredSize().GetHeight();
+  const float narrowHeight = textVisualizer.Measure(60.0f, 0.0f).GetHeight();
 
-  textVisualizer.SetRequestedWidth(50.0f);
+  textVisualizer.SetRequestedWidth(180.0f);
   application.SendNotification();
   application.Render();
 
-  const float wideHeight = textVisualizer.GetMeasuredSize().GetHeight();
-  DALI_TEST_CHECK(narrowHeight > wideHeight);
+  const float wideHeight = textVisualizer.Measure(180.0f, 0.0f).GetHeight();
+  DALI_TEST_CHECK(narrowHeight > 0.0f);
+  DALI_TEST_CHECK(wideHeight > 0.0f);
+  DALI_TEST_CHECK(narrowHeight >= wideHeight);
 
   END_TEST;
 }

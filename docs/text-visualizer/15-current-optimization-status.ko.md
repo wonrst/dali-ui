@@ -23,10 +23,11 @@
 - `Add TextVisualizer line-level metrics cache`
 - `Add TextVisualizer TextLine metrics cache`
 - `Replace performance sample labels with TextVisualizer`
+- `Use pixel font size conversion for TextVisualizer`
 
 이번 작업 포함 최신 커밋:
 
-- `Replace performance sample labels with TextVisualizer`
+- `Use pixel font size conversion for TextVisualizer`
 
 최근 최적화 상태:
 
@@ -37,6 +38,7 @@
 - renderer glyph position 계산에 line-level metrics cache를 우선 사용할 수 있게 했다.
 - `LayoutGlyphs()`가 `TextLine.metrics`를 채우도록 했다.
 - performance sample의 title / status / quote text를 `Label`에서 `TextVisualizer`로 교체했다.
+- `TextPreparer`가 public pixel `FontSize`를 기존 `Label` / `Controller`와 같은 pixel-to-point 변환으로 shaping에 사용하도록 했다.
 
 현재 해석:
 
@@ -58,7 +60,7 @@
 - line-level metrics cache가 추가되어 renderer baseline 보정 품질 개선의 기반이 생겼다.
 - `LayoutResult`의 각 glyph line은 line별 metrics 후보를 보유할 수 있다.
 - paragraph 4 수준에서는 어느 정도 동작하지만 paragraph 8 수준은 아직 성능이 부족하다.
-- 전체 `TextVisualizer` UTC는 `123 tests, 0 failures` 상태다.
+- 전체 `TextVisualizer` UTC는 `126 tests, 0 failures` 상태다.
 
 현재 performance sample은 interactive moving bounds 비용을 관찰하기 위한 수동/반자동 확인 지점이다. 아직 FPS나 per-stage timing을 core instrumentation으로 고정하지는 않았다.
 
@@ -88,6 +90,21 @@ CalculatedLineHeight(px) = FontSize(px) * lineHeight
 - 개념적으로는 `Label`의 `LineHeightMode::RELATIVE`와 같은 의미를 따른다.
 - 다만 `TextVisualizer`에는 아직 `LineHeightMode` public API가 없다.
 - absolute mode도 현재 제공하지 않는다.
+
+FontSize conversion:
+
+- `LabelImpl::SetFontSize()`와 `InputFieldImpl::SetFontSize()`는 public font size를 `Text::Controller::PIXEL_SIZE`로 `Controller::SetDefaultFontSize()`에 전달한다.
+- `Controller`는 pixel size를 `point = pixel * 72 / DPI` 공식으로 point size로 변환해 저장한다.
+- shaping 단계에서는 point size에 `FontClient::GetNumberOfPointsPerOneUnitOfPointSize()`를 곱해 `PointSize26Dot6` 값을 만든다.
+- `TextPreparer`도 같은 pixel-to-point 변환을 사용한다.
+- `PreparedText::GetFontSize()`는 public pixel font size를 그대로 반환한다.
+- `fontSize <= 0.0f` fallback은 이미 26.6 단위인 `TextAbstraction::FontClient::DEFAULT_POINT_SIZE`를 사용한다.
+
+확인 필요:
+
+- system / user font size scale을 `TextVisualizer`에 반영할지 여부
+- DPI 변경 시 cached DPI를 갱신할 필요가 있는지 여부
+- default font size fallback이 `Label` 기본 configuration과 완전히 같은지 여부
 
 ## 4. LineMetrics 현재 상태
 

@@ -33,6 +33,7 @@ namespace Dali::Ui::Internal::TextVisualizer
 namespace
 {
 constexpr float FONT_SIZE_SCALE = 1.0f;
+constexpr float POINTS_PER_INCH = 72.0f;
 
 TextAbstraction::FontDescription CreateDefaultFontDescription(const Dali::String& fontFamily)
 {
@@ -46,16 +47,37 @@ TextAbstraction::FontDescription CreateDefaultFontDescription(const Dali::String
   return defaultFontDescription;
 }
 
+float GetDpi()
+{
+  static uint32_t horizontalDpi = 0u;
+  static uint32_t verticalDpi   = 0u;
+
+  if(horizontalDpi == 0u)
+  {
+    TextAbstraction::FontClient fontClient = TextAbstraction::FontClient::Get();
+    fontClient.GetDpi(horizontalDpi, verticalDpi);
+  }
+  return static_cast<float>(horizontalDpi);
+}
+
+float ConvertPixelToPoint(float pixel)
+{
+  return pixel * POINTS_PER_INCH / GetDpi();
+}
+
 Text::PointSize26Dot6 GetDefaultPointSize(TextAbstraction::FontClient& fontClient, float fontSize)
 {
   // TextVisualizer public FontSize is defined as a pixel size.
-  // The shaping/font client path still expects the internal point-size representation,
-  // so the public pixel size is converted here using the same font-client scale helper
-  // that the existing text stack relies on.
-  const float effectivePointSize = (fontSize > 0.0f) ? fontSize : TextAbstraction::FontClient::DEFAULT_POINT_SIZE;
+  // Match the existing text stack by converting public pixels to point units
+  // before expanding them to the internal 26.6 point-size representation.
+  if(fontSize > 0.0f)
+  {
+    const float effectivePointSize = ConvertPixelToPoint(fontSize);
+    return static_cast<Text::PointSize26Dot6>(effectivePointSize * FONT_SIZE_SCALE *
+                                              fontClient.GetNumberOfPointsPerOneUnitOfPointSize());
+  }
 
-  return static_cast<Text::PointSize26Dot6>(effectivePointSize * FONT_SIZE_SCALE *
-                                            fontClient.GetNumberOfPointsPerOneUnitOfPointSize());
+  return static_cast<Text::PointSize26Dot6>(TextAbstraction::FontClient::DEFAULT_POINT_SIZE * FONT_SIZE_SCALE);
 }
 
 bool IsNewParagraphGlyph(Text::GlyphIndex glyphIndex, const Dali::Vector<Text::GlyphIndex>& newParagraphGlyphs)
