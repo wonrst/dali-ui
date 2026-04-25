@@ -240,6 +240,8 @@ void TextVisualizerImpl::OnInitialize()
 
 void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
 {
+  (void)container;
+
   bool updateRenderDataResult = false;
   bool attachResult           = false;
 
@@ -304,7 +306,6 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   LogRenderDiagnostics(renderSize, updateRenderDataResult, attachResult);
 
   mLastLayoutSize = renderSize;
-  ViewImpl::OnRelayout(size, container);
 }
 
 MeasuredSize TextVisualizerImpl::OnMeasure(float widthConstraint, float heightConstraint)

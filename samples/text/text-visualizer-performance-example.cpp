@@ -59,6 +59,7 @@ constexpr float BODY_SURFACE_LEFT             = SIDE_MARGIN - 6.0f;
 constexpr float BODY_SURFACE_TOP              = TITLE_TOP;
 constexpr float BODY_SURFACE_WIDTH            = WINDOW_WIDTH - BODY_SURFACE_LEFT - SIDE_MARGIN;
 constexpr float BODY_SURFACE_HEIGHT           = WINDOW_HEIGHT - BODY_SURFACE_TOP - STATUS_HEIGHT - STATUS_BOTTOM;
+constexpr float TITLE_WIDTH                   = WINDOW_WIDTH / 2.0f - 80.0f;
 constexpr float TITLE_EXCLUSION_LINE_0_WIDTH  = 880.0f;
 constexpr float TITLE_EXCLUSION_LINE_2_WIDTH  = 510.0f;
 constexpr float TITLE_EXCLUSION_LINE_HEIGHT   = TITLE_FONT_SIZE * 0.72f;
@@ -271,22 +272,13 @@ private:
     mRoot.SetRequestedHeight(MATCH_PARENT);
     mRoot.SetBackgroundColor(WINDOW_BG_COLOR);
 
-    mTitleArea = View::New();
-    mTitleArea.SetLayoutMode(LayoutMode::STANDALONE);
-    mTitleArea.SetPositionX(BODY_SURFACE_LEFT);
-    mTitleArea.SetPositionY(BODY_SURFACE_TOP);
-    mTitleArea.SetRequestedWidth(WINDOW_WIDTH / 2.0f - 80);
-    mTitleArea.SetRequestedHeight(TITLE_HEIGHT);
-    mTitleArea.SetBackgroundColor(UiColor(Color::TRANSPARENT));
-    mTitleArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
-
     mTitleText = TextVisualizer::New();
-    mTitleText.SetLayoutMode(LayoutMode::STANDALONE);
-    mTitleText.SetPositionX(0.0f);
-    mTitleText.SetPositionY(0.0f);
-    mTitleText.SetRequestedWidth(MATCH_PARENT);
-    mTitleText.SetRequestedHeight(MATCH_PARENT);
+    mTitleText.SetPositionX(BODY_SURFACE_LEFT);
+    mTitleText.SetPositionY(BODY_SURFACE_TOP);
+    mTitleText.SetRequestedWidth(TITLE_WIDTH);
+    mTitleText.SetRequestedHeight(TITLE_HEIGHT);
     mTitleText.SetBackgroundColor(UiColor(Color::TRANSPARENT));
+    mTitleText.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
     mTitleText.SetText(BuildTitleText());
     mTitleText.SetFontFamily(SAMPLE_FONT_FAMILY);
     mTitleText.SetFontSize(TITLE_FONT_SIZE);
@@ -303,7 +295,6 @@ private:
     mContentArea.SetProperty(Actor::Property::CLIPPING_MODE, ClippingMode::CLIP_CHILDREN);
 
     mStatusText = TextVisualizer::New();
-    mStatusText.SetLayoutMode(LayoutMode::STANDALONE);
     mStatusText.SetPositionX(SIDE_MARGIN);
     mStatusText.SetPositionY(WINDOW_HEIGHT - STATUS_HEIGHT - STATUS_BOTTOM);
     mStatusText.SetRequestedWidth(CONTENT_WIDTH);
@@ -315,8 +306,7 @@ private:
     mStatusText.SetTextColor(STATUS_TEXT_COLOR);
 
     mRoot.Add(mContentArea);
-    mTitleArea.Add(mTitleText);
-    mRoot.Add(mTitleArea);
+    mRoot.Add(mTitleText);
     mRoot.Add(mStatusText);
     window.Add(mRoot);
   }
@@ -324,11 +314,10 @@ private:
   void CreateTextSurface()
   {
     mTextVisualizer = TextVisualizer::New();
-    mTextVisualizer.SetLayoutMode(LayoutMode::STANDALONE);
     mTextVisualizer.SetPositionX(0.0f);
     mTextVisualizer.SetPositionY(0.0f);
-    mTextVisualizer.SetRequestedWidth(MATCH_PARENT);
-    mTextVisualizer.SetRequestedHeight(MATCH_PARENT);
+    mTextVisualizer.SetRequestedWidth(BODY_SURFACE_WIDTH);
+    mTextVisualizer.SetRequestedHeight(BODY_SURFACE_HEIGHT);
     mTextVisualizer.SetBackgroundColor(UiColor(Color::TRANSPARENT));
     mTextVisualizer.SetText(BuildBodyText());
     mTextVisualizer.SetFontFamily(SAMPLE_FONT_FAMILY);
@@ -344,7 +333,6 @@ private:
     mContentArea.Add(mTextVisualizer);
 
     mDropCapText = TextVisualizer::New();
-    mDropCapText.SetLayoutMode(LayoutMode::STANDALONE);
     mDropCapText.SetPositionX(DROP_CAP_TEXT_X);
     mDropCapText.SetPositionY(DROP_CAP_TEXT_Y);
     mDropCapText.SetRequestedWidth(DROP_CAP_TEXT_WIDTH);
@@ -373,7 +361,6 @@ private:
       block.phase      = phase;
 
       block.text = TextVisualizer::New();
-      block.text.SetLayoutMode(LayoutMode::STANDALONE);
       block.text.SetPositionX(bounds.x);
       block.text.SetPositionY(bounds.y);
       block.text.SetRequestedWidth(bounds.width);
@@ -809,7 +796,6 @@ private:
 private:
   Application&                          mApplication;
   View                                  mRoot;
-  View                                  mTitleArea;
   TextVisualizer                        mTitleText;
   TextVisualizer                        mStatusText;
   View                                  mContentArea;

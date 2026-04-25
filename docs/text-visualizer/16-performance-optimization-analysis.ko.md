@@ -283,6 +283,13 @@ performance sample 자체도 측정을 왜곡할 수 있다.
 | `OnRelayout()` | 실제 allocated size를 우선 사용하고, width가 0 이하이면 natural width를 fallback으로 사용 |
 | empty text | wrap 측정은 `0x0`, fixed requested size는 유지 |
 
+`OnRelayout()` lifecycle도 `LabelImpl` / `InputFieldImpl` 패턴에 맞췄다.
+
+- `LabelImpl::OnRelayout()`과 `InputFieldImpl::OnRelayout()`은 자체 text layout / renderer update를 수행하고 `ViewImpl::OnRelayout()`을 명시 호출하지 않는다.
+- `ViewImpl::OnRelayout()`은 padding / margin이 있는 경우 child를 `RelayoutContainer`에 다시 넣고, fitting / accessibility 관련 base view 처리를 수행한다.
+- `TextVisualizerImpl`은 내부 `mRenderHost`를 `AddActorChild()`로 직접 소유하고 `SyncRenderHostSize()`로 크기를 직접 맞춘다.
+- 따라서 `TextVisualizerImpl::OnRelayout()`도 base `ViewImpl::OnRelayout()` 호출에 의존하지 않고, 내부 render host와 renderer output lifecycle을 직접 관리한다.
+
 `InputField`와 다르게 처리한 점:
 
 - cursor / selection / decorator / IME / placeholder interaction은 고려하지 않는다.

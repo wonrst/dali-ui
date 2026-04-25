@@ -563,6 +563,7 @@ basic word wrap 적용 후 performance sample에서 layout 비용 증가가 관�
 - `WRAP_CONTENT` width / height는 text natural width와 해당 width에서의 layout height를 기준으로 측정한다.
 - `MATCH_PARENT` / fill parent는 positive parent constraint가 있으면 그 constraint를 사용한다.
 - `OnRelayout()`은 실제 allocated size를 우선 사용하고, width가 0 이하이면 natural width를 fallback으로 사용한다.
+- `OnRelayout()`은 `LabelImpl` / `InputFieldImpl`처럼 base `ViewImpl::OnRelayout()`을 호출하지 않고 내부 render host를 직접 size sync한다.
 - empty text는 wrap 측정에서 `0x0`을 반환하지만 fixed requested size는 유지한다.
 
 범위에서 제외한 것:
