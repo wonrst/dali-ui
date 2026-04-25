@@ -121,7 +121,7 @@ const OrbPreset ORB_PRESETS[MAX_ORB_COUNT] = {
 
 Dali::String BuildTitleText()
 {
-  return Dali::String("THE FUTURE OF TEXT LAYOUT IS DYNAMIC");
+  return Dali::String("THE FUTURE OF\nTEXT LAYOUT IS\nDYNAMIC");
 }
 
 Dali::String BuildBodyText()
@@ -132,27 +132,27 @@ Dali::String BuildBodyText()
     << "텍스트는 더 이상 사각형 안에 갇힌 데이터가 아니라 주변 요소와 함께 리듬을 만들어내는 시각 재료다. "
     << "When a system can prepare shaping once and then reflow around objects, it stops feeling like a rigid document engine and starts behaving like a layout instrument. "
     << "A browser still hides the real cost of measurement behind synchronous barriers. A paragraph looks effortless only because the engine measured, broke, aligned, and painted it before the reader noticed. "
-    << "But when interactive objects move through the composition, the hidden pipeline becomes visible. The question is no longer whether text can wrap. The question is whether text can stay fluid without forcing the whole page to stall.\n\n"
+    << "But when interactive objects move through the composition, the hidden pipeline becomes visible. The question is no longer whether text can wrap. The question is whether text can stay fluid without forcing the whole page to stall."
     << "Design systems often treat text as the last step: render a block, then stack objects around it. Editorial interfaces reverse the rule. "
     << "Objects enter first, and the text must adapt in real time without losing its tone, measure, or cadence. "
     << "That means line height, baseline placement, and the geometry passed to the renderer all matter at once. "
     << "When the gap between lines is too tight, every moving obstacle feels heavier because more lines must be processed and more fragments must squeeze into the same height. "
-    << "Once line metrics become more natural, the paragraphs breathe. The visual change looks subtle, but the engine also gains room: fewer visible lines, fewer interval scans, and less layout churn under pressure.\n\n"
+    << "Once line metrics become more natural, the paragraphs breathe. The visual change looks subtle, but the engine also gains room: fewer visible lines, fewer interval scans, and less layout churn under pressure."
     << "CSS taught the industry to think in rectangles, but the most interesting interfaces are rarely rectangular. Cards expand, images drift, subtitles appear, and notifications cut across the reading flow. "
     << "Developers end up guessing text height, over-measuring the DOM, or paying for expensive relayout loops because the engine exposes too little of its own structure. "
     << "A text visualizer should move in the opposite direction. It should prepare text once, expose stable layout inputs, and let the application reposition exclusion bounds as often as composition demands. "
-    << "The renderer then needs to update cleanly when those placements change.\n\n"
+    << "The renderer then needs to update cleanly when those placements change.\n"
     << "This sample keeps one large text surface and uses invisible fixed bounds to split the body into three reading lanes. "
     << "The moving orb should feel like an inserted image or a conversation bubble that the paragraph naturally avoids. "
     << "It is not enough for the box height to change. The glyphs must truly reflow and find a new path through the composition as the scene shifts. "
-    << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive.\n\n"
+    << "If the text remains readable while the objects drift, the pipeline stops being a demo and starts becoming a usable editorial primitive."
     << "The hard part is not drawing a glyph atlas. The hard part is keeping every later decision honest after the glyphs are prepared. "
     << "A moving title, a floating quote, or a circular object can invalidate naive assumptions about where a line begins and how many fragments a renderer must accept. "
     << "If the exclusion geometry is too coarse, the result looks mechanical; if it is too dense, the frame budget disappears. "
-    << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune.\n\n"
+    << "A practical implementation has to balance editorial shape with predictable cost, then make that trade visible enough for developers to tune."
     << "The title at the top is deliberately oversized so the body text can demonstrate a second kind of avoidance: not just an obstacle box, but a typographic silhouette. "
-    << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
-    << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
+    // << "The body starts at the same origin as the title and flows through the remaining space, while the title itself stays readable as an independent visual layer. "
+    // << "This is the kind of composition that usually forces applications into screenshots, masks, or custom canvas drawing. "
     << "Here it remains text: shaped once, measured as text, and continuously rearranged as the scene moves.";
 
   const std::string text = builder.str();
