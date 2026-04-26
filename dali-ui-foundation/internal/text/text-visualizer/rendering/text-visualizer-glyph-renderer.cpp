@@ -879,6 +879,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
 
   const Vector2  actorSize                = GetMeshActorSize(adapter);
   const uint64_t newMeshTopologySignature = CalculateMeshTopologySignature(pendingMeshes, glyphManager);
+  mOutputActor.SetProperty(Actor::Property::SIZE, Vector3(actorSize.x, actorSize.y, 0.0f));
 
   auto canUpdateGeometryOnly = [&]() -> bool
   {

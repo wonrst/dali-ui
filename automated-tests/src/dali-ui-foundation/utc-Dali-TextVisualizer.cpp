@@ -2006,6 +2006,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
   {
     DALI_TEST_CHECK(renderer.HasOutputActor());
     DALI_TEST_CHECK(renderer.GetOutputActor().GetChildCount() > 0u);
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetProperty<Vector3>(Actor::Property::SIZE), Vector3(layoutResult.width, layoutResult.height, 0.0f), TEST_LOCATION);
     DALI_TEST_CHECK(renderer.GetMeshRecordCount() > 0u);
     DALI_TEST_CHECK(renderer.HasMeshTopologySignature());
     DALI_TEST_CHECK(renderer.GetMeshTopologySignature() != 0u);
@@ -2109,6 +2110,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderAfterAtlasRendererWarmupSmokeP(void)
   {
     DALI_TEST_CHECK(renderer.HasOutputActor());
     DALI_TEST_CHECK(renderer.GetOutputActor().GetChildCount() > 0u);
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetProperty<Vector3>(Actor::Property::SIZE), Vector3(layoutResult.width, layoutResult.height, 0.0f), TEST_LOCATION);
     DALI_TEST_CHECK(renderer.GetMeshRecordCount() > 0u);
     DALI_TEST_CHECK(renderer.HasMeshTopologySignature());
     DALI_TEST_CHECK(renderer.GetMeshTopologySignature() != 0u);
@@ -2195,6 +2197,7 @@ int UtcDaliTextVisualizerGlyphRendererRepeatedRenderSameGlyphSequenceSmokeP(void
   if(firstRenderResult && secondRenderResult)
   {
     DALI_TEST_CHECK(renderer.HasGlyphCacheEntries());
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetProperty<Vector3>(Actor::Property::SIZE), Vector3(layoutResult.width, layoutResult.height, 0.0f), TEST_LOCATION);
     DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), firstCacheEntryCount, TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheSignature());
     DALI_TEST_EQUALS(renderer.GetGlyphCacheSignature(), firstSignature, TEST_LOCATION);
@@ -2256,6 +2259,7 @@ int UtcDaliTextVisualizerGlyphRendererRepeatedRenderAfterWarmupGeometryOnlySmoke
   if(firstRenderResult && secondRenderResult)
   {
     DALI_TEST_CHECK(renderer.HasMeshRecords());
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetProperty<Vector3>(Actor::Property::SIZE), Vector3(layoutResult.width, layoutResult.height, 0.0f), TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasMeshTopologySignature());
     DALI_TEST_EQUALS(renderer.GetMeshTopologySignature(), firstTopologySignature, TEST_LOCATION);
     DALI_TEST_EQUALS(renderer.GetMeshRecordCount(), firstMeshRecordCount, TEST_LOCATION);

@@ -831,3 +831,45 @@ Enable lightweight renderer flag locally and benchmark performance sample
 ```text
 Design TextVisualizer glyph cache miss handling
 ```
+
+## 19. 진행: preserve lightweight renderer state across adapter updates
+
+non-renderable glyph skip 이후 flag ON 로컬 실험에서 다음 로그가 관찰됐다.
+
+```text
+attempts=563
+successes=562
+fallbacks=1
+fullRebuilds=1
+geometryOnly=0
+glyphCacheEntries=3137
+meshRecords=2
+outputSize=(0,0,0)
+firstChildSize=(1354,970,0)
+```
+
+해석:
+
+- lightweight renderer는 대부분 성공하므로 space / advance-only glyph fallback 문제는 크게 줄었다.
+- 하지만 `geometryOnly=0`이므로 mesh state가 render 사이에서 유지되지 않았다.
+- 원인 후보는 `AtlasRendererBridge::SetAdapter(non-null)`이 layout update마다 `mGlyphRenderer.Clear()`를 호출해 glyph cache / mesh topology / mesh records를 모두 지우는 것이었다.
+- 또한 output actor size가 `(0,0,0)`이라 child mesh actor의 transform 기준이 불안정할 수 있었다.
+
+변경 정책:
+
+- `SetAdapter(nullptr)`와 `AtlasRendererBridge::Clear()`에서는 기존처럼 `TextVisualizerGlyphRenderer::Clear()`를 호출한다.
+- `SetAdapter(non-null)`에서는 renderer state를 clear하지 않는다.
+- adapter가 바뀌어도 `TextVisualizerGlyphRenderer::Render()`가 glyph cache signature와 mesh topology signature로 full rebuild 또는 geometry-only update를 판단한다.
+- text / font / fontSize 변경으로 glyph sequence가 바뀌면 signature mismatch로 old refs release + full rebuild가 가능하다.
+- `RenderAdapter()`는 output actor size를 adapter control size로 매 render마다 동기화한다.
+
+기대:
+
+- flag ON 재실험에서 첫 render는 full rebuild, 이후 같은 glyph sequence / topology render는 geometry-only update가 증가해야 한다.
+- diagnostics log의 `outputSize`가 더 이상 `(0,0,0)`에 머물지 않아야 한다.
+
+남은 확인:
+
+- glyph correctness 문제는 별도 diagnostics가 필요하다.
+- cache miss handling은 여전히 없다.
+- default lightweight flag는 계속 `false`다.

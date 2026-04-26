@@ -111,7 +111,6 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 
   mAdapter = adapter;
   mImpl->Clear();
-  mGlyphRenderer.Clear();
   if(mRenderHost)
   {
     mGlyphRenderer.SetRenderHost(mRenderHost);
