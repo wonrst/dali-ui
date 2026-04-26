@@ -87,8 +87,8 @@
 - `docs/text-visualizer/19-render-optimization-phase2-plan.ko.md`에서 `TextVisualizerGlyphRenderer` prototype 방향을 시작점으로 잡았다.
 - `docs/text-visualizer/20-lightweight-renderer-dependency-analysis.ko.md`에서 `TextVisualizerGlyphRenderer` 구현에 필요한 atlas / mesh / geometry dependency를 조사했다.
 - 조사 결과 `AtlasGlyphManager`와 `AtlasMeshFactory`는 재사용 가능하지만, `CacheGlyph`, `MeshRecord`, `TextCacheEntry`, actor/renderer 생성 lifecycle은 `AtlasRenderer::Impl` private 구현에 묶여 있다.
-- active path에 연결하지 않는 `TextVisualizerGlyphRenderer` skeleton을 추가했다.
-- 현재 skeleton은 output actor / render host lifecycle만 보유하며 glyph mesh / atlas cache / geometry 생성은 아직 구현하지 않는다.
+- 초기 단계에서 active path에 연결하지 않는 `TextVisualizerGlyphRenderer` skeleton을 추가했다.
+- 초기 skeleton은 output actor / render host lifecycle만 보유했지만, 이후 mesh / glyph cache reference / optional bridge integration까지 확장됐다.
 - `TextVisualizerGlyphRenderer`에 private mesh record state와 clear lifecycle을 추가했다.
 - `TextVisualizerGlyphRenderer::Render()` MVP를 추가해 already-cached glyph만 atlas id별 mesh actor로 만들 수 있게 했다.
 - MVP는 `PreparedText` / `LayoutResult` / `AtlasViewAdapter`를 입력으로 받고 cached renderer glyph positions를 사용한다.
@@ -105,7 +105,7 @@
 - `UpdateLayout()`은 raw exclusion vector 대신 cached sorted exclusions를 사용한다.
 - text / font / fontSize / lineHeight / color / size 변경은 sorted exclusion cache를 유지한다.
 - `docs/text-visualizer/23-glyph-cache-lifecycle-design.ko.md`에서 active lightweight renderer path 전환 전 필요한 glyph cache ownership과 ref count lifecycle을 설계했다.
-- 현재 `TextVisualizerGlyphRenderer` MVP는 already-cached glyph mesh proof이며, production path로 쓰려면 own glyph references가 필요하다.
+- 현재 `TextVisualizerGlyphRenderer` prototype은 already-cached glyph mesh proof에서 optional bridge path와 geometry-only update proof까지 확장됐다.
 - `TextVisualizerGlyphRenderer`가 already-cached glyph에 대해 reference acquire / release / rollback을 수행할 수 있게 됐다.
 - 같은 glyph sequence render에서는 glyph cache signature를 통해 ref count churn을 피할 수 있는 기반이 생겼다.
 - 같은 glyph cache signature와 같은 mesh topology에서는 `TextVisualizerGlyphRenderer`가 기존 mesh actor / renderer / geometry를 유지하고 `VertexBuffer::SetData()`로 vertex data만 갱신할 수 있게 됐다.
@@ -128,7 +128,7 @@
 - lightweight fallback 시 기존 lightweight output을 즉시 detach하지 않고 fallback render 성공 후 bridge output 교체 로직이 정리하도록 했다.
 - lightweight mesh actor에도 atlas shader가 사용하는 `uOffset` property를 `Vector2::ZERO`로 등록해 기존 `Text::AtlasRenderer`와 맞췄다.
 - cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`는 아직 하지 않는다.
-- 다음 추천 구현 후보는 visible glyph cache miss handling 설계 또는 lightweight renderer production fallback policy 정리다.
+- 다음 추천 구현 후보는 기존 `Text::AtlasRenderer::CacheGlyph()` behavior를 공유하기 위한 internal glyph cache helper 설계다.
 
 현재 해석:
 
@@ -850,21 +850,24 @@ flag ON 로컬 실험에서 `text-breaker.example`의 brick renderer toggle과 d
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Design / implement glyph cache miss handling
+### A. Design shared glyph cache helper for TextVisualizerGlyphRenderer
 
 이유:
 
 - geometry-only prototype은 already-cached glyph를 전제로 한다.
 - active path 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / ref count acquire를 안전하게 처리해야 한다.
-- `FontClient::CreateBitmap()` / compressed bitmap / atlas block size policy는 기존 `AtlasRenderer::Impl::CacheGlyph()`와 맞춰야 하므로 별도 설계가 필요하다.
+- `FontClient::CreateBitmap()` / compressed bitmap / atlas block size policy는 기존 `AtlasRenderer::Impl::CacheGlyph()`와 맞춰야 한다.
+- lightweight path의 가치가 확인됐으므로, 중복 구현보다 기존 renderer와 cache behavior를 공유할 수 있는 internal helper extraction 설계를 먼저 진행한다.
+- 이 작업은 `text-atlas-renderer.*` 영향 가능성이 있으므로 md-only 설계 커밋으로 먼저 분리한다.
 
-### B. Integrate optional renderer path behind internal flag
+### B. Decide limited CacheGlyph implementation vs helper extraction
 
 이유:
 
-- optional bridge path는 compile-time flag 기본 off로 추가됐다.
-- 다음 단계에서는 로컬에서 flag를 켠 뒤 performance sample을 비교한다.
-- render dirty clear / layout policy는 변경하지 않는다.
+- A안은 `TextVisualizerGlyphRenderer`에 limited CacheGlyph equivalent를 구현하는 것이다.
+- 빠르게 독립 prototype을 완성할 수 있지만 기존 `AtlasRenderer::Impl::CacheGlyph()`와 behavior drift 위험이 있다.
+- B안은 기존 `CacheGlyph` logic을 공용 internal helper로 추출하는 것이다.
+- 영향 범위는 크지만 long-term production path에는 더 안전하다.
 
 ### C. Extend geometry-only update toward active-path policy
 

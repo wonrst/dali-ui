@@ -2,11 +2,11 @@
 
 ## 1. 목적
 
-현재 `TextVisualizerGlyphRenderer` MVP는 already-cached glyph만 처리한다.
+현재 `TextVisualizerGlyphRenderer` prototype은 already-cached glyph만 처리한다.
 
-즉 `Render(preparedText, layoutResult, adapter, textColor)`는 `AtlasGlyphManager::IsCached()`가 성공한 glyph에 대해서만 atlas id별 mesh actor를 만들 수 있고, cache miss가 발생하면 안전하게 `false`를 반환한다.
+즉 `Render(preparedText, layoutResult, adapter, textColor)` 또는 adapter-only `Render(adapter)`는 `AtlasGlyphManager::IsCached()`가 성공한 glyph에 대해서만 atlas id별 mesh actor를 만들 수 있고, cache miss가 발생하면 안전하게 `false`를 반환한다.
 
-이 상태는 rendering feasibility proof로는 충분하지만, active `TextVisualizer` render path로 연결하기에는 아직 부족하다. active path로 연결하려면 다음 책임이 필요하다.
+이 상태는 layout-dynamic workload에서 lightweight renderer와 geometry-only update의 가치를 확인하기에는 충분하지만, production default path로 전환하기에는 아직 부족하다. production path로 전환하려면 다음 책임이 필요하다.
 
 - cache miss 시 glyph bitmap 생성
 - atlas cache add
@@ -15,38 +15,36 @@
 - render 실패 중간 상태 rollback
 - layout-dynamic workload에서 glyph sequence가 같을 때 ref count churn 방지
 
-이 문서는 `TextVisualizerGlyphRenderer`가 기존 `Text::AtlasRenderer`를 직접 수정하지 않고도 glyph cache ownership을 가질 수 있는 lifecycle을 설계한다.
+이 문서는 `TextVisualizerGlyphRenderer`가 기존 `Text::AtlasRenderer`와 glyph cache behavior를 어떻게 공유하거나 분리할지 설계한다.
 
-## 2. 현재 TextVisualizerGlyphRenderer MVP 상태
+## 2. 현재 TextVisualizerGlyphRenderer 구현 상태
 
 현재 구현은 다음 상태다.
 
-- `TextVisualizerGlyphRenderer::Render()`
-- 입력:
-  - `PreparedText`
-  - `LayoutResult`
-  - `AtlasViewAdapter`
-  - single `textColor`
-- `AtlasViewAdapter`의 cached renderer glyph positions 사용
-- `AtlasGlyphManager::IsCached()` 사용
-- `AtlasGlyphManager::GenerateMeshData()` 사용
-- atlas id별 pending mesh 구성
-- L8 / BGRA atlas pixel format에 따라 shader 선택
-- output actor 아래 mesh actor attach
-- cache miss / invalid glyph / invalid position / empty mesh / texture failure는 `false`
-- glyph bitmap 생성 없음
-- atlas cache add 없음
-- glyph ref count lifecycle 없음
-- active render path 미연결
+- `TextVisualizerGlyphRenderer::Render()`는 `PreparedText`, `LayoutResult`, `AtlasViewAdapter`, single `textColor`를 입력으로 받을 수 있다.
+- adapter-only `Render(const AtlasViewAdapter&)` overload도 있다.
+- `AtlasViewAdapter`의 cached renderer glyph positions를 사용한다.
+- `AtlasGlyphManager::IsCached()`와 `AtlasGlyphManager::GenerateMeshData()`로 already-cached glyph mesh를 만든다.
+- atlas id별 pending mesh를 구성하고 L8 / BGRA atlas pixel format에 따라 shader를 선택한다.
+- output actor 아래 mesh actor를 attach한다.
+- already-cached glyph에 대해 reference acquire / release / rollback을 수행한다.
+- 같은 glyph cache signature에서는 ref count churn 없이 기존 glyph cache ownership을 유지한다.
+- 같은 glyph cache signature와 같은 mesh topology에서는 actor / renderer / geometry를 유지하고 `VertexBuffer::SetData()`로 geometry-only update를 시도한다.
+- `AtlasRendererBridge`의 internal compile-time flag 뒤에서 optional bridge path로 연결되어 있다.
+- 기본 flag는 `false`이므로 production 기본 경로는 기존 `Text::AtlasRenderer` path를 유지한다.
+- flag ON 상태에서도 `TextVisualizerImpl`은 exclusion regions가 있는 TextVisualizer에만 lightweight renderer를 허용한다.
+- cache miss / invalid glyph / invalid position / empty mesh / texture failure는 `false`로 반환하고 기존 renderer fallback을 사용한다.
+- glyph bitmap 생성은 아직 없다.
+- atlas cache add는 아직 없다.
 
 중요한 점은 `AtlasGlyphManager::GenerateMeshData()`가 mesh data를 만들 때 atlas image reference count를 증가시키지 않는다는 것이다. `AtlasGlyphManager::GenerateMeshData()`는 내부적으로 `AtlasManager::GenerateMeshData(..., false)`를 호출한다.
 
-따라서 현재 MVP는 “다른 renderer가 이미 보유하고 있는 glyph atlas slot을 읽어서 mesh를 만드는 smoke path”에 가깝다. 기존 owner가 reference를 release해 atlas image가 제거되면, 새 renderer의 mesh는 stale atlas slot을 참조할 위험이 있다.
+따라서 현재 prototype은 already-cached glyph에 대해서는 직접 references를 보유하지만, cache miss에서 glyph bitmap을 만들고 atlas에 추가하는 ownership 시작점은 아직 없다.
 
 결론:
 
-- rendering 가능성은 확인됐다.
-- production path로 쓰려면 cache ownership이 필요하다.
+- rendering 가능성과 layout-dynamic geometry-only update 가치는 확인됐다.
+- production default path로 쓰려면 cache miss handling과 기존 `AtlasRenderer::CacheGlyph()` behavior 공유 전략이 필요하다.
 
 ## 3. 기존 AtlasRenderer CacheGlyph / RemoveText 분석
 
