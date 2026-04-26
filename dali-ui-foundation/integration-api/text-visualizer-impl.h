@@ -20,6 +20,7 @@
 // EXTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/exclusion-layout-cache.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/public-api/text/text-enumerations.h>
@@ -208,28 +209,29 @@ private:
   void  SyncRenderStateToAdapter(const Vector2& controlSize);
 
 private:
-  Dali::String                                  mText;
-  Dali::String                                  mFontFamily;
-  float                                         mFontSize;
-  float                                         mLineHeight;
-  UiColor                                       mTextColor;
-  Dali::Vector<Rect<float>>                     mExclusionRegions;
-  Internal::TextVisualizer::PreparedText        mPreparedText;
-  Internal::TextVisualizer::LayoutResult        mLayoutResult;
-  Internal::TextVisualizer::LayoutResult        mMeasuredLayoutCache;
-  Internal::TextVisualizer::AtlasViewAdapter    mAtlasViewAdapter;
-  Internal::TextVisualizer::AtlasRendererBridge mAtlasRendererBridge;
-  Actor                                         mRenderHost;
-  Vector2                                       mLastLayoutSize;
-  float                                         mMeasuredLayoutWidth;
-  uint64_t                                      mLastRenderedLayoutSignature;
-  bool                                          mPrepareDirty;
-  bool                                          mLayoutDirty;
-  bool                                          mRenderDirty;
-  bool                                          mForceRenderDirty;
-  bool                                          mHasLastRenderedLayoutSignature;
-  bool                                          mHasMeasuredLayoutCache;
-  mutable bool                                  mRenderDiagnosticsLogged;
+  Dali::String                                   mText;
+  Dali::String                                   mFontFamily;
+  float                                          mFontSize;
+  float                                          mLineHeight;
+  UiColor                                        mTextColor;
+  Dali::Vector<Rect<float>>                      mExclusionRegions;
+  Internal::TextVisualizer::ExclusionLayoutCache mExclusionLayoutCache;
+  Internal::TextVisualizer::PreparedText         mPreparedText;
+  Internal::TextVisualizer::LayoutResult         mLayoutResult;
+  Internal::TextVisualizer::LayoutResult         mMeasuredLayoutCache;
+  Internal::TextVisualizer::AtlasViewAdapter     mAtlasViewAdapter;
+  Internal::TextVisualizer::AtlasRendererBridge  mAtlasRendererBridge;
+  Actor                                          mRenderHost;
+  Vector2                                        mLastLayoutSize;
+  float                                          mMeasuredLayoutWidth;
+  uint64_t                                       mLastRenderedLayoutSignature;
+  bool                                           mPrepareDirty;
+  bool                                           mLayoutDirty;
+  bool                                           mRenderDirty;
+  bool                                           mForceRenderDirty;
+  bool                                           mHasLastRenderedLayoutSignature;
+  bool                                           mHasMeasuredLayoutCache;
+  mutable bool                                   mRenderDiagnosticsLogged;
 };
 
 } // namespace Integration

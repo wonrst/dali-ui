@@ -22,6 +22,7 @@
 #include <dali-ui-foundation/dali-ui-foundation.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-renderer-bridge.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/atlas-view-adapter.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/exclusion-layout-cache.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/rendering/text-visualizer-glyph-renderer.h>
@@ -3492,6 +3493,137 @@ int UtcDaliTextVisualizerPrepareEmojiTextP(void)
 
   textVisualizer.SetText("Emoji 😀👨‍👩‍👧‍👦");
   textVisualizer.Prepare();
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionLayoutCacheEmptyP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+
+  DALI_TEST_CHECK(cache.Empty());
+  DALI_TEST_EQUALS(cache.Count(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(static_cast<uint32_t>(cache.GetSortedRegions().size()), 0u, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionLayoutCacheSetRegionsSortedP(void)
+{
+  UiTestApplication application;
+  Dali::Vector<Rect<float>> regions;
+  regions.PushBack(Rect<float>(0.0f, 30.0f, 10.0f, -20.0f));
+  regions.PushBack(Rect<float>(0.0f, 0.0f, 10.0f, 5.0f));
+  regions.PushBack(Rect<float>(0.0f, 20.0f, 10.0f, 5.0f));
+
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+  const uint64_t                                           initialVersion = cache.GetVersion();
+  cache.SetRegions(regions);
+
+  const Dali::Ui::Internal::TextVisualizer::SortedExclusionRegions& sortedRegions = cache.GetSortedRegions();
+  DALI_TEST_CHECK(!cache.Empty());
+  DALI_TEST_EQUALS(cache.Count(), 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(cache.GetVersion() > initialVersion);
+  DALI_TEST_EQUALS(sortedRegions[0u].top, 0.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(sortedRegions[0u].bottom, 5.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(sortedRegions[1u].top, 10.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(sortedRegions[1u].bottom, 30.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(sortedRegions[2u].top, 20.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(sortedRegions[2u].bottom, 25.0f, TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerExclusionLayoutCacheClearP(void)
+{
+  UiTestApplication application;
+  Dali::Vector<Rect<float>> regions;
+  regions.PushBack(Rect<float>(0.0f, 0.0f, 10.0f, 10.0f));
+
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+  cache.SetRegions(regions);
+  const uint64_t setVersion = cache.GetVersion();
+
+  cache.Clear();
+
+  DALI_TEST_CHECK(cache.Empty());
+  DALI_TEST_EQUALS(cache.Count(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(cache.GetVersion() > setVersion);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutIntervalsSortedCacheSameAsVectorPathP(void)
+{
+  UiTestApplication application;
+  Dali::Vector<Rect<float>> regions;
+  regions.PushBack(Rect<float>(45.0f, 0.0f, 20.0f, 20.0f));
+  regions.PushBack(Rect<float>(10.0f, 0.0f, 15.0f, 20.0f));
+
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+  cache.SetRegions(regions);
+
+  const Dali::Vector<Dali::Ui::Internal::TextVisualizer::AvailableInterval> vectorIntervals =
+    Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, regions);
+  const Dali::Vector<Dali::Ui::Internal::TextVisualizer::AvailableInterval> cacheIntervals =
+    Dali::Ui::Internal::TextVisualizer::LayoutEngine::BuildAvailableIntervals(100.0f, 0.0f, 20.0f, cache);
+
+  DALI_TEST_EQUALS(cacheIntervals.Count(), vectorIntervals.Count(), TEST_LOCATION);
+  for(uint32_t index = 0u; index < vectorIntervals.Count(); ++index)
+  {
+    DALI_TEST_EQUALS(cacheIntervals[index].x, vectorIntervals[index].x, TEST_LOCATION);
+    DALI_TEST_EQUALS(cacheIntervals[index].width, vectorIntervals[index].width, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutGlyphsSortedCacheSameAsVectorPathP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("hello world dynamic text", 16.0f);
+  Dali::Vector<Rect<float>> regions;
+  regions.PushBack(Rect<float>(55.0f, 0.0f, 45.0f, 24.0f));
+  regions.PushBack(Rect<float>(0.0f, 32.0f, 35.0f, 24.0f));
+
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+  cache.SetRegions(regions);
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult vectorLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult cacheLayoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 180.0f, 0.0f, regions, vectorLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, 180.0f, 0.0f, cache, cacheLayoutResult);
+
+  if(preparedText.GetGlyphCount() > 0u)
+  {
+    DALI_TEST_EQUALS(cacheLayoutResult.glyphPlacements.Count(), vectorLayoutResult.glyphPlacements.Count(), TEST_LOCATION);
+    DALI_TEST_EQUALS(cacheLayoutResult.CalculateSignature(), vectorLayoutResult.CalculateSignature(), TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerLayoutPlaceholderSortedCacheSameAsVectorPathP(void)
+{
+  UiTestApplication application;
+  auto              preparedText = CreatePreparedText("abcdefghij", 10.0f);
+  Dali::Vector<Rect<float>> regions;
+  regions.PushBack(Rect<float>(20.0f, 0.0f, 20.0f, 12.0f));
+  regions.PushBack(Rect<float>(0.0f, 12.0f, 15.0f, 12.0f));
+
+  Dali::Ui::Internal::TextVisualizer::ExclusionLayoutCache cache;
+  cache.SetRegions(regions);
+
+  Dali::Ui::Internal::TextVisualizer::LayoutResult vectorLayoutResult;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult cacheLayoutResult;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, regions, vectorLayoutResult);
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(preparedText, 100.0f, 12.0f, cache, cacheLayoutResult);
+
+  DALI_TEST_EQUALS(cacheLayoutResult.clusterPlacements.Count(), vectorLayoutResult.clusterPlacements.Count(), TEST_LOCATION);
+  DALI_TEST_EQUALS(cacheLayoutResult.CalculateSignature(), vectorLayoutResult.CalculateSignature(), TEST_LOCATION);
 
   END_TEST;
 }

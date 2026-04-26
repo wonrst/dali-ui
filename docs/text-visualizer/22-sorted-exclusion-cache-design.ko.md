@@ -273,3 +273,49 @@ Add TextVisualizer ExclusionLayoutCache
    - placeholder path sorted cache smoke
 
 이번 설계의 결론은 “바로 `layout-types.h`에 raw sorted vector를 노출하기보다, 작은 internal `ExclusionLayoutCache`로 cache ownership을 먼저 세우는 것”이다.
+
+## 11. 진행: ExclusionLayoutCache
+
+이번 구현에서 설계안 C의 작은 형태를 적용했다.
+
+추가된 구조:
+
+- `internal/text/text-visualizer/exclusion-layout-cache.h`
+- `internal/text/text-visualizer/exclusion-layout-cache.cpp`
+- `SortedExclusionRegion`
+- `SortedExclusionRegions`
+- `ExclusionLayoutCache`
+
+`ExclusionLayoutCache::SetRegions()`는 raw `Dali::Vector<Rect<float>>`를 받아 `top` / `bottom` 값을 미리 계산하고 y 기준으로 정렬한다. `Clear()`와 `SetRegions()`는 version을 증가시켜 cache 변경 추적이 가능하게 했다.
+
+`LayoutEngine`에는 다음 sorted cache overload를 추가했다.
+
+- `BuildAvailableIntervals(..., const ExclusionLayoutCache&)`
+- `LayoutPlaceholder(..., const ExclusionLayoutCache&, LayoutResult&)`
+- `LayoutGlyphs(..., const ExclusionLayoutCache&, LayoutResult&)`
+
+기존 vector 기반 API는 유지했다. 기존 API는 compatibility/test path로 남기고, 내부에서 temporary `ExclusionLayoutCache`를 만들어 새 overload로 위임한다. 따라서 기존 caller의 behavior는 유지된다.
+
+`TextVisualizerImpl`은 `mExclusionLayoutCache`를 member로 보유한다.
+
+적용 정책:
+
+- `SetExclusionRegions()`에서 exact compare가 false인 경우 `mExclusionRegions`를 갱신한 뒤 `mExclusionLayoutCache.SetRegions(mExclusionRegions)`를 호출한다.
+- `ClearExclusionRegions()`는 raw regions와 sorted cache를 함께 clear한다.
+- `UpdateLayout()`은 raw `mExclusionRegions` 대신 cached sorted exclusions를 사용하는 `LayoutEngine` overload를 호출한다.
+- text / font / fontSize / lineHeight / color / layout size 변경은 sorted exclusion cache를 clear하지 않는다.
+- measured layout cache는 기존처럼 exclusion 변경 시 clear된다.
+
+검증 방향:
+
+- `ExclusionLayoutCache` empty / set / clear UTC
+- unsorted input이 top 기준으로 정렬되는지 확인
+- vector path와 sorted cache path의 available intervals가 같은지 확인
+- `LayoutGlyphs()` vector path와 cache path의 `LayoutResult::CalculateSignature()`가 같은지 확인
+- `LayoutPlaceholder()` vector path와 cache path의 signature가 같은지 확인
+
+남은 한계:
+
+- moving bounds처럼 exclusion set이 매 tick 바뀌면 cache rebuild 자체는 계속 발생한다.
+- line-local blocked interval sort / merge는 여전히 layout 중 수행된다.
+- static / dynamic core split, y bucket cache, available interval cache는 다음 단계 후보로 남긴다.

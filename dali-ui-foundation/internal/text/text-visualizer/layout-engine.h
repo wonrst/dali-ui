@@ -19,6 +19,7 @@
  */
 
 // INTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/text-visualizer/exclusion-layout-cache.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-types.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/prepared-text.h>
 #include <dali/public-api/math/rect.h>
@@ -37,17 +38,34 @@ public:
                                                                  float                            lineHeight,
                                                                  const Dali::Vector<Rect<float>>& exclusionRegions);
 
+  static Dali::Vector<AvailableInterval> BuildAvailableIntervals(float                       layoutWidth,
+                                                                 float                       lineY,
+                                                                 float                       lineHeight,
+                                                                 const ExclusionLayoutCache& exclusionCache);
+
   static void LayoutPlaceholder(const PreparedText&              preparedText,
                                 float                            layoutWidth,
                                 float                            lineHeight,
                                 const Dali::Vector<Rect<float>>& exclusionRegions,
                                 LayoutResult&                    result);
 
+  static void LayoutPlaceholder(const PreparedText&         preparedText,
+                                float                       layoutWidth,
+                                float                       lineHeight,
+                                const ExclusionLayoutCache& exclusionCache,
+                                LayoutResult&               result);
+
   static void LayoutGlyphs(const PreparedText&              preparedText,
                            float                            layoutWidth,
                            float                            lineHeight,
                            const Dali::Vector<Rect<float>>& exclusionRegions,
                            LayoutResult&                    result);
+
+  static void LayoutGlyphs(const PreparedText&         preparedText,
+                           float                       layoutWidth,
+                           float                       lineHeight,
+                           const ExclusionLayoutCache& exclusionCache,
+                           LayoutResult&               result);
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

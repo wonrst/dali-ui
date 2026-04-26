@@ -33,13 +33,6 @@ struct BlockedInterval
   float end{0.0f};
 };
 
-struct SortedExclusionRegion
-{
-  Rect<float> rect;
-  float       top{0.0f};
-  float       bottom{0.0f};
-};
-
 struct GlyphFitResult
 {
   uint32_t glyphEnd{0u};
@@ -47,8 +40,6 @@ struct GlyphFitResult
   bool     hasGlyphs{false};
   bool     forceLineBreak{false};
 };
-
-using SortedExclusionRegions = std::vector<SortedExclusionRegion>;
 
 bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& region)
 {
@@ -58,35 +49,6 @@ bool HasVerticalOverlap(float lineTop, float lineBottom, const Rect<float>& regi
 bool IsInsideLayoutWidth(const BlockedInterval& interval)
 {
   return interval.end > interval.start;
-}
-
-SortedExclusionRegions BuildSortedExclusionRegions(const Dali::Vector<Rect<float>>& exclusionRegions)
-{
-  SortedExclusionRegions sortedRegions;
-  sortedRegions.reserve(exclusionRegions.Count());
-
-  for(uint32_t index = 0u; index < exclusionRegions.Count(); ++index)
-  {
-    const Rect<float>& region = exclusionRegions[index];
-    const float        bottom = region.y + region.height;
-
-    SortedExclusionRegion sortedRegion;
-    sortedRegion.rect   = region;
-    sortedRegion.top    = std::min(region.y, bottom);
-    sortedRegion.bottom = std::max(region.y, bottom);
-    sortedRegions.push_back(sortedRegion);
-  }
-
-  std::sort(sortedRegions.begin(), sortedRegions.end(), [](const SortedExclusionRegion& lhs, const SortedExclusionRegion& rhs)
-  {
-    if(lhs.top == rhs.top)
-    {
-      return lhs.bottom < rhs.bottom;
-    }
-    return lhs.top < rhs.top;
-  });
-
-  return sortedRegions;
 }
 
 float GetEffectiveLineHeight(const PreparedText& preparedText, float lineHeight)
@@ -124,14 +86,13 @@ float GetGlyphPlacementAdvance(const Text::GlyphInfo& glyph)
   return glyph.width > 0.0f ? glyph.width : 0.0f;
 }
 
-uint32_t GetEstimatedLineGuard(float lineHeight, const Dali::Vector<Rect<float>>& exclusionRegions, uint32_t glyphCount)
+uint32_t GetEstimatedLineGuard(float lineHeight, const SortedExclusionRegions& exclusionRegions, uint32_t glyphCount)
 {
   float maxBlockedBottom = 0.0f;
 
-  for(uint32_t index = 0u; index < exclusionRegions.Count(); ++index)
+  for(SortedExclusionRegions::const_iterator it = exclusionRegions.begin(), endIt = exclusionRegions.end(); it != endIt; ++it)
   {
-    const Rect<float>& region = exclusionRegions[index];
-    maxBlockedBottom          = std::max(maxBlockedBottom, region.y + region.height);
+    maxBlockedBottom = std::max(maxBlockedBottom, it->bottom);
   }
 
   const uint32_t blockedLineCount = lineHeight > 0.0f ? static_cast<uint32_t>(std::ceil(std::max(0.0f, maxBlockedBottom) / lineHeight)) : 0u;
@@ -415,8 +376,17 @@ Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float     
                                                                       float                            lineHeight,
                                                                       const Dali::Vector<Rect<float>>& exclusionRegions)
 {
-  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
-  return BuildAvailableIntervalsFromSorted(layoutWidth, lineY, lineHeight, sortedExclusionRegions);
+  ExclusionLayoutCache exclusionCache;
+  exclusionCache.SetRegions(exclusionRegions);
+  return BuildAvailableIntervals(layoutWidth, lineY, lineHeight, exclusionCache);
+}
+
+Dali::Vector<AvailableInterval> LayoutEngine::BuildAvailableIntervals(float                       layoutWidth,
+                                                                      float                       lineY,
+                                                                      float                       lineHeight,
+                                                                      const ExclusionLayoutCache& exclusionCache)
+{
+  return BuildAvailableIntervalsFromSorted(layoutWidth, lineY, lineHeight, exclusionCache.GetSortedRegions());
 }
 
 float LayoutEngine::GetPlaceholderClusterAdvance(const PreparedText& preparedText)
@@ -437,6 +407,17 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
                                      const Dali::Vector<Rect<float>>& exclusionRegions,
                                      LayoutResult&                    result)
 {
+  ExclusionLayoutCache exclusionCache;
+  exclusionCache.SetRegions(exclusionRegions);
+  LayoutPlaceholder(preparedText, layoutWidth, lineHeight, exclusionCache, result);
+}
+
+void LayoutEngine::LayoutPlaceholder(const PreparedText&         preparedText,
+                                     float                       layoutWidth,
+                                     float                       lineHeight,
+                                     const ExclusionLayoutCache& exclusionCache,
+                                     LayoutResult&               result)
+{
   result.Clear();
 
   const uint32_t clusterCount = preparedText.GetClusterCount();
@@ -452,11 +433,11 @@ void LayoutEngine::LayoutPlaceholder(const PreparedText&              preparedTe
     return;
   }
 
-  uint32_t                     currentCluster         = 0u;
-  float                        currentY               = 0.0f;
-  const uint32_t               maxLineCount           = std::max(1u, clusterCount + static_cast<uint32_t>(exclusionRegions.Count()) + 1u);
-  const uint32_t               estimatedLineCount     = std::min(maxLineCount, clusterCount);
-  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
+  uint32_t                      currentCluster         = 0u;
+  float                         currentY               = 0.0f;
+  const uint32_t                maxLineCount           = std::max(1u, clusterCount + exclusionCache.Count() + 1u);
+  const uint32_t                estimatedLineCount     = std::min(maxLineCount, clusterCount);
+  const SortedExclusionRegions& sortedExclusionRegions = exclusionCache.GetSortedRegions();
   result.Reserve(estimatedLineCount, 0u, clusterCount);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentCluster < clusterCount; ++lineIndex)
@@ -525,6 +506,17 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
                                 const Dali::Vector<Rect<float>>& exclusionRegions,
                                 LayoutResult&                    result)
 {
+  ExclusionLayoutCache exclusionCache;
+  exclusionCache.SetRegions(exclusionRegions);
+  LayoutGlyphs(preparedText, layoutWidth, lineHeight, exclusionCache, result);
+}
+
+void LayoutEngine::LayoutGlyphs(const PreparedText&         preparedText,
+                                float                       layoutWidth,
+                                float                       lineHeight,
+                                const ExclusionLayoutCache& exclusionCache,
+                                LayoutResult&               result)
+{
   result.Clear();
 
   if(!preparedText.HasGlyphData() || layoutWidth <= 0.0f)
@@ -550,11 +542,11 @@ void LayoutEngine::LayoutGlyphs(const PreparedText&              preparedText,
     glyphLayoutData         = &fallbackGlyphLayoutData;
   }
 
-  uint32_t                     currentGlyph           = 0u;
-  float                        currentY               = 0.0f;
-  const uint32_t               maxLineCount           = GetEstimatedLineGuard(effectiveLineHeight, exclusionRegions, glyphCount);
-  const uint32_t               estimatedLineCount     = std::min(maxLineCount, glyphCount);
-  const SortedExclusionRegions sortedExclusionRegions = BuildSortedExclusionRegions(exclusionRegions);
+  uint32_t                      currentGlyph           = 0u;
+  float                         currentY               = 0.0f;
+  const SortedExclusionRegions& sortedExclusionRegions = exclusionCache.GetSortedRegions();
+  const uint32_t                maxLineCount           = GetEstimatedLineGuard(effectiveLineHeight, sortedExclusionRegions, glyphCount);
+  const uint32_t                estimatedLineCount     = std::min(maxLineCount, glyphCount);
   result.Reserve(estimatedLineCount, glyphCount, 0u);
 
   for(uint32_t lineIndex = 0u; lineIndex < maxLineCount && currentGlyph < glyphCount; ++lineIndex)

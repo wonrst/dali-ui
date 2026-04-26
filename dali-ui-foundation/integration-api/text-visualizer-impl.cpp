@@ -78,6 +78,7 @@ TextVisualizerImpl::TextVisualizerImpl()
   mLineHeight(Text::LINE_HEIGHT_AUTO),
   mTextColor(Color::BLACK),
   mExclusionRegions(),
+  mExclusionLayoutCache(),
   mPreparedText(),
   mLayoutResult(),
   mMeasuredLayoutCache(),
@@ -212,6 +213,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
   if(!AreExclusionRegionsEqual(regions))
   {
     UpdateStoredExclusionRegions(regions);
+    mExclusionLayoutCache.SetRegions(mExclusionRegions);
     ClearMeasuredLayoutCache();
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
@@ -230,6 +232,7 @@ void TextVisualizerImpl::ClearExclusionRegions()
   if(!mExclusionRegions.Empty())
   {
     mExclusionRegions.Clear();
+    mExclusionLayoutCache.Clear();
     ClearMeasuredLayoutCache();
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
@@ -726,11 +729,11 @@ void TextVisualizerImpl::UpdateLayout(float layoutWidth, Internal::TextVisualize
 
   if(mPreparedText.HasGlyphData() && mPreparedText.HasGlyphMetrics())
   {
-    Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionRegions, result);
+    Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionLayoutCache, result);
   }
   else
   {
-    Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionRegions, result);
+    Internal::TextVisualizer::LayoutEngine::LayoutPlaceholder(mPreparedText, layoutWidth, effectiveLineHeight, mExclusionLayoutCache, result);
   }
 }
 

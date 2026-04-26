@@ -43,10 +43,11 @@
 - `Add simple TextVisualizer glyph mesh MVP`
 - `Cache TextVisualizer measured layout result`
 - `Design TextVisualizer sorted exclusion cache boundary`
+- `Add TextVisualizer ExclusionLayoutCache`
 
 이번 작업 포함 최신 커밋:
 
-- `Design TextVisualizer sorted exclusion cache boundary`
+- `Add TextVisualizer ExclusionLayoutCache`
 
 최근 최적화 상태:
 
@@ -89,7 +90,11 @@
 - sorted exclusion cache / available interval cache / epsilon compare는 internal API 경계와 correctness risk 때문에 이번 범위에서는 보류했다.
 - `docs/text-visualizer/22-sorted-exclusion-cache-design.ko.md`에서 sorted exclusion cache의 internal API 경계를 설계했다.
 - 추천 방향은 raw sorted vector를 바로 노출하기보다 `ExclusionLayoutCache` internal class를 추가하고, `LayoutEngine`에 sorted cache overload를 두는 것이다.
-- 다음 low-risk 구현 후보는 `Add TextVisualizer ExclusionLayoutCache`, glyph cache warmup/add path 조사, 또는 geometry-only mesh update prototype이다.
+- `ExclusionLayoutCache` internal class를 추가했고, `LayoutEngine`은 기존 vector API를 유지하면서 cache overload를 제공한다.
+- `TextVisualizerImpl`은 `SetExclusionRegions()` 변경 시 sorted cache를 rebuild하고, `ClearExclusionRegions()`에서 cache를 clear한다.
+- `UpdateLayout()`은 raw exclusion vector 대신 cached sorted exclusions를 사용한다.
+- text / font / fontSize / lineHeight / color / size 변경은 sorted exclusion cache를 유지한다.
+- 다음 low-risk 구현 후보는 glyph cache warmup/add path 조사, line-local interval cache 분석, 또는 geometry-only mesh update prototype이다.
 
 현재 해석:
 
