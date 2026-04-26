@@ -2205,6 +2205,12 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightRenderAttemptCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderSuccessCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderFallbackCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFullMeshRebuildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshTopologySignature(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
   DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
@@ -2226,6 +2232,11 @@ int UtcDaliTextVisualizerAtlasRendererBridgeWithEmptyAdapterP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightRenderAttemptCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderSuccessCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderFallbackCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFullMeshRebuildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
 
   END_TEST;
 }
@@ -2276,6 +2287,15 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearP(void)
 
   DALI_TEST_CHECK(!bridge.HasRenderableGlyphs());
   DALI_TEST_CHECK(!bridge.IsRendererCreated());
+  DALI_TEST_EQUALS(bridge.GetLightweightRenderAttemptCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightRenderSuccessCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightRenderFallbackCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFullMeshRebuildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshTopologySignature(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
 
   END_TEST;
 }
@@ -2549,6 +2569,11 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightRenderAttemptCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderSuccessCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightRenderFallbackCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFullMeshRebuildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
+  DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
 
   if(attached)
   {

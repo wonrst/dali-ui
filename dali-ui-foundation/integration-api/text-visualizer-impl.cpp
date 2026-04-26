@@ -561,6 +561,20 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
     firstChildSize.z,
     mAtlasRendererBridge.IsFirstRendererOutputChildVisible());
 
+  DALI_LOG_RELEASE_INFO(
+    "[TextVisualizer][%p] lightweight attempts=%u successes=%u fallbacks=%u fullRebuilds=%u geometryOnly=%u "
+    "glyphCacheEntries=%u meshRecords=%u hasTopology=%d topologySignature=%llu\n",
+    this,
+    mAtlasRendererBridge.GetLightweightRenderAttemptCount(),
+    mAtlasRendererBridge.GetLightweightRenderSuccessCount(),
+    mAtlasRendererBridge.GetLightweightRenderFallbackCount(),
+    mAtlasRendererBridge.GetLightweightFullMeshRebuildCount(),
+    mAtlasRendererBridge.GetLightweightGeometryOnlyUpdateCount(),
+    mAtlasRendererBridge.GetLightweightGlyphCacheEntryCount(),
+    mAtlasRendererBridge.GetLightweightMeshRecordCount(),
+    mAtlasRendererBridge.HasLightweightMeshTopologySignature(),
+    static_cast<unsigned long long>(mAtlasRendererBridge.GetLightweightMeshTopologySignature()));
+
   mRenderDiagnosticsLogged = true;
 }
 

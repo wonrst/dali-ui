@@ -560,6 +560,51 @@ Add TextVisualizerGlyphRenderer glyph cache references
 Design TextVisualizer glyph cache miss handling
 ```
 
+## 16. 진행: lightweight renderer benchmark diagnostics
+
+flag ON 실험을 관찰하기 위한 lightweight renderer diagnostics를 보강했다.
+
+추가된 bridge getter:
+
+- `GetLightweightGeometryOnlyUpdateCount()`
+- `GetLightweightFullMeshRebuildCount()`
+- `GetLightweightGlyphCacheEntryCount()`
+- `GetLightweightMeshRecordCount()`
+- `GetLightweightMeshTopologySignature()`
+- `HasLightweightMeshTopologySignature()`
+
+`TextVisualizerImpl::LogRenderDiagnostics()`에는 diagnostics flag가 켜진 경우에만 다음 항목을 추가로 출력한다.
+
+- lightweight attempts
+- lightweight successes
+- lightweight fallbacks
+- lightweight full mesh rebuilds
+- lightweight geometry-only updates
+- lightweight glyph cache entry count
+- lightweight mesh record count
+- lightweight topology signature state
+
+기본 정책:
+
+- `ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER` 기본값은 계속 `false`다.
+- `ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS` 기본값도 계속 `false`다.
+- 기본 build에서는 기존 `Text::AtlasRenderer` path와 runtime logging behavior가 그대로 유지된다.
+- performance sample status에는 표시하지 않는다. 해당 counters는 internal bridge state라 public API 없이 sample에서 접근하지 않는다.
+
+local benchmark 절차:
+
+1. `atlas-renderer-bridge.cpp`에서 `ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER`를 임시로 `true`로 바꾼다.
+2. `text-visualizer-impl.cpp`에서 `ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS`를 임시로 `true`로 바꾼다.
+3. `text-visualizer-performance.example`을 실행한다.
+4. log에서 `attempts`, `successes`, `fallbacks`, `fullRebuilds`, `geometryOnly`, `glyphCacheEntries`, `meshRecords`를 본다.
+5. 실험 후 flag 변경은 되돌리고 커밋하지 않는다.
+
+주의:
+
+- 이 단계는 correctness fix가 아니다.
+- 일부 glyph가 잘못 보이는 현상은 별도 glyph/atlas correctness diagnostics로 다룬다.
+- cache miss handling은 여전히 없다.
+
 또는 already-cached 환경을 전제로:
 
 ```text

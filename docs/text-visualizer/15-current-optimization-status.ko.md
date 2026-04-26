@@ -48,10 +48,11 @@
 - `Add TextVisualizerGlyphRenderer glyph cache references`
 - `Prototype TextVisualizer geometry-only mesh update`
 - `Integrate TextVisualizerGlyphRenderer behind internal flag`
+- `Add TextVisualizer lightweight renderer benchmark diagnostics`
 
 이번 작업 포함 최신 커밋:
 
-- `Integrate TextVisualizerGlyphRenderer behind internal flag`
+- `Add TextVisualizer lightweight renderer benchmark diagnostics`
 
 최근 최적화 상태:
 
@@ -105,8 +106,10 @@
 - 같은 glyph cache signature와 같은 mesh topology에서는 `TextVisualizerGlyphRenderer`가 기존 mesh actor / renderer / geometry를 유지하고 `VertexBuffer::SetData()`로 vertex data만 갱신할 수 있게 됐다.
 - `AtlasRendererBridge`가 compile-time flag 뒤에서 `TextVisualizerGlyphRenderer`를 먼저 시도하고 실패 시 기존 `Text::AtlasRenderer` path로 fallback할 수 있게 됐다.
 - lightweight renderer flag 기본값은 `false`라 기본 build의 active behavior는 기존과 같다.
+- bridge와 `TextVisualizerImpl` diagnostics log에 lightweight attempt / success / fallback / full rebuild / geometry-only / cache entry / mesh record counters를 추가했다.
+- diagnostics flag 기본값도 `false`라 기본 build에서는 formatting/logging 비용이 없다.
 - cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`는 아직 하지 않는다.
-- 다음 추천 구현 후보는 flag true 로컬 benchmark 또는 glyph cache miss handling 설계/구현이다.
+- 다음 추천 구현 후보는 flag true 로컬 benchmark, lightweight glyph correctness diagnostics, 또는 glyph cache miss handling 설계/구현이다.
 
 현재 해석:
 
@@ -875,4 +878,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 켠 performance sample benchmark 또는 glyph cache miss handling 설계/구현이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 켠 performance sample benchmark와 glyph correctness diagnostics다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 잘못 보이는 glyph 원인과 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.

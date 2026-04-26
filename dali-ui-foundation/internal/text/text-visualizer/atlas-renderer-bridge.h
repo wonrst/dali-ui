@@ -96,6 +96,12 @@ public:
   uint32_t GetLightweightRenderAttemptCount() const;
   uint32_t GetLightweightRenderSuccessCount() const;
   uint32_t GetLightweightRenderFallbackCount() const;
+  uint32_t GetLightweightGeometryOnlyUpdateCount() const;
+  uint32_t GetLightweightFullMeshRebuildCount() const;
+  uint32_t GetLightweightGlyphCacheEntryCount() const;
+  uint32_t GetLightweightMeshRecordCount() const;
+  uint64_t GetLightweightMeshTopologySignature() const;
+  bool     HasLightweightMeshTopologySignature() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();

@@ -273,6 +273,36 @@ uint32_t AtlasRendererBridge::GetLightweightRenderFallbackCount() const
   return mLightweightRenderFallbackCount;
 }
 
+uint32_t AtlasRendererBridge::GetLightweightGeometryOnlyUpdateCount() const
+{
+  return mGlyphRenderer.GetGeometryOnlyUpdateCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFullMeshRebuildCount() const
+{
+  return mGlyphRenderer.GetFullMeshRebuildCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightGlyphCacheEntryCount() const
+{
+  return mGlyphRenderer.GetGlyphCacheEntryCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightMeshRecordCount() const
+{
+  return mGlyphRenderer.GetMeshRecordCount();
+}
+
+uint64_t AtlasRendererBridge::GetLightweightMeshTopologySignature() const
+{
+  return mGlyphRenderer.GetMeshTopologySignature();
+}
+
+bool AtlasRendererBridge::HasLightweightMeshTopologySignature() const
+{
+  return mGlyphRenderer.HasMeshTopologySignature();
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
