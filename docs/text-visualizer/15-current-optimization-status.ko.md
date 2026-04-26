@@ -54,10 +54,11 @@
 - `Preserve TextVisualizerGlyphRenderer state across adapter updates`
 - `Fix TextVisualizerGlyphRenderer mesh actor bounds`
 - `Stabilize TextVisualizer lightweight renderer experiment`
+- `Design shared glyph cache helper for TextVisualizerGlyphRenderer`
 
 이번 작업 포함 최신 커밋:
 
-- `Stabilize TextVisualizer lightweight renderer experiment`
+- `Design shared glyph cache helper for TextVisualizerGlyphRenderer`
 
 최근 최적화 상태:
 
@@ -128,7 +129,9 @@
 - lightweight fallback 시 기존 lightweight output을 즉시 detach하지 않고 fallback render 성공 후 bridge output 교체 로직이 정리하도록 했다.
 - lightweight mesh actor에도 atlas shader가 사용하는 `uOffset` property를 `Vector2::ZERO`로 등록해 기존 `Text::AtlasRenderer`와 맞췄다.
 - cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`는 아직 하지 않는다.
-- 다음 추천 구현 후보는 기존 `Text::AtlasRenderer::CacheGlyph()` behavior를 공유하기 위한 internal glyph cache helper 설계다.
+- `docs/text-visualizer/24-shared-glyph-cache-helper-design.ko.md`에서 기존 `Text::AtlasRenderer::Impl::CacheGlyph()` behavior를 `TextVisualizerGlyphRenderer`와 공유하기 위한 helper boundary를 설계했다.
+- 추천 방향은 local limited `CacheGlyph()` 중복 구현보다 staged shared helper extraction이다.
+- 다음 추천 구현 후보는 shared atlas glyph cache helper skeleton 또는 기존 `AtlasRenderer` no-behavior-change helper extraction이다.
 
 현재 해석:
 
@@ -850,32 +853,30 @@ flag ON 로컬 실험에서 `text-breaker.example`의 brick renderer toggle과 d
 
 현재 기준 추천 순서는 다음과 같다.
 
-### A. Design shared glyph cache helper for TextVisualizerGlyphRenderer
+### A. Add shared Atlas glyph cache helper skeleton
 
 이유:
 
-- geometry-only prototype은 already-cached glyph를 전제로 한다.
-- active path 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / ref count acquire를 안전하게 처리해야 한다.
-- `FontClient::CreateBitmap()` / compressed bitmap / atlas block size policy는 기존 `AtlasRenderer::Impl::CacheGlyph()`와 맞춰야 한다.
-- lightweight path의 가치가 확인됐으므로, 중복 구현보다 기존 renderer와 cache behavior를 공유할 수 있는 internal helper extraction 설계를 먼저 진행한다.
-- 이 작업은 `text-atlas-renderer.*` 영향 가능성이 있으므로 md-only 설계 커밋으로 먼저 분리한다.
+- `24-shared-glyph-cache-helper-design.ko.md`에서 helper boundary는 문서화됐다.
+- 다음에는 request / result / entry / release helper type을 코드로 고정할 수 있다.
+- 처음 skeleton은 existing renderer와 lightweight renderer active path에 연결하지 않으면 영향 범위를 작게 유지할 수 있다.
+- 이후 기존 `AtlasRenderer::Impl::CacheGlyph()` extraction diff를 작게 만들 수 있다.
 
-### B. Decide limited CacheGlyph implementation vs helper extraction
-
-이유:
-
-- A안은 `TextVisualizerGlyphRenderer`에 limited CacheGlyph equivalent를 구현하는 것이다.
-- 빠르게 독립 prototype을 완성할 수 있지만 기존 `AtlasRenderer::Impl::CacheGlyph()`와 behavior drift 위험이 있다.
-- B안은 기존 `CacheGlyph` logic을 공용 internal helper로 추출하는 것이다.
-- 영향 범위는 크지만 long-term production path에는 더 안전하다.
-
-### C. Extend geometry-only update toward active-path policy
+### B. Extract AtlasRenderer glyph cache helper without behavior change
 
 이유:
 
-- prototype은 같은 glyph cache signature와 같은 mesh topology에서 `VertexBuffer::SetData()`만 수행할 수 있음을 확인했다.
-- active path에서는 failure 시 old output 유지 여부, fallback 조건, render dirty clear 조건을 별도 설계해야 한다.
-- 기존 `AtlasRenderer` path는 계속 fallback으로 유지한다.
+- 기존 `Text::AtlasRenderer`의 cache miss behavior를 기준점으로 유지해야 한다.
+- `FontClient::CreateBitmap()` / compressed bitmap / atlas growth / `AtlasGlyphManager::Add()` 정책은 기존 renderer와 공유하는 편이 long-term production path에 안전하다.
+- 이 커밋은 `text-atlas-renderer.*`를 건드리므로 existing renderer no-behavior-change 검증이 필요하다.
+
+### C. Use shared glyph cache helper in TextVisualizerGlyphRenderer
+
+이유:
+
+- helper extraction 이후 visible glyph cache miss에서 fallback하지 않고 cache add + ref acquire를 수행할 수 있다.
+- 실패 시 temporary refs rollback, 성공 시 old refs release / new refs commit 순서를 유지한다.
+- 기존 `Text::AtlasRenderer` fallback path는 계속 유지한다.
 
 ### D. Keep layout-side follow-ups separate
 
@@ -942,4 +943,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 다시 켠 뒤 geometry-only update가 유지되는지, output / mesh actor bounds가 layout content 크기로 잡히는지, 그리고 glyph correctness 문제가 남는지 확인하는 것이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 잘못 보이는 glyph 원인과 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 `24-shared-glyph-cache-helper-design.ko.md`의 결론에 따라 shared atlas glyph cache helper skeleton을 추가하거나, 기존 `AtlasRenderer::Impl::CacheGlyph()`를 no-behavior-change helper extraction으로 분리하는 것이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 기존 renderer와 같은 policy로 처리해야 한다. 새 세션에서는 이 문서 다음에 `24-shared-glyph-cache-helper-design.ko.md`, `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
