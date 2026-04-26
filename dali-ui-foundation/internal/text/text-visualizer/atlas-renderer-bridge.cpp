@@ -83,6 +83,7 @@ AtlasRendererBridge::AtlasRendererBridge()
   mLightweightRenderAttemptCount(0u),
   mLightweightRenderSuccessCount(0u),
   mLightweightRenderFallbackCount(0u),
+  mLightweightRendererAllowed(false),
   mAnimatablePropertyIndex(Property::INVALID_INDEX),
   mAlignmentOffset(0.0f),
   mDepth(0),
@@ -131,6 +132,7 @@ void AtlasRendererBridge::Clear()
   mLightweightRenderAttemptCount  = 0u;
   mLightweightRenderSuccessCount  = 0u;
   mLightweightRenderFallbackCount = 0u;
+  mLightweightRendererAllowed     = false;
   mGlyphRenderer.Clear();
   ResetRenderer();
 }
@@ -464,6 +466,30 @@ bool AtlasRendererBridge::UpdateRenderData()
   return true;
 }
 
+void AtlasRendererBridge::SetLightweightRendererAllowed(bool allowed)
+{
+  if(mLightweightRendererAllowed == allowed)
+  {
+    return;
+  }
+
+  mLightweightRendererAllowed = allowed;
+
+  if(!allowed)
+  {
+    mGlyphRenderer.Clear();
+    if(mRenderHost)
+    {
+      mGlyphRenderer.SetRenderHost(mRenderHost);
+    }
+  }
+}
+
+bool AtlasRendererBridge::IsLightweightRendererAllowed() const
+{
+  return mLightweightRendererAllowed;
+}
+
 void AtlasRendererBridge::SetRenderHost(Actor renderHost)
 {
   if(!renderHost)
@@ -497,7 +523,7 @@ bool AtlasRendererBridge::AttachRendererToHost()
     return false;
   }
 
-  if(ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER && (nullptr != mAdapter))
+  if(ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER && mLightweightRendererAllowed && (nullptr != mAdapter))
   {
     ++mLightweightRenderAttemptCount;
 
@@ -524,7 +550,6 @@ bool AtlasRendererBridge::AttachRendererToHost()
       }
     }
 
-    mGlyphRenderer.DetachOutputFromHost();
     ++mLightweightRenderFallbackCount;
   }
 

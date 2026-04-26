@@ -52,10 +52,12 @@
 - `Diagnose TextVisualizerGlyphRenderer fallback reasons`
 - `Skip TextVisualizerGlyphRenderer non-renderable glyphs`
 - `Preserve TextVisualizerGlyphRenderer state across adapter updates`
+- `Fix TextVisualizerGlyphRenderer mesh actor bounds`
+- `Stabilize TextVisualizer lightweight renderer experiment`
 
 이번 작업 포함 최신 커밋:
 
-- `Preserve TextVisualizerGlyphRenderer state across adapter updates`
+- `Stabilize TextVisualizer lightweight renderer experiment`
 
 최근 최적화 상태:
 
@@ -119,9 +121,14 @@
 - glyph cache signature에는 non-renderable glyph도 계속 포함해 text/glyph sequence identity를 유지한다.
 - non-renderable skip 이후 flag ON 실험에서 lightweight renderer success는 대부분 발생했지만 `geometryOnly=0`, `outputSize=(0,0,0)`이 관찰됐다.
 - `AtlasRendererBridge::SetAdapter(non-null)`은 더 이상 `TextVisualizerGlyphRenderer` state를 clear하지 않는다.
-- `TextVisualizerGlyphRenderer::RenderAdapter()`는 output actor size를 adapter control size로 동기화한다.
+- `TextVisualizerGlyphRenderer::RenderAdapter()`는 output actor와 mesh actor size를 layout size / control size의 axis-wise max로 동기화한다.
+- flag ON 실험에서 glyph position이 actor-center 기준으로 맞지 않아 전체 text가 우하단으로 밀려 보였고, lightweight renderer가 기존 `Text::AtlasRenderer`처럼 glyph positions를 actor-center local coordinate로 변환하도록 수정했다.
+- `TextVisualizerImpl`은 exclusion regions가 있는 TextVisualizer에만 lightweight renderer internal allow flag를 켠다. no-exclusion status / fragment / brick TextVisualizer는 기존 renderer fallback을 사용한다.
+- geometry-only update에서도 atlas texture set을 다시 renderer에 동기화한다.
+- lightweight fallback 시 기존 lightweight output을 즉시 detach하지 않고 fallback render 성공 후 bridge output 교체 로직이 정리하도록 했다.
+- lightweight mesh actor에도 atlas shader가 사용하는 `uOffset` property를 `Vector2::ZERO`로 등록해 기존 `Text::AtlasRenderer`와 맞췄다.
 - cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`는 아직 하지 않는다.
-- 다음 추천 구현 후보는 flag true 로컬 재실험으로 geometry-only update 증가 여부를 확인하고, 이후 visible glyph cache miss handling 설계 또는 lightweight glyph correctness diagnostics를 진행하는 것이다.
+- 다음 추천 구현 후보는 visible glyph cache miss handling 설계 또는 lightweight renderer production fallback policy 정리다.
 
 현재 해석:
 
@@ -813,6 +820,31 @@ flag ON 로컬 실험에서 lightweight renderer는 대부분 성공하고 geome
 
 - flag ON 로컬 재실험에서 output / first child bounds가 기존 `Text::AtlasRenderer` path에 가까워지는지 확인한다.
 - glyph correctness가 남으면 glyph position / atlas mesh data / shader path를 별도 diagnostics로 분리한다.
+
+### 진행: Stabilize TextVisualizer lightweight renderer experiment
+
+flag ON 로컬 실험에서 `text-breaker.example`의 brick renderer toggle과 destroy effect가 atlas를 자주 흔들 때 glyph flicker / missing이 관찰됐다.
+
+확인된 차이와 수정:
+
+- 기존 `Text::AtlasRenderer`는 glyph mesh를 actor-center coordinate로 생성하므로 lightweight renderer도 layout top-left position에서 `halfActorSize`를 빼도록 맞췄다.
+- 기존 `Text::AtlasRenderer` mesh actor는 `uOffset` property를 `Vector2::ZERO`로 등록하므로 lightweight mesh actor도 동일하게 등록한다.
+- geometry-only update에서도 atlas texture set을 다시 renderer에 설정해 atlas texture handle 변화 가능성에 대응한다.
+- full rebuild fallback 전에는 texture set 유효성을 먼저 확인하고, 실패 시 기존 mesh를 즉시 비우지 않는다.
+- lightweight render 실패 시 output actor를 즉시 detach하지 않고, fallback render가 성공한 뒤 기존 bridge output 교체 로직이 이전 output을 정리하게 한다.
+- lightweight renderer는 compile flag가 켜져 있어도 exclusion regions가 있는 TextVisualizer에서만 시도된다. no-exclusion status / fragment / brick TextVisualizer는 기존 renderer path를 사용한다.
+
+성능 차이:
+
+- flag OFF 기본 경로는 render dirty마다 기존 `Text::AtlasRenderer::Render()` full path를 사용한다.
+- flag ON + exclusion-present path는 첫 render 이후 같은 glyph sequence / mesh topology에서 actor / renderer / geometry를 유지하고 `VertexBuffer::SetData()` 중심으로 갱신한다.
+- layout-dynamic workload에서는 glyph movement가 더 부드럽게 보일 수 있다.
+- content-dynamic workload는 아직 primary target이 아니므로 기존 renderer fallback을 우선한다.
+
+기본값:
+
+- `ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER`는 계속 `false`다.
+- `ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS`도 계속 `false`다.
 
 ## 21. 다음 추천 작업
 

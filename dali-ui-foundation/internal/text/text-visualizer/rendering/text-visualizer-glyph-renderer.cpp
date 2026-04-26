@@ -24,6 +24,7 @@
 #include <dali/public-api/rendering/texture-set.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 // INTERNAL INCLUDES
@@ -769,7 +770,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   if(0u == adapter.GetRendererGlyphPositionCacheCount())
   {
     RecordFailure(RenderFailureReason::NO_POSITION_CACHE);
-    ClearMeshes();
     return false;
   }
 
@@ -780,7 +780,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     {
       ++mFailureSignatureCount;
     }
-    ClearMeshes();
     return false;
   }
 
@@ -788,7 +787,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   if(!glyphManager)
   {
     RecordFailure(RenderFailureReason::NO_GLYPH_MANAGER);
-    ClearMeshes();
     return false;
   }
 
@@ -798,19 +796,20 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   if(!reuseGlyphCache &&
      !AcquireGlyphReferences(adapter, newGlyphCacheEntries))
   {
-    ClearMeshes();
     return false;
   }
 
   auto failRender = [&]() -> bool
   {
-    ClearMeshes();
     if(!reuseGlyphCache)
     {
       ReleaseGlyphReferences(newGlyphCacheEntries);
     }
     return false;
   };
+
+  const Vector2 actorSize     = GetMeshActorSize(adapter);
+  const Vector2 halfActorSize = actorSize * 0.5f;
 
   std::vector<PendingMesh> pendingMeshes;
   pendingMeshes.reserve(adapter.GetRenderableGlyphCount());
@@ -843,6 +842,10 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
       RecordFailure(RenderFailureReason::GLYPH_POSITION_FAILED, placementIndex, placement.glyphIndex, &glyphInfo);
       return failRender();
     }
+
+    // Atlas glyph mesh vertices use actor-center local coordinates. Match Text::AtlasRenderer by converting from
+    // layout top-left coordinates before generating the glyph quad.
+    position = Vector2(std::round(position.x), position.y) - halfActorSize;
 
     const Dali::Ui::AtlasGlyphManager::GlyphStyle style = CreateGlyphStyle(glyphInfo);
 
@@ -895,7 +898,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     return failRender();
   }
 
-  const Vector2  actorSize                = GetMeshActorSize(adapter);
   const uint64_t newMeshTopologySignature = CalculateMeshTopologySignature(pendingMeshes, glyphManager);
   mOutputActor.SetProperty(Actor::Property::SIZE, Vector3(actorSize.x, actorSize.y, 0.0f));
 
@@ -948,6 +950,13 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
       const PendingMesh& pendingMesh = pendingMeshes[index];
 
       record.vertexBuffer.SetData(const_cast<Dali::Ui::AtlasManager::Vertex2D*>(pendingMesh.mesh.mVertices.Begin()), pendingMesh.mesh.mVertices.Size());
+      TextureSet textureSet = glyphManager.GetTextures(record.atlasId);
+      if(!textureSet)
+      {
+        RecordFailure(RenderFailureReason::NO_TEXTURE_SET);
+        return false;
+      }
+      record.renderer.SetTextures(textureSet);
       record.actor.SetProperty(Actor::Property::SIZE, Vector3(actorSize.x, actorSize.y, 0.0f));
       record.vertexCount = pendingMesh.mesh.mVertices.Size();
       record.indexCount  = pendingMesh.mesh.mIndices.Size();
@@ -964,10 +973,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     return true;
   }
 
-  ClearMeshes();
-
-  Property::Map vertexFormat = CreateQuadVertexFormat();
-
   for(const PendingMesh& pendingMesh : pendingMeshes)
   {
     if(pendingMesh.mesh.mVertices.Empty() || pendingMesh.mesh.mIndices.Empty())
@@ -976,6 +981,20 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
       return failRender();
     }
 
+    TextureSet textureSet = glyphManager.GetTextures(pendingMesh.atlasId);
+    if(!textureSet)
+    {
+      RecordFailure(RenderFailureReason::NO_TEXTURE_SET);
+      return failRender();
+    }
+  }
+
+  ClearMeshes();
+
+  Property::Map vertexFormat = CreateQuadVertexFormat();
+
+  for(const PendingMesh& pendingMesh : pendingMeshes)
+  {
     VertexBuffer vertexBuffer = VertexBuffer::New(vertexFormat);
     vertexBuffer.SetData(const_cast<Dali::Ui::AtlasManager::Vertex2D*>(pendingMesh.mesh.mVertices.Begin()), pendingMesh.mesh.mVertices.Size());
 
@@ -984,11 +1003,6 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     geometry.SetIndexBuffer(pendingMesh.mesh.mIndices.Begin(), pendingMesh.mesh.mIndices.Size());
 
     TextureSet textureSet = glyphManager.GetTextures(pendingMesh.atlasId);
-    if(!textureSet)
-    {
-      RecordFailure(RenderFailureReason::NO_TEXTURE_SET);
-      return failRender();
-    }
 
     const bool isColorShader = Pixel::BGRA8888 == glyphManager.GetPixelFormat(pendingMesh.atlasId);
     Shader     shader;
@@ -1027,6 +1041,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     meshActor.SetProperty(Actor::Property::PARENT_ORIGIN, ParentOrigin::TOP_LEFT);
     meshActor.SetProperty(Actor::Property::PIVOT, Pivot::TOP_LEFT);
     meshActor.SetProperty(Actor::Property::SIZE, Vector3(actorSize.x, actorSize.y, 0.0f));
+    meshActor.RegisterProperty("uOffset", Vector2::ZERO);
     meshActor.SetProperty(Actor::Property::COLOR_MODE, USE_OWN_MULTIPLY_PARENT_COLOR);
 
     mOutputActor.Add(meshActor);

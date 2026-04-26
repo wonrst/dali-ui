@@ -288,6 +288,7 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
   const Vector2 renderSize(layoutWidth, size.y > 0.0f ? size.y : mLayoutResult.height);
 
   SyncRenderStateToAdapter(renderSize);
+  mAtlasRendererBridge.SetLightweightRendererAllowed(!mExclusionRegions.Empty());
   SyncRenderHostSize(renderSize);
 
   const bool     hasLayoutSignature        = !mLayoutResult.Empty();

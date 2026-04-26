@@ -126,6 +126,8 @@ public:
   void  EnsureRenderer();
   void  ResetRenderer();
   bool  UpdateRenderData();
+  void  SetLightweightRendererAllowed(bool allowed);
+  bool  IsLightweightRendererAllowed() const;
   void  SetRenderHost(Actor renderHost);
   Actor GetRenderHost() const;
   void  SetTextControlActor(Actor textControlActor);
@@ -147,6 +149,7 @@ private:
   uint32_t                    mLightweightRenderAttemptCount;
   uint32_t                    mLightweightRenderSuccessCount;
   uint32_t                    mLightweightRenderFallbackCount;
+  bool                        mLightweightRendererAllowed;
   Property::Index             mAnimatablePropertyIndex;
   float                       mAlignmentOffset;
   int                         mDepth;
