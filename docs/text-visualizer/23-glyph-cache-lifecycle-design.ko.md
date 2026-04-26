@@ -619,3 +619,50 @@ Design TextVisualizer glyph cache miss handling
 ```text
 Integrate TextVisualizerGlyphRenderer behind internal fallback flag
 ```
+
+## 15. 진행: optional lightweight renderer bridge path
+
+`AtlasRendererBridge`에 `TextVisualizerGlyphRenderer`를 optional internal path로 연결했다.
+
+정책:
+
+- compile-time flag `ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER`의 기본값은 `false`다.
+- 기본 build에서는 기존 `Text::AtlasRenderer` path만 사용하므로 public behavior는 바뀌지 않는다.
+- flag를 켠 경우 bridge는 lightweight renderer를 먼저 시도한다.
+- lightweight render 또는 attach가 실패하면 기존 `Text::AtlasRenderer` path로 fallback한다.
+- cache miss handling은 아직 없으므로 fallback은 필수다.
+- active benchmarking은 flag를 로컬에서 켠 뒤 별도 비교로 진행한다.
+
+추가된 bridge 상태:
+
+- `TextVisualizerGlyphRenderer mGlyphRenderer`
+- `mLightweightRenderAttemptCount`
+- `mLightweightRenderSuccessCount`
+- `mLightweightRenderFallbackCount`
+
+추가된 renderer API:
+
+- `TextVisualizerGlyphRenderer::Render(const AtlasViewAdapter& adapter)`
+
+의미:
+
+- Phase 2 prototype을 active bridge lifecycle 근처에 배치했지만 기본값을 꺼 두어 안정성을 유지했다.
+- 다음 단계에서 flag를 켜고 performance sample을 비교할 수 있는 최소 연결점이 생겼다.
+
+남은 한계:
+
+- cache miss handling은 여전히 없다.
+- flag true 상태의 성능/시각 검증은 별도 작업이다.
+- production 전환 전에는 failure 시 old output 유지, fallback 조건, render dirty clear 정책을 다시 확인해야 한다.
+
+다음 후보:
+
+```text
+Enable lightweight renderer flag locally and benchmark performance sample
+```
+
+또는:
+
+```text
+Design TextVisualizer glyph cache miss handling
+```

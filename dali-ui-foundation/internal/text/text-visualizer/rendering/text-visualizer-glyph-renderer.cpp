@@ -71,18 +71,9 @@ Property::Map CreateQuadVertexFormat()
   return format;
 }
 
-Vector2 GetMeshActorSize(const LayoutResult& layoutResult, const AtlasViewAdapter& adapter)
+Vector2 GetMeshActorSize(const AtlasViewAdapter& adapter)
 {
-  Vector2 actorSize = adapter.GetControlSize();
-  if(actorSize.x <= 0.0f)
-  {
-    actorSize.x = layoutResult.width;
-  }
-  if(actorSize.y <= 0.0f)
-  {
-    actorSize.y = layoutResult.height;
-  }
-  return actorSize;
+  return adapter.GetControlSize();
 }
 
 PendingMesh* FindPendingMesh(std::vector<PendingMesh>& pendingMeshes, uint32_t atlasId)
@@ -447,8 +438,23 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
   if(preparedText.Empty() ||
      !preparedText.HasGlyphData() ||
      !preparedText.HasGlyphMetrics() ||
-     layoutResult.glyphPlacements.Empty() ||
-     !adapter.HasRenderableGlyphs() ||
+     layoutResult.glyphPlacements.Empty())
+  {
+    ClearMeshes();
+    return false;
+  }
+
+  return RenderAdapter(adapter, textColor);
+}
+
+bool TextVisualizerGlyphRenderer::Render(const AtlasViewAdapter& adapter)
+{
+  return RenderAdapter(adapter, adapter.GetTextColor());
+}
+
+bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter, const Vector4& textColor)
+{
+  if(!adapter.HasRenderableGlyphs() ||
      (0u == adapter.GetRendererGlyphPositionCacheCount()))
   {
     ClearMeshes();
@@ -552,7 +558,7 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     return failRender();
   }
 
-  const Vector2  actorSize                = GetMeshActorSize(layoutResult, adapter);
+  const Vector2  actorSize                = GetMeshActorSize(adapter);
   const uint64_t newMeshTopologySignature = CalculateMeshTopologySignature(pendingMeshes, glyphManager);
 
   auto canUpdateGeometryOnly = [&]() -> bool

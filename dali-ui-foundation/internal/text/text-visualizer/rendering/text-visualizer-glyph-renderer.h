@@ -80,6 +80,7 @@ public:
   uint64_t GetGlyphCacheSignature() const;
 
   bool Render(const PreparedText& preparedText, const LayoutResult& layoutResult, const AtlasViewAdapter& adapter, const Vector4& textColor);
+  bool Render(const AtlasViewAdapter& adapter);
 
 private:
   struct GlyphCacheEntry
@@ -106,6 +107,7 @@ private:
   bool CanReuseGlyphCache(uint64_t signature) const;
   bool AcquireGlyphReferences(const AtlasViewAdapter& adapter, std::vector<GlyphCacheEntry>& entries) const;
   void ReleaseGlyphReferences(std::vector<GlyphCacheEntry>& entries) const;
+  bool RenderAdapter(const AtlasViewAdapter& adapter, const Vector4& textColor);
 
   Actor mRenderHost;
   Actor mOutputActor;

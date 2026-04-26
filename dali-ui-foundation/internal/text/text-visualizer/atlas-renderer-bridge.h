@@ -20,6 +20,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/rendering/text-renderer.h>
+#include <dali-ui-foundation/internal/text/text-visualizer/rendering/text-visualizer-glyph-renderer.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-visualizer-view-interface.h>
 #include <dali/public-api/actors/actor.h>
 
@@ -92,6 +93,9 @@ public:
   uint32_t GetAttachCallCount() const;
   uint32_t GetValidatedGlyphCount() const;
   bool     HasValidatedRenderData() const;
+  uint32_t GetLightweightRenderAttemptCount() const;
+  uint32_t GetLightweightRenderSuccessCount() const;
+  uint32_t GetLightweightRenderFallbackCount() const;
 
   void  EnsureRenderer();
   void  ResetRenderer();
@@ -114,10 +118,14 @@ private:
   bool                        mRendererAttached;
   uint32_t                    mRenderCallCount;
   uint32_t                    mAttachCallCount;
+  uint32_t                    mLightweightRenderAttemptCount;
+  uint32_t                    mLightweightRenderSuccessCount;
+  uint32_t                    mLightweightRenderFallbackCount;
   Property::Index             mAnimatablePropertyIndex;
   float                       mAlignmentOffset;
   int                         mDepth;
   TextVisualizerViewInterface mViewInterface;
+  TextVisualizerGlyphRenderer mGlyphRenderer;
   Impl*                       mImpl;
 };
 

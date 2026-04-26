@@ -26,6 +26,8 @@ namespace Dali::Ui::Internal::TextVisualizer
 {
 namespace
 {
+constexpr bool ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER = false;
+
 uint32_t CountDescendants(const Actor& actor)
 {
   if(!actor)
@@ -78,9 +80,14 @@ AtlasRendererBridge::AtlasRendererBridge()
   mRendererAttached(false),
   mRenderCallCount(0u),
   mAttachCallCount(0u),
+  mLightweightRenderAttemptCount(0u),
+  mLightweightRenderSuccessCount(0u),
+  mLightweightRenderFallbackCount(0u),
   mAnimatablePropertyIndex(Property::INVALID_INDEX),
   mAlignmentOffset(0.0f),
   mDepth(0),
+  mViewInterface(),
+  mGlyphRenderer(),
   mImpl(new Impl())
 {
 }
@@ -95,6 +102,7 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
   if(nullptr == adapter)
   {
     DetachRendererFromHost();
+    mGlyphRenderer.Clear();
     mImpl->Clear();
     mAdapter = nullptr;
     mViewInterface.Clear();
@@ -103,6 +111,11 @@ void AtlasRendererBridge::SetAdapter(const AtlasViewAdapter* adapter)
 
   mAdapter = adapter;
   mImpl->Clear();
+  mGlyphRenderer.Clear();
+  if(mRenderHost)
+  {
+    mGlyphRenderer.SetRenderHost(mRenderHost);
+  }
   mViewInterface.SetAdapter(adapter);
 }
 
@@ -114,8 +127,12 @@ void AtlasRendererBridge::Clear()
   mImpl->Clear();
   mRenderHost.Reset();
   mTextControlActor.Reset();
-  mRenderCallCount = 0u;
-  mAttachCallCount = 0u;
+  mRenderCallCount                = 0u;
+  mAttachCallCount                = 0u;
+  mLightweightRenderAttemptCount  = 0u;
+  mLightweightRenderSuccessCount  = 0u;
+  mLightweightRenderFallbackCount = 0u;
+  mGlyphRenderer.Clear();
   ResetRenderer();
 }
 
@@ -241,6 +258,21 @@ bool AtlasRendererBridge::HasValidatedRenderData() const
   return mImpl->mHasValidatedGlyphs;
 }
 
+uint32_t AtlasRendererBridge::GetLightweightRenderAttemptCount() const
+{
+  return mLightweightRenderAttemptCount;
+}
+
+uint32_t AtlasRendererBridge::GetLightweightRenderSuccessCount() const
+{
+  return mLightweightRenderSuccessCount;
+}
+
+uint32_t AtlasRendererBridge::GetLightweightRenderFallbackCount() const
+{
+  return mLightweightRenderFallbackCount;
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())
@@ -311,6 +343,7 @@ void AtlasRendererBridge::SetRenderHost(Actor renderHost)
   }
 
   mRenderHost = renderHost;
+  mGlyphRenderer.SetRenderHost(renderHost);
 }
 
 Actor AtlasRendererBridge::GetRenderHost() const
@@ -333,6 +366,37 @@ bool AtlasRendererBridge::AttachRendererToHost()
   if(!HasRenderHost() || !HasRenderableGlyphs() || !HasViewInterfaceAdapter())
   {
     return false;
+  }
+
+  if(ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER && (nullptr != mAdapter))
+  {
+    ++mLightweightRenderAttemptCount;
+
+    mGlyphRenderer.SetRenderHost(mRenderHost);
+    if(mGlyphRenderer.Render(*mAdapter) && mGlyphRenderer.AttachOutputToHost())
+    {
+      Actor output = mGlyphRenderer.GetOutputActor();
+      if(output)
+      {
+        if(mRendererOutput && mRendererOutput != output)
+        {
+          Actor previousParent = mRendererOutput.GetParent();
+          if(previousParent == mRenderHost)
+          {
+            mRendererOutput.Unparent();
+          }
+        }
+
+        mRendererOutput   = output;
+        mRendererAttached = true;
+        ++mRenderCallCount;
+        ++mLightweightRenderSuccessCount;
+        return true;
+      }
+    }
+
+    mGlyphRenderer.DetachOutputFromHost();
+    ++mLightweightRenderFallbackCount;
   }
 
   EnsureRenderer();
@@ -393,6 +457,7 @@ void AtlasRendererBridge::DetachRendererFromHost()
     mRendererOutput.Reset();
   }
 
+  mGlyphRenderer.DetachOutputFromHost();
   mRendererAttached = false;
 }
 

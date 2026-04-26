@@ -47,10 +47,11 @@
 - `Design TextVisualizer glyph cache lifecycle`
 - `Add TextVisualizerGlyphRenderer glyph cache references`
 - `Prototype TextVisualizer geometry-only mesh update`
+- `Integrate TextVisualizerGlyphRenderer behind internal flag`
 
 이번 작업 포함 최신 커밋:
 
-- `Prototype TextVisualizer geometry-only mesh update`
+- `Integrate TextVisualizerGlyphRenderer behind internal flag`
 
 최근 최적화 상태:
 
@@ -102,8 +103,10 @@
 - `TextVisualizerGlyphRenderer`가 already-cached glyph에 대해 reference acquire / release / rollback을 수행할 수 있게 됐다.
 - 같은 glyph sequence render에서는 glyph cache signature를 통해 ref count churn을 피할 수 있는 기반이 생겼다.
 - 같은 glyph cache signature와 같은 mesh topology에서는 `TextVisualizerGlyphRenderer`가 기존 mesh actor / renderer / geometry를 유지하고 `VertexBuffer::SetData()`로 vertex data만 갱신할 수 있게 됐다.
-- geometry-only prototype은 active path에 연결하지 않았고, cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`도 아직 하지 않는다.
-- 다음 추천 구현 후보는 glyph cache miss handling 설계/구현 또는 lightweight renderer bridge integration을 internal fallback flag 뒤에서 검토하는 것이다.
+- `AtlasRendererBridge`가 compile-time flag 뒤에서 `TextVisualizerGlyphRenderer`를 먼저 시도하고 실패 시 기존 `Text::AtlasRenderer` path로 fallback할 수 있게 됐다.
+- lightweight renderer flag 기본값은 `false`라 기본 build의 active behavior는 기존과 같다.
+- cache miss handling / `FontClient::CreateBitmap()` / `AtlasGlyphManager::Add()`는 아직 하지 않는다.
+- 다음 추천 구현 후보는 flag true 로컬 benchmark 또는 glyph cache miss handling 설계/구현이다.
 
 현재 해석:
 
@@ -795,8 +798,8 @@ Non-primary workload:
 
 이유:
 
-- cache miss handling 또는 robust fallback policy가 준비된 뒤에 bridge 연결을 검토한다.
-- 처음에는 internal flag 또는 compile-time guard로 기존 `Text::AtlasRenderer` fallback을 유지한다.
+- optional bridge path는 compile-time flag 기본 off로 추가됐다.
+- 다음 단계에서는 로컬에서 flag를 켠 뒤 performance sample을 비교한다.
 - render dirty clear / layout policy는 변경하지 않는다.
 
 ### C. Extend geometry-only update toward active-path policy
@@ -872,4 +875,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 glyph cache miss handling 설계/구현이다. geometry-only mesh update prototype은 already-cached glyph reference lifecycle 위에서 동작하는 proof로 추가됐지만, active path 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 켠 performance sample benchmark 또는 glyph cache miss handling 설계/구현이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
