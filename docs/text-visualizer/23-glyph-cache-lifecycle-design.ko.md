@@ -565,3 +565,57 @@ Design TextVisualizer glyph cache miss handling
 ```text
 Prototype TextVisualizer geometry-only mesh update
 ```
+
+## 14. 진행: geometry-only mesh update prototype
+
+`TextVisualizerGlyphRenderer`에 같은 glyph sequence / 같은 mesh topology에서 기존 mesh actor / renderer / geometry를 유지하고 vertex data만 갱신하는 prototype path를 추가했다.
+
+추가된 상태:
+
+- `mMeshTopologySignature`
+- `mHasMeshTopologySignature`
+- `mGeometryOnlyUpdateCount`
+- `mFullMeshRebuildCount`
+
+geometry-only update 조건:
+
+- glyph cache signature가 기존 render와 같다.
+- mesh topology signature가 기존 render와 같다.
+- atlas id sequence가 같다.
+- mesh record count가 같다.
+- 각 mesh record의 actor / renderer / geometry / vertex buffer handle이 유효하다.
+- vertex count와 index count가 기존 mesh와 같다.
+- mesh actor가 현재 output actor 아래에 붙어 있다.
+
+동작:
+
+- 첫 render는 기존처럼 atlas id별 mesh actor / renderer / geometry / vertex buffer를 생성한다.
+- 다음 render에서 glyph sequence와 topology가 같으면 `VertexBuffer::SetData()`로 새 vertex data만 반영한다.
+- 이 path는 vertex color도 vertex data에 포함하므로 text color가 바뀌어도 topology가 같으면 geometry-only update가 가능하다.
+- topology가 다르거나 handle이 유효하지 않으면 full mesh rebuild로 fallback한다.
+- cache miss handling은 여전히 없다.
+- active `AtlasRendererBridge` path에는 연결하지 않았다.
+
+의미:
+
+- Phase 2 primary target인 layout-dynamic workload에서 renderer object churn을 줄일 수 있는 최소 proof가 생겼다.
+- glyph cache references와 결합되면서, 같은 glyph sequence에서는 ref count churn 없이 position/color vertex data만 갱신하는 방향을 확인했다.
+
+남은 한계:
+
+- cache miss는 여전히 `false`다.
+- glyph bitmap 생성 / atlas add lifecycle은 아직 없다.
+- active path 연결 전에는 fallback policy와 failure 시 old output 유지 정책을 다시 정해야 한다.
+- topology가 같아도 atlas page split이 바뀌면 full rebuild가 필요하다.
+
+다음 후보:
+
+```text
+Design TextVisualizer glyph cache miss handling
+```
+
+또는 active path 전환 준비를 위해:
+
+```text
+Integrate TextVisualizerGlyphRenderer behind internal fallback flag
+```

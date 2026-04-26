@@ -68,6 +68,10 @@ public:
   void     ClearMeshes();
   bool     HasMeshRecords() const;
   uint32_t GetMeshRecordCount() const;
+  bool     HasMeshTopologySignature() const;
+  uint64_t GetMeshTopologySignature() const;
+  uint32_t GetGeometryOnlyUpdateCount() const;
+  uint32_t GetFullMeshRebuildCount() const;
 
   void     ClearGlyphCache();
   bool     HasGlyphCacheEntries() const;
@@ -112,8 +116,13 @@ private:
   bool                         mHasGlyphCacheSignature;
 
   std::vector<MeshRecord> mMeshRecords;
-  Shader                  mShaderL8;
-  Shader                  mShaderRgba;
+  uint64_t                mMeshTopologySignature;
+  bool                    mHasMeshTopologySignature;
+  uint32_t                mGeometryOnlyUpdateCount;
+  uint32_t                mFullMeshRebuildCount;
+
+  Shader mShaderL8;
+  Shader mShaderRgba;
 };
 
 } // namespace Dali::Ui::Internal::TextVisualizer

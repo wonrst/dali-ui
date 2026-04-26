@@ -57,6 +57,11 @@ void HashGlyphCacheValue(uint64_t& hash, uint64_t value)
   hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6u) + (hash >> 2u);
 }
 
+void HashMeshTopologyValue(uint64_t& hash, uint64_t value)
+{
+  HashGlyphCacheValue(hash, value);
+}
+
 Property::Map CreateQuadVertexFormat()
 {
   Property::Map format;
@@ -92,6 +97,23 @@ PendingMesh* FindPendingMesh(std::vector<PendingMesh>& pendingMeshes, uint32_t a
 
   return nullptr;
 }
+
+uint64_t CalculateMeshTopologySignature(const std::vector<PendingMesh>& pendingMeshes, Dali::Ui::AtlasGlyphManager glyphManager)
+{
+  uint64_t hash = 1469598103934665603ULL;
+  HashMeshTopologyValue(hash, pendingMeshes.size());
+
+  for(const PendingMesh& pendingMesh : pendingMeshes)
+  {
+    const bool isColorShader = Pixel::BGRA8888 == glyphManager.GetPixelFormat(pendingMesh.atlasId);
+    HashMeshTopologyValue(hash, pendingMesh.atlasId);
+    HashMeshTopologyValue(hash, pendingMesh.mesh.mVertices.Size());
+    HashMeshTopologyValue(hash, pendingMesh.mesh.mIndices.Size());
+    HashMeshTopologyValue(hash, isColorShader ? 1u : 0u);
+  }
+
+  return hash;
+}
 } // unnamed namespace
 
 TextVisualizerGlyphRenderer::TextVisualizerGlyphRenderer()
@@ -102,6 +124,10 @@ TextVisualizerGlyphRenderer::TextVisualizerGlyphRenderer()
   mGlyphCacheSignature(0u),
   mHasGlyphCacheSignature(false),
   mMeshRecords(),
+  mMeshTopologySignature(0u),
+  mHasMeshTopologySignature(false),
+  mGeometryOnlyUpdateCount(0u),
+  mFullMeshRebuildCount(0u),
   mShaderL8(),
   mShaderRgba()
 {
@@ -119,7 +145,11 @@ void TextVisualizerGlyphRenderer::Clear()
   DetachOutputFromHost();
   mOutputActor.Reset();
   mRenderHost.Reset();
-  mAttached = false;
+  mAttached                 = false;
+  mMeshTopologySignature    = 0u;
+  mHasMeshTopologySignature = false;
+  mGeometryOnlyUpdateCount  = 0u;
+  mFullMeshRebuildCount     = 0u;
   mShaderL8.Reset();
   mShaderRgba.Reset();
 }
@@ -238,6 +268,8 @@ void TextVisualizerGlyphRenderer::ClearMeshes()
   }
 
   mMeshRecords.clear();
+  mMeshTopologySignature    = 0u;
+  mHasMeshTopologySignature = false;
 }
 
 bool TextVisualizerGlyphRenderer::HasMeshRecords() const
@@ -248,6 +280,26 @@ bool TextVisualizerGlyphRenderer::HasMeshRecords() const
 uint32_t TextVisualizerGlyphRenderer::GetMeshRecordCount() const
 {
   return static_cast<uint32_t>(mMeshRecords.size());
+}
+
+bool TextVisualizerGlyphRenderer::HasMeshTopologySignature() const
+{
+  return mHasMeshTopologySignature;
+}
+
+uint64_t TextVisualizerGlyphRenderer::GetMeshTopologySignature() const
+{
+  return mMeshTopologySignature;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetGeometryOnlyUpdateCount() const
+{
+  return mGeometryOnlyUpdateCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFullMeshRebuildCount() const
+{
+  return mFullMeshRebuildCount;
 }
 
 void TextVisualizerGlyphRenderer::ClearGlyphCache()
@@ -437,8 +489,6 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     return false;
   };
 
-  ClearMeshes();
-
   std::vector<PendingMesh> pendingMeshes;
   pendingMeshes.reserve(adapter.GetRenderableGlyphCount());
 
@@ -502,7 +552,76 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     return failRender();
   }
 
-  const Vector2 actorSize    = GetMeshActorSize(layoutResult, adapter);
+  const Vector2  actorSize                = GetMeshActorSize(layoutResult, adapter);
+  const uint64_t newMeshTopologySignature = CalculateMeshTopologySignature(pendingMeshes, glyphManager);
+
+  auto canUpdateGeometryOnly = [&]() -> bool
+  {
+    if(!CanReuseGlyphCache(newGlyphCacheSignature) ||
+       !mHasMeshTopologySignature ||
+       (mMeshTopologySignature != newMeshTopologySignature) ||
+       (mMeshRecords.size() != pendingMeshes.size()))
+    {
+      return false;
+    }
+
+    for(size_t index = 0u; index < pendingMeshes.size(); ++index)
+    {
+      const MeshRecord&  record      = mMeshRecords[index];
+      const PendingMesh& pendingMesh = pendingMeshes[index];
+
+      if((record.atlasId != pendingMesh.atlasId) ||
+         !record.actor ||
+         !record.renderer ||
+         !record.geometry ||
+         !record.vertexBuffer ||
+         (record.vertexCount != pendingMesh.mesh.mVertices.Size()) ||
+         (record.indexCount != pendingMesh.mesh.mIndices.Size()))
+      {
+        return false;
+      }
+
+      Actor parent = record.actor.GetParent();
+      if(parent != mOutputActor)
+      {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  auto updateGeometryOnly = [&]() -> bool
+  {
+    if(!canUpdateGeometryOnly())
+    {
+      return false;
+    }
+
+    for(size_t index = 0u; index < pendingMeshes.size(); ++index)
+    {
+      MeshRecord&        record      = mMeshRecords[index];
+      const PendingMesh& pendingMesh = pendingMeshes[index];
+
+      record.vertexBuffer.SetData(const_cast<Dali::Ui::AtlasManager::Vertex2D*>(pendingMesh.mesh.mVertices.Begin()), pendingMesh.mesh.mVertices.Size());
+      record.actor.SetProperty(Actor::Property::SIZE, Vector3(actorSize.x, actorSize.y, 0.0f));
+      record.vertexCount = pendingMesh.mesh.mVertices.Size();
+      record.indexCount  = pendingMesh.mesh.mIndices.Size();
+    }
+
+    mMeshTopologySignature    = newMeshTopologySignature;
+    mHasMeshTopologySignature = true;
+    ++mGeometryOnlyUpdateCount;
+    return true;
+  };
+
+  if(updateGeometryOnly())
+  {
+    return true;
+  }
+
+  ClearMeshes();
+
   Property::Map vertexFormat = CreateQuadVertexFormat();
 
   for(const PendingMesh& pendingMesh : pendingMeshes)
@@ -576,6 +695,10 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     meshRecord.indexCount   = pendingMesh.mesh.mIndices.Size();
     mMeshRecords.push_back(meshRecord);
   }
+
+  mMeshTopologySignature    = newMeshTopologySignature;
+  mHasMeshTopologySignature = true;
+  ++mFullMeshRebuildCount;
 
   if(!reuseGlyphCache)
   {
