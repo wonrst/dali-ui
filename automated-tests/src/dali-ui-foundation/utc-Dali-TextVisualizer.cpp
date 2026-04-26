@@ -3063,6 +3063,65 @@ int UtcDaliTextVisualizerMeasureFixedWidthWrapHeightP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerMeasureThenRelayoutWithExclusionSmokeP(void)
+{
+  UiTestApplication          application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> exclusionRegions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  exclusionRegions.PushBack(Rect<float>(40.0f, 0.0f, 80.0f, 60.0f));
+
+  textVisualizer.SetText("TextVisualizer measure result should stay valid for the following relayout with matching width and exclusions.");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(220.0f);
+  textVisualizer.SetRequestedHeight(WRAP_CONTENT);
+  textVisualizer.SetExclusionRegions(exclusionRegions);
+
+  const MeasuredSize measured = textVisualizer.Measure(220.0f, 0.0f);
+  DALI_TEST_EQUALS(measured.GetWidth(), 220.0f, TEST_LOCATION);
+  DALI_TEST_CHECK(measured.GetHeight() > 0.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  const Vector3 size = textVisualizer.GetProperty<Vector3>(Actor::Property::SIZE);
+  DALI_TEST_EQUALS(size.x, 220.0f, TEST_LOCATION);
+  DALI_TEST_CHECK(size.y > 0.0f);
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerMeasuredLayoutCacheInvalidationSmokeP(void)
+{
+  UiTestApplication          application;
+  TextVisualizer            textVisualizer = TextVisualizer::New();
+  Dali::Vector<Rect<float>> exclusionRegions;
+  DALI_TEST_CHECK(textVisualizer);
+
+  textVisualizer.SetText("Changing exclusion and line height after measure should relayout safely.");
+  textVisualizer.SetFontSize(18.0f);
+  textVisualizer.SetRequestedWidth(180.0f);
+  textVisualizer.SetRequestedHeight(WRAP_CONTENT);
+
+  const float initialHeight = textVisualizer.Measure(180.0f, 0.0f).GetHeight();
+  DALI_TEST_CHECK(initialHeight > 0.0f);
+
+  exclusionRegions.PushBack(Rect<float>(0.0f, 0.0f, 90.0f, 80.0f));
+  textVisualizer.SetExclusionRegions(exclusionRegions);
+  textVisualizer.SetLineHeight(1.6f);
+
+  const float updatedHeight = textVisualizer.Measure(180.0f, 0.0f).GetHeight();
+  DALI_TEST_CHECK(updatedHeight > 0.0f);
+
+  application.GetScene().Add(textVisualizer);
+  application.SendNotification();
+  application.Render();
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerMeasureFixedSizeP(void)
 {
   UiTestApplication application;

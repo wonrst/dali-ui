@@ -41,10 +41,11 @@
 - `Add TextVisualizerGlyphRenderer skeleton`
 - `Add TextVisualizerGlyphRenderer mesh state skeleton`
 - `Add simple TextVisualizer glyph mesh MVP`
+- `Cache TextVisualizer measured layout result`
 
 이번 작업 포함 최신 커밋:
 
-- `Add simple TextVisualizer glyph mesh MVP`
+- `Cache TextVisualizer measured layout result`
 
 최근 최적화 상태:
 
@@ -81,7 +82,11 @@
 - MVP는 `PreparedText` / `LayoutResult` / `AtlasViewAdapter`를 입력으로 받고 cached renderer glyph positions를 사용한다.
 - glyph cache miss, invalid glyph, invalid position, empty mesh, texture/shader 생성 실패는 `false`로 안전하게 반환한다.
 - glyph bitmap 생성, atlas cache add, ref count lifecycle, geometry-only update, active path 연결은 아직 하지 않는다.
-- 다음 low-risk 구현 후보는 glyph cache warmup/add path 조사 또는 geometry-only mesh update prototype이다.
+- `docs/text-visualizer/21-exclusion-layout-optimization-analysis.ko.md`에서 exclusion / layout redundant work 후보를 정리했다.
+- `OnMeasure()`가 wrap height 계산 중 만든 `LayoutResult`를 cache하고, 같은 layout width로 이어지는 `OnRelayout()`에서 재사용할 수 있게 했다.
+- measured layout cache는 text / font / fontSize / lineHeight / exclusion 변경 시 clear되며, text color 변경에는 유지된다.
+- sorted exclusion cache / available interval cache / epsilon compare는 internal API 경계와 correctness risk 때문에 이번 범위에서는 보류했다.
+- 다음 low-risk 구현 후보는 glyph cache warmup/add path 조사, geometry-only mesh update prototype, 또는 sorted exclusion cache internal boundary 설계다.
 
 현재 해석:
 

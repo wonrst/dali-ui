@@ -199,6 +199,9 @@ private:
   void  StoreLastRenderedLayoutSignature(uint64_t layoutSignature);
   void  UpdateStoredExclusionRegions(const Dali::Vector<Rect<float>>& regions);
   bool  AreExclusionRegionsEqual(const Dali::Vector<Rect<float>>& regions) const;
+  void  ClearMeasuredLayoutCache();
+  void  StoreMeasuredLayoutCache(float layoutWidth, const Internal::TextVisualizer::LayoutResult& result);
+  bool  TryUseMeasuredLayoutCache(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
   float GetNaturalTextWidth() const;
   float MeasureNaturalTextHeightForWidth(float layoutWidth);
   void  UpdateLayout(float layoutWidth, Internal::TextVisualizer::LayoutResult& result);
@@ -213,16 +216,19 @@ private:
   Dali::Vector<Rect<float>>                     mExclusionRegions;
   Internal::TextVisualizer::PreparedText        mPreparedText;
   Internal::TextVisualizer::LayoutResult        mLayoutResult;
+  Internal::TextVisualizer::LayoutResult        mMeasuredLayoutCache;
   Internal::TextVisualizer::AtlasViewAdapter    mAtlasViewAdapter;
   Internal::TextVisualizer::AtlasRendererBridge mAtlasRendererBridge;
   Actor                                         mRenderHost;
   Vector2                                       mLastLayoutSize;
+  float                                         mMeasuredLayoutWidth;
   uint64_t                                      mLastRenderedLayoutSignature;
   bool                                          mPrepareDirty;
   bool                                          mLayoutDirty;
   bool                                          mRenderDirty;
   bool                                          mForceRenderDirty;
   bool                                          mHasLastRenderedLayoutSignature;
+  bool                                          mHasMeasuredLayoutCache;
   mutable bool                                  mRenderDiagnosticsLogged;
 };
 

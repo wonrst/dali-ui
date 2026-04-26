@@ -31,6 +31,8 @@
 #include <dali-ui-foundation/internal/text/text-visualizer/layout-engine.h>
 #include <dali-ui-foundation/internal/text/text-visualizer/text-preparer.h>
 
+#include <cmath>
+
 namespace Dali
 {
 
@@ -78,16 +80,19 @@ TextVisualizerImpl::TextVisualizerImpl()
   mExclusionRegions(),
   mPreparedText(),
   mLayoutResult(),
+  mMeasuredLayoutCache(),
   mAtlasViewAdapter(),
   mAtlasRendererBridge(),
   mRenderHost(),
   mLastLayoutSize(Vector2::ZERO),
+  mMeasuredLayoutWidth(0.0f),
   mLastRenderedLayoutSignature(0u),
   mPrepareDirty(true),
   mLayoutDirty(true),
   mRenderDirty(true),
   mForceRenderDirty(true),
   mHasLastRenderedLayoutSignature(false),
+  mHasMeasuredLayoutCache(false),
   mRenderDiagnosticsLogged(false)
 {
 }
@@ -152,6 +157,7 @@ void TextVisualizerImpl::SetLineHeight(float lineHeight)
   if(mLineHeight != normalizedLineHeight)
   {
     mLineHeight = normalizedLineHeight;
+    ClearMeasuredLayoutCache();
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
     RelayoutRequest();
@@ -186,6 +192,8 @@ UiColor TextVisualizerImpl::GetTextColor()
 
 void TextVisualizerImpl::Prepare()
 {
+  ClearMeasuredLayoutCache();
+
   Internal::TextVisualizer::TextPreparer::Input input;
   input.text       = mText;
   input.fontFamily = mFontFamily;
@@ -204,6 +212,7 @@ void TextVisualizerImpl::SetExclusionRegions(const Dali::Vector<Rect<float>>& re
   if(!AreExclusionRegionsEqual(regions))
   {
     UpdateStoredExclusionRegions(regions);
+    ClearMeasuredLayoutCache();
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
     RelayoutRequest();
@@ -221,6 +230,7 @@ void TextVisualizerImpl::ClearExclusionRegions()
   if(!mExclusionRegions.Empty())
   {
     mExclusionRegions.Clear();
+    ClearMeasuredLayoutCache();
     MarkLayoutDirty();
     MarkPlacementRenderDirty();
     RelayoutRequest();
@@ -261,7 +271,10 @@ void TextVisualizerImpl::OnRelayout(const Vector2& size, RelayoutContainer& cont
 
   if(mLayoutDirty)
   {
-    UpdateLayout(layoutWidth, mLayoutResult);
+    if(!TryUseMeasuredLayoutCache(layoutWidth, mLayoutResult))
+    {
+      UpdateLayout(layoutWidth, mLayoutResult);
+    }
     mAtlasViewAdapter.SetPreparedText(&mPreparedText);
     mAtlasViewAdapter.SetLayoutResult(&mLayoutResult);
     mAtlasRendererBridge.SetAdapter(&mAtlasViewAdapter);
@@ -407,6 +420,7 @@ void TextVisualizerImpl::MarkPrepareDirty()
 {
   mPreparedText.Clear();
   mLayoutResult.Clear();
+  ClearMeasuredLayoutCache();
   mAtlasViewAdapter.Clear();
   mAtlasRendererBridge.Clear();
   mPrepareDirty            = true;
@@ -644,6 +658,32 @@ bool TextVisualizerImpl::AreExclusionRegionsEqual(const Dali::Vector<Rect<float>
   return true;
 }
 
+void TextVisualizerImpl::ClearMeasuredLayoutCache()
+{
+  mMeasuredLayoutCache.Clear();
+  mMeasuredLayoutWidth    = 0.0f;
+  mHasMeasuredLayoutCache = false;
+}
+
+void TextVisualizerImpl::StoreMeasuredLayoutCache(float layoutWidth, const Internal::TextVisualizer::LayoutResult& result)
+{
+  mMeasuredLayoutCache    = result;
+  mMeasuredLayoutWidth    = layoutWidth;
+  mHasMeasuredLayoutCache = true;
+}
+
+bool TextVisualizerImpl::TryUseMeasuredLayoutCache(float layoutWidth, Internal::TextVisualizer::LayoutResult& result)
+{
+  if(!mHasMeasuredLayoutCache || std::fabs(mMeasuredLayoutWidth - layoutWidth) > 0.001f)
+  {
+    return false;
+  }
+
+  result = mMeasuredLayoutCache;
+  ClearMeasuredLayoutCache();
+  return true;
+}
+
 float TextVisualizerImpl::GetNaturalTextWidth() const
 {
   if(mPreparedText.Empty() || mPreparedText.GetClusterCount() == 0u)
@@ -669,6 +709,7 @@ float TextVisualizerImpl::MeasureNaturalTextHeightForWidth(float layoutWidth)
 
   Internal::TextVisualizer::LayoutResult measuredLayoutResult;
   UpdateLayout(layoutWidth, measuredLayoutResult);
+  StoreMeasuredLayoutCache(layoutWidth, measuredLayoutResult);
   return measuredLayoutResult.Empty() ? 0.0f : measuredLayoutResult.height;
 }
 
