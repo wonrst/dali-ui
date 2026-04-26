@@ -512,3 +512,56 @@ fallback 조건:
 ```text
 Add TextVisualizerGlyphRenderer glyph cache references
 ```
+
+## 13. 진행: glyph cache references
+
+`TextVisualizerGlyphRenderer`에 already-cached glyph ownership 기반을 추가했다.
+
+추가된 구조:
+
+- `GlyphCacheEntry`
+  - `fontId`
+  - `glyphIndex`
+  - `AtlasGlyphManager::GlyphStyle`
+  - `atlasId`
+  - `imageId`
+- `mGlyphCacheEntries`
+- `mGlyphCacheSignature`
+- `mHasGlyphCacheSignature`
+
+추가된 lifecycle:
+
+- `Render()`가 새 glyph sequence signature를 계산한다.
+- 기존 signature와 같고 cache entries가 있으면 glyph reference acquire / release를 생략한다.
+- signature가 다르면 already-cached glyph에 대해 `AtlasGlyphManager::AdjustReferenceCount(..., +1)`로 temporary refs를 acquire한다.
+- cache miss는 여전히 `false`를 반환한다.
+- mesh build 또는 actor creation 실패 시 temporary refs를 rollback한다.
+- render 성공 시 old refs를 release하고 temporary entries를 commit한다.
+- `Clear()`는 mesh / output actor lifecycle과 함께 owned glyph refs를 release한다.
+
+이번 단계에서 의도적으로 하지 않은 것:
+
+- cache miss handling
+- `FontClient::CreateBitmap()`
+- `AtlasGlyphManager::Add()`
+- glyph bitmap 생성
+- geometry-only update
+- active `AtlasRendererBridge` path 연결
+
+의미:
+
+- current MVP는 더 이상 “남이 보유한 cached glyph slot을 읽기만 하는 smoke path”에 머물지 않고, 성공한 render에 대해서는 glyph refs를 보유할 수 있다.
+- 같은 glyph sequence render에서는 ref count churn을 피할 수 있는 기반이 생겼다.
+- cache miss가 있으면 여전히 fallback이 필요하므로 active path 연결은 아직 하지 않는다.
+
+다음 후보:
+
+```text
+Design TextVisualizer glyph cache miss handling
+```
+
+또는 already-cached 환경을 전제로:
+
+```text
+Prototype TextVisualizer geometry-only mesh update
+```

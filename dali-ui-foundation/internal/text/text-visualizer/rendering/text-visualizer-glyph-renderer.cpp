@@ -39,9 +39,23 @@ namespace
 {
 struct PendingMesh
 {
-  uint32_t             atlasId{0u};
+  uint32_t                       atlasId{0u};
   Dali::Ui::AtlasManager::Mesh2D mesh;
 };
+
+Dali::Ui::AtlasGlyphManager::GlyphStyle CreateGlyphStyle(const Text::GlyphInfo& glyphInfo)
+{
+  Dali::Ui::AtlasGlyphManager::GlyphStyle style;
+  style.outline  = 0u;
+  style.isItalic = glyphInfo.isItalicRequired;
+  style.isBold   = glyphInfo.isBoldRequired;
+  return style;
+}
+
+void HashGlyphCacheValue(uint64_t& hash, uint64_t value)
+{
+  hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6u) + (hash >> 2u);
+}
 
 Property::Map CreateQuadVertexFormat()
 {
@@ -84,6 +98,9 @@ TextVisualizerGlyphRenderer::TextVisualizerGlyphRenderer()
 : mRenderHost(),
   mOutputActor(),
   mAttached(false),
+  mGlyphCacheEntries(),
+  mGlyphCacheSignature(0u),
+  mHasGlyphCacheSignature(false),
   mMeshRecords(),
   mShaderL8(),
   mShaderRgba()
@@ -98,6 +115,7 @@ TextVisualizerGlyphRenderer::~TextVisualizerGlyphRenderer()
 void TextVisualizerGlyphRenderer::Clear()
 {
   ClearMeshes();
+  ClearGlyphCache();
   DetachOutputFromHost();
   mOutputActor.Reset();
   mRenderHost.Reset();
@@ -232,10 +250,148 @@ uint32_t TextVisualizerGlyphRenderer::GetMeshRecordCount() const
   return static_cast<uint32_t>(mMeshRecords.size());
 }
 
+void TextVisualizerGlyphRenderer::ClearGlyphCache()
+{
+  ReleaseGlyphReferences(mGlyphCacheEntries);
+  mGlyphCacheSignature    = 0u;
+  mHasGlyphCacheSignature = false;
+}
+
+bool TextVisualizerGlyphRenderer::HasGlyphCacheEntries() const
+{
+  return !mGlyphCacheEntries.empty();
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetGlyphCacheEntryCount() const
+{
+  return static_cast<uint32_t>(mGlyphCacheEntries.size());
+}
+
+bool TextVisualizerGlyphRenderer::HasGlyphCacheSignature() const
+{
+  return mHasGlyphCacheSignature;
+}
+
+uint64_t TextVisualizerGlyphRenderer::GetGlyphCacheSignature() const
+{
+  return mGlyphCacheSignature;
+}
+
+bool TextVisualizerGlyphRenderer::CalculateGlyphCacheSignature(const AtlasViewAdapter& adapter, uint64_t& signature) const
+{
+  const uint32_t placementCount = adapter.GetGlyphPlacementCount();
+  if(0u == placementCount)
+  {
+    return false;
+  }
+
+  uint64_t hash = 1469598103934665603ULL;
+  HashGlyphCacheValue(hash, placementCount);
+
+  for(uint32_t placementIndex = 0u; placementIndex < placementCount; ++placementIndex)
+  {
+    GlyphPlacement  placement;
+    Text::GlyphInfo glyphInfo;
+
+    if(!adapter.GetGlyphPlacement(placementIndex, placement) ||
+       !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    {
+      return false;
+    }
+
+    const Dali::Ui::AtlasGlyphManager::GlyphStyle style = CreateGlyphStyle(glyphInfo);
+    HashGlyphCacheValue(hash, glyphInfo.fontId);
+    HashGlyphCacheValue(hash, glyphInfo.index);
+    HashGlyphCacheValue(hash, style.outline);
+    HashGlyphCacheValue(hash, style.isItalic ? 1u : 0u);
+    HashGlyphCacheValue(hash, style.isBold ? 1u : 0u);
+  }
+
+  signature = hash;
+  return true;
+}
+
+bool TextVisualizerGlyphRenderer::CanReuseGlyphCache(uint64_t signature) const
+{
+  return mHasGlyphCacheSignature &&
+         (mGlyphCacheSignature == signature) &&
+         !mGlyphCacheEntries.empty();
+}
+
+bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter& adapter, std::vector<GlyphCacheEntry>& entries) const
+{
+  entries.clear();
+
+  Dali::Ui::AtlasGlyphManager glyphManager = Dali::Ui::AtlasGlyphManager::Get();
+  if(!glyphManager)
+  {
+    return false;
+  }
+
+  const uint32_t placementCount = adapter.GetGlyphPlacementCount();
+  entries.reserve(placementCount);
+
+  for(uint32_t placementIndex = 0u; placementIndex < placementCount; ++placementIndex)
+  {
+    GlyphPlacement  placement;
+    Text::GlyphInfo glyphInfo;
+
+    if(!adapter.GetGlyphPlacement(placementIndex, placement) ||
+       !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    {
+      ReleaseGlyphReferences(entries);
+      return false;
+    }
+
+    const Dali::Ui::AtlasGlyphManager::GlyphStyle style = CreateGlyphStyle(glyphInfo);
+
+    Dali::Ui::AtlasManager::AtlasSlot slot;
+    if(!glyphManager.IsCached(glyphInfo.fontId, glyphInfo.index, style, slot) ||
+       (0u == slot.mImageId) ||
+       (0u == slot.mAtlasId))
+    {
+      ReleaseGlyphReferences(entries);
+      return false;
+    }
+
+    glyphManager.AdjustReferenceCount(glyphInfo.fontId, glyphInfo.index, style, 1);
+
+    GlyphCacheEntry entry;
+    entry.fontId     = glyphInfo.fontId;
+    entry.glyphIndex = glyphInfo.index;
+    entry.style      = style;
+    entry.atlasId    = slot.mAtlasId;
+    entry.imageId    = slot.mImageId;
+    entries.push_back(entry);
+  }
+
+  return !entries.empty();
+}
+
+void TextVisualizerGlyphRenderer::ReleaseGlyphReferences(std::vector<GlyphCacheEntry>& entries) const
+{
+  if(entries.empty())
+  {
+    return;
+  }
+
+  Dali::Ui::AtlasGlyphManager glyphManager = Dali::Ui::AtlasGlyphManager::Get();
+  if(glyphManager)
+  {
+    for(const GlyphCacheEntry& entry : entries)
+    {
+      if(entry.fontId != 0u)
+      {
+        glyphManager.AdjustReferenceCount(entry.fontId, entry.glyphIndex, entry.style, -1);
+      }
+    }
+  }
+
+  entries.clear();
+}
+
 bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const LayoutResult& layoutResult, const AtlasViewAdapter& adapter, const Vector4& textColor)
 {
-  ClearMeshes();
-
   if(preparedText.Empty() ||
      !preparedText.HasGlyphData() ||
      !preparedText.HasGlyphMetrics() ||
@@ -243,14 +399,45 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
      !adapter.HasRenderableGlyphs() ||
      (0u == adapter.GetRendererGlyphPositionCacheCount()))
   {
+    ClearMeshes();
+    return false;
+  }
+
+  uint64_t newGlyphCacheSignature = 0u;
+  if(!CalculateGlyphCacheSignature(adapter, newGlyphCacheSignature))
+  {
+    ClearMeshes();
     return false;
   }
 
   Dali::Ui::AtlasGlyphManager glyphManager = Dali::Ui::AtlasGlyphManager::Get();
   if(!glyphManager)
   {
+    ClearMeshes();
     return false;
   }
+
+  const bool                   reuseGlyphCache = CanReuseGlyphCache(newGlyphCacheSignature);
+  std::vector<GlyphCacheEntry> newGlyphCacheEntries;
+
+  if(!reuseGlyphCache &&
+     !AcquireGlyphReferences(adapter, newGlyphCacheEntries))
+  {
+    ClearMeshes();
+    return false;
+  }
+
+  auto failRender = [&]() -> bool
+  {
+    ClearMeshes();
+    if(!reuseGlyphCache)
+    {
+      ReleaseGlyphReferences(newGlyphCacheEntries);
+    }
+    return false;
+  };
+
+  ClearMeshes();
 
   std::vector<PendingMesh> pendingMeshes;
   pendingMeshes.reserve(adapter.GetRenderableGlyphCount());
@@ -265,27 +452,24 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
        !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo) ||
        !adapter.GetRendererGlyphPosition(placementIndex, position))
     {
-      return false;
+      return failRender();
     }
 
-    Dali::Ui::AtlasGlyphManager::GlyphStyle style;
-    style.outline  = 0u;
-    style.isItalic = glyphInfo.isItalicRequired;
-    style.isBold   = glyphInfo.isBoldRequired;
+    const Dali::Ui::AtlasGlyphManager::GlyphStyle style = CreateGlyphStyle(glyphInfo);
 
     Dali::Ui::AtlasManager::AtlasSlot slot;
     if(!glyphManager.IsCached(glyphInfo.fontId, glyphInfo.index, style, slot) ||
        (0u == slot.mImageId) ||
        (0u == slot.mAtlasId))
     {
-      return false;
+      return failRender();
     }
 
     Dali::Ui::AtlasManager::Mesh2D glyphMesh;
     glyphManager.GenerateMeshData(slot.mImageId, position, glyphMesh);
     if(glyphMesh.mVertices.Empty() || glyphMesh.mIndices.Empty())
     {
-      return false;
+      return failRender();
     }
 
     for(Vector<Dali::Ui::AtlasManager::Vertex2D>::Iterator it = glyphMesh.mVertices.Begin(), endIt = glyphMesh.mVertices.End(); it != endIt; ++it)
@@ -309,13 +493,13 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
 
   if(pendingMeshes.empty())
   {
-    return false;
+    return failRender();
   }
 
   EnsureOutputActor();
   if(!mOutputActor)
   {
-    return false;
+    return failRender();
   }
 
   const Vector2 actorSize    = GetMeshActorSize(layoutResult, adapter);
@@ -325,8 +509,7 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
   {
     if(pendingMesh.mesh.mVertices.Empty() || pendingMesh.mesh.mIndices.Empty())
     {
-      ClearMeshes();
-      return false;
+      return failRender();
     }
 
     VertexBuffer vertexBuffer = VertexBuffer::New(vertexFormat);
@@ -339,8 +522,7 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     TextureSet textureSet = glyphManager.GetTextures(pendingMesh.atlasId);
     if(!textureSet)
     {
-      ClearMeshes();
-      return false;
+      return failRender();
     }
 
     const bool isColorShader = Pixel::BGRA8888 == glyphManager.GetPixelFormat(pendingMesh.atlasId);
@@ -393,6 +575,14 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
     meshRecord.vertexCount  = pendingMesh.mesh.mVertices.Size();
     meshRecord.indexCount   = pendingMesh.mesh.mIndices.Size();
     mMeshRecords.push_back(meshRecord);
+  }
+
+  if(!reuseGlyphCache)
+  {
+    ReleaseGlyphReferences(mGlyphCacheEntries);
+    mGlyphCacheEntries.swap(newGlyphCacheEntries);
+    mGlyphCacheSignature    = newGlyphCacheSignature;
+    mHasGlyphCacheSignature = true;
   }
 
   return HasMeshRecords();

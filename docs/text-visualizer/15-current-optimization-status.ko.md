@@ -45,10 +45,11 @@
 - `Design TextVisualizer sorted exclusion cache boundary`
 - `Add TextVisualizer ExclusionLayoutCache`
 - `Design TextVisualizer glyph cache lifecycle`
+- `Add TextVisualizerGlyphRenderer glyph cache references`
 
 이번 작업 포함 최신 커밋:
 
-- `Design TextVisualizer glyph cache lifecycle`
+- `Add TextVisualizerGlyphRenderer glyph cache references`
 
 최근 최적화 상태:
 
@@ -97,7 +98,10 @@
 - text / font / fontSize / lineHeight / color / size 변경은 sorted exclusion cache를 유지한다.
 - `docs/text-visualizer/23-glyph-cache-lifecycle-design.ko.md`에서 active lightweight renderer path 전환 전 필요한 glyph cache ownership과 ref count lifecycle을 설계했다.
 - 현재 `TextVisualizerGlyphRenderer` MVP는 already-cached glyph mesh proof이며, production path로 쓰려면 own glyph references가 필요하다.
-- 다음 추천 구현 후보는 `Add TextVisualizerGlyphRenderer glyph cache references`다.
+- `TextVisualizerGlyphRenderer`가 already-cached glyph에 대해 reference acquire / release / rollback을 수행할 수 있게 됐다.
+- 같은 glyph sequence render에서는 glyph cache signature를 통해 ref count churn을 피할 수 있는 기반이 생겼다.
+- cache miss handling, `FontClient::CreateBitmap()`, `AtlasGlyphManager::Add()`, geometry-only update, active path 연결은 아직 하지 않는다.
+- 다음 추천 구현 후보는 glyph cache miss handling 설계/구현 또는 geometry-only mesh update prototype이다.
 
 현재 해석:
 
@@ -867,4 +871,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 `Add TextVisualizerGlyphRenderer glyph cache references`이다. 이 작업은 cache miss handling을 아직 구현하지 않고, already-cached glyph에 대한 reference acquire / release / rollback 기반만 추가하는 것이 좋다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 glyph cache miss handling 설계/구현 또는 `Prototype TextVisualizer geometry-only mesh update`이다. cache miss handling은 `FontClient::CreateBitmap()` / compressed glyph buffer / atlas size policy를 건드리므로 별도 설계가 필요하고, geometry-only update는 already-cached glyph reference lifecycle 위에서 진행해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
