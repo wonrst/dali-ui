@@ -873,3 +873,47 @@ firstChildSize=(1354,970,0)
 - glyph correctness 문제는 별도 diagnostics가 필요하다.
 - cache miss handling은 여전히 없다.
 - default lightweight flag는 계속 `false`다.
+
+## 20. 진행: fix lightweight renderer mesh actor bounds
+
+flag ON 로컬 실험에서 state 보존 이후 다음 로그가 관찰됐다.
+
+```text
+attempts=483
+successes=482
+fallbacks=1
+fullRebuilds=1
+geometryOnly=481
+glyphCacheEntries=3137
+meshRecords=2
+renderHostSize=(1354,970,0)
+outputSize=(1354,970,0)
+firstChildSize=(1354,970,0)
+```
+
+기존 `Text::AtlasRenderer` fallback path에서는 같은 상황에서 output / first child height가 약 `1152`까지 커졌다.
+
+해석:
+
+- lightweight renderer는 output actor와 mesh actor size를 adapter control size로 사용했다.
+- 실제 layout / text content bounds는 control height보다 클 수 있다.
+- actor bounds가 content보다 작으면 culling / clipping / transform 기준 차이로 일부 glyph가 보이지 않을 수 있다.
+
+변경 정책:
+
+- render host는 기존처럼 control size를 유지한다.
+- `TextVisualizerGlyphRenderer`의 output actor와 mesh actor size는 layout size를 우선 사용한다.
+- layout size가 0인 축은 control size로 fallback한다.
+- layout size와 control size가 모두 유효하면 각 축별 `max(layoutSize, controlSize)`를 사용한다.
+- geometry-only update path에서도 mesh actor size를 같은 actor size로 갱신한다.
+
+의미:
+
+- control보다 layout content가 큰 경우에도 lightweight renderer actor bounds가 content를 감쌀 수 있다.
+- default lightweight flag와 diagnostics flag는 계속 `false`다.
+
+남은 확인:
+
+- flag ON 재실험에서 output / first child size가 layout content bounds에 맞게 커지는지 확인해야 한다.
+- glyph correctness 문제가 bounds 문제만으로 해결되는지는 별도 확인이 필요하다.
+- cache miss handling은 여전히 없다.

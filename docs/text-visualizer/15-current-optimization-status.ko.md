@@ -797,6 +797,23 @@ Non-primary workload:
 - 추천 이름은 `TextVisualizerGlyphRenderer`다.
 - 첫 구현 전 `AtlasGlyphManager`, `AtlasMeshFactory`, `VertexBuffer`, `Geometry` reuse 가능성을 조사해야 한다.
 
+### 진행: Fix TextVisualizerGlyphRenderer mesh actor bounds
+
+flag ON 로컬 실험에서 lightweight renderer는 대부분 성공하고 geometry-only update도 증가했지만, output / mesh actor size가 control size에 묶여 일부 glyph가 보이지 않을 가능성이 있었다.
+
+변경 내용:
+
+- `TextVisualizerGlyphRenderer` output actor / mesh actor size는 layout size를 우선 사용한다.
+- layout size가 비어 있는 축은 control size로 fallback한다.
+- layout size와 control size가 모두 있으면 각 축별 max 값을 사용한다.
+- render host size는 기존 control size 정책을 유지한다.
+- lightweight renderer flag와 diagnostics flag 기본값은 계속 `false`다.
+
+다음 확인:
+
+- flag ON 로컬 재실험에서 output / first child bounds가 기존 `Text::AtlasRenderer` path에 가까워지는지 확인한다.
+- glyph correctness가 남으면 glyph position / atlas mesh data / shader path를 별도 diagnostics로 분리한다.
+
 ## 21. 다음 추천 작업
 
 현재 기준 추천 순서는 다음과 같다.
@@ -890,4 +907,4 @@ flowchart LR
 4. 최근 local commit push가 인증 문제로 실패할 수 있으므로, push 실패를 코드 문제로 보지 않는다.
 5. 코드 작업 전 금지 파일과 기존 user change 여부를 다시 확인한다.
 
-현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 다시 켠 뒤 geometry-only update가 증가하는지, output actor size가 정상화됐는지, 그리고 glyph correctness 문제가 남는지 확인하는 것이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 잘못 보이는 glyph 원인과 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.
+현재 가장 자연스러운 다음 작업은 lightweight renderer flag를 로컬에서 다시 켠 뒤 geometry-only update가 유지되는지, output / mesh actor bounds가 layout content 크기로 잡히는지, 그리고 glyph correctness 문제가 남는지 확인하는 것이다. geometry-only mesh update prototype과 optional bridge path는 already-cached glyph reference lifecycle 위에서 동작하지만, production 전환 전에는 잘못 보이는 glyph 원인과 cache miss에서 glyph bitmap 생성 / atlas add / rollback을 안전하게 처리해야 한다. 새 세션에서는 이 문서 다음에 `23-glyph-cache-lifecycle-design.ko.md`, `20-lightweight-renderer-dependency-analysis.ko.md`, `19-render-optimization-phase2-plan.ko.md`, `18-atlas-render-update-cost-analysis.ko.md`를 함께 읽고 Phase 2 render update 작업을 시작한다.

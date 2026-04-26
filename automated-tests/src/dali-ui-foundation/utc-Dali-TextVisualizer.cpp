@@ -2134,6 +2134,47 @@ int UtcDaliTextVisualizerGlyphRendererRenderAfterAtlasRendererWarmupSmokeP(void)
   END_TEST;
 }
 
+int UtcDaliTextVisualizerGlyphRendererUsesLayoutSizeForOutputActorP(void)
+{
+  UiTestApplication                                               application;
+  const auto                                                      preparedText = CreatePreparedText("bounds", 10.0f);
+  Dali::Vector<Rect<float>>                                       exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::AtlasRendererBridge         bridge;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+  Actor                                                          renderHost = Actor::New();
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 40.0f, 0.0f, exclusionRegions, layoutResult);
+
+  const Vector2 controlSize(layoutResult.width * 0.5f, std::max(1.0f, layoutResult.height * 0.5f));
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(controlSize);
+  bridge.SetAdapter(&adapter);
+  renderHost.SetProperty(Actor::Property::SIZE, Vector3(controlSize.x, controlSize.y, 0.0f));
+  bridge.SetRenderHost(renderHost);
+
+  if(adapter.HasRenderableGlyphs())
+  {
+    bridge.UpdateRenderData();
+    bridge.AttachRendererToHost();
+  }
+
+  const bool renderResult = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
+  DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
+
+  if(renderResult)
+  {
+    const Vector3 expectedSize(layoutResult.width, layoutResult.height, 0.0f);
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetProperty<Vector3>(Actor::Property::SIZE), expectedSize, TEST_LOCATION);
+    DALI_TEST_CHECK(renderer.GetOutputActor().GetChildCount() > 0u);
+    DALI_TEST_EQUALS(renderer.GetOutputActor().GetChildAt(0u).GetProperty<Vector3>(Actor::Property::SIZE), expectedSize, TEST_LOCATION);
+  }
+
+  END_TEST;
+}
+
 int UtcDaliTextVisualizerGlyphRendererClearAfterRenderSmokeP(void)
 {
   UiTestApplication                                               application;

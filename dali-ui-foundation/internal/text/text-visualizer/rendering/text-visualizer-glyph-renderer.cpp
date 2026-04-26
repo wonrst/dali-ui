@@ -23,6 +23,7 @@
 #include <dali/public-api/object/property-map.h>
 #include <dali/public-api/rendering/texture-set.h>
 
+#include <algorithm>
 #include <limits>
 
 // INTERNAL INCLUDES
@@ -80,7 +81,24 @@ Property::Map CreateQuadVertexFormat()
 
 Vector2 GetMeshActorSize(const AtlasViewAdapter& adapter)
 {
-  return adapter.GetControlSize();
+  const Vector2 controlSize = adapter.GetControlSize();
+  const Vector2 layoutSize  = adapter.GetLayoutSize();
+
+  Vector2 actorSize = layoutSize;
+  if(actorSize.x <= 0.0f)
+  {
+    actorSize.x = controlSize.x;
+  }
+
+  if(actorSize.y <= 0.0f)
+  {
+    actorSize.y = controlSize.y;
+  }
+
+  actorSize.x = std::max(actorSize.x, controlSize.x);
+  actorSize.y = std::max(actorSize.y, controlSize.y);
+
+  return actorSize;
 }
 
 PendingMesh* FindPendingMesh(std::vector<PendingMesh>& pendingMeshes, uint32_t atlasId)
