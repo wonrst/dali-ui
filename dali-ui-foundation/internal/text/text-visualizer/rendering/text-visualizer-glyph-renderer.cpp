@@ -23,6 +23,8 @@
 #include <dali/public-api/object/property-map.h>
 #include <dali/public-api/rendering/texture-set.h>
 
+#include <limits>
+
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/devel-api/view-depth-index-ranges.h>
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
@@ -119,6 +121,28 @@ TextVisualizerGlyphRenderer::TextVisualizerGlyphRenderer()
   mHasMeshTopologySignature(false),
   mGeometryOnlyUpdateCount(0u),
   mFullMeshRebuildCount(0u),
+  mLastFailureReason(RenderFailureReason::NONE),
+  mFailureEmptyInputCount(0u),
+  mFailureNoRenderableGlyphsCount(0u),
+  mFailureNoPositionCacheCount(0u),
+  mFailureSignatureCount(0u),
+  mFailureNoGlyphManagerCount(0u),
+  mFailureGlyphPlacementCount(0u),
+  mFailureGlyphInfoCount(0u),
+  mFailureGlyphPositionCount(0u),
+  mFailureCacheMissCount(0u),
+  mFailureEmptyMeshCount(0u),
+  mFailureNoOutputActorCount(0u),
+  mFailureNoTextureSetCount(0u),
+  mLastFailedPlacementIndex(std::numeric_limits<uint32_t>::max()),
+  mLastFailedGlyphIndex(std::numeric_limits<uint32_t>::max()),
+  mLastFailedFontId(0u),
+  mLastFailedGlyphId(0u),
+  mLastFailedGlyphAdvance(0.0f),
+  mLastFailedGlyphWidth(0.0f),
+  mLastFailedGlyphHeight(0.0f),
+  mLastFailedGlyphXBearing(0.0f),
+  mLastFailedGlyphYBearing(0.0f),
   mShaderL8(),
   mShaderRgba()
 {
@@ -141,6 +165,7 @@ void TextVisualizerGlyphRenderer::Clear()
   mHasMeshTopologySignature = false;
   mGeometryOnlyUpdateCount  = 0u;
   mFullMeshRebuildCount     = 0u;
+  ResetFailureDiagnostics();
   mShaderL8.Reset();
   mShaderRgba.Reset();
 }
@@ -320,11 +345,241 @@ uint64_t TextVisualizerGlyphRenderer::GetGlyphCacheSignature() const
   return mGlyphCacheSignature;
 }
 
-bool TextVisualizerGlyphRenderer::CalculateGlyphCacheSignature(const AtlasViewAdapter& adapter, uint64_t& signature) const
+TextVisualizerGlyphRenderer::RenderFailureReason TextVisualizerGlyphRenderer::GetLastFailureReason() const
+{
+  return mLastFailureReason;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureEmptyInputCount() const
+{
+  return mFailureEmptyInputCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureNoRenderableGlyphsCount() const
+{
+  return mFailureNoRenderableGlyphsCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureNoPositionCacheCount() const
+{
+  return mFailureNoPositionCacheCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureSignatureCount() const
+{
+  return mFailureSignatureCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureNoGlyphManagerCount() const
+{
+  return mFailureNoGlyphManagerCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureGlyphPlacementCount() const
+{
+  return mFailureGlyphPlacementCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureGlyphInfoCount() const
+{
+  return mFailureGlyphInfoCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureGlyphPositionCount() const
+{
+  return mFailureGlyphPositionCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureCacheMissCount() const
+{
+  return mFailureCacheMissCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureEmptyMeshCount() const
+{
+  return mFailureEmptyMeshCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureNoOutputActorCount() const
+{
+  return mFailureNoOutputActorCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetFailureNoTextureSetCount() const
+{
+  return mFailureNoTextureSetCount;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetLastFailedPlacementIndex() const
+{
+  return mLastFailedPlacementIndex;
+}
+
+uint32_t TextVisualizerGlyphRenderer::GetLastFailedGlyphIndex() const
+{
+  return mLastFailedGlyphIndex;
+}
+
+Text::FontId TextVisualizerGlyphRenderer::GetLastFailedFontId() const
+{
+  return mLastFailedFontId;
+}
+
+Text::GlyphIndex TextVisualizerGlyphRenderer::GetLastFailedGlyphId() const
+{
+  return mLastFailedGlyphId;
+}
+
+float TextVisualizerGlyphRenderer::GetLastFailedGlyphAdvance() const
+{
+  return mLastFailedGlyphAdvance;
+}
+
+float TextVisualizerGlyphRenderer::GetLastFailedGlyphWidth() const
+{
+  return mLastFailedGlyphWidth;
+}
+
+float TextVisualizerGlyphRenderer::GetLastFailedGlyphHeight() const
+{
+  return mLastFailedGlyphHeight;
+}
+
+float TextVisualizerGlyphRenderer::GetLastFailedGlyphXBearing() const
+{
+  return mLastFailedGlyphXBearing;
+}
+
+float TextVisualizerGlyphRenderer::GetLastFailedGlyphYBearing() const
+{
+  return mLastFailedGlyphYBearing;
+}
+
+void TextVisualizerGlyphRenderer::ResetFailureDiagnostics()
+{
+  mLastFailureReason              = RenderFailureReason::NONE;
+  mFailureEmptyInputCount         = 0u;
+  mFailureNoRenderableGlyphsCount = 0u;
+  mFailureNoPositionCacheCount    = 0u;
+  mFailureSignatureCount          = 0u;
+  mFailureNoGlyphManagerCount     = 0u;
+  mFailureGlyphPlacementCount     = 0u;
+  mFailureGlyphInfoCount          = 0u;
+  mFailureGlyphPositionCount      = 0u;
+  mFailureCacheMissCount          = 0u;
+  mFailureEmptyMeshCount          = 0u;
+  mFailureNoOutputActorCount      = 0u;
+  mFailureNoTextureSetCount       = 0u;
+  mLastFailedPlacementIndex       = std::numeric_limits<uint32_t>::max();
+  mLastFailedGlyphIndex           = std::numeric_limits<uint32_t>::max();
+  mLastFailedFontId               = 0u;
+  mLastFailedGlyphId              = 0u;
+  mLastFailedGlyphAdvance         = 0.0f;
+  mLastFailedGlyphWidth           = 0.0f;
+  mLastFailedGlyphHeight          = 0.0f;
+  mLastFailedGlyphXBearing        = 0.0f;
+  mLastFailedGlyphYBearing        = 0.0f;
+}
+
+void TextVisualizerGlyphRenderer::RecordFailure(RenderFailureReason reason, uint32_t placementIndex, uint32_t glyphIndex, const Text::GlyphInfo* glyphInfo)
+{
+  mLastFailureReason        = reason;
+  mLastFailedPlacementIndex = placementIndex;
+  mLastFailedGlyphIndex     = glyphIndex;
+  mLastFailedFontId         = 0u;
+  mLastFailedGlyphId        = 0u;
+  mLastFailedGlyphAdvance   = 0.0f;
+  mLastFailedGlyphWidth     = 0.0f;
+  mLastFailedGlyphHeight    = 0.0f;
+  mLastFailedGlyphXBearing  = 0.0f;
+  mLastFailedGlyphYBearing  = 0.0f;
+
+  if(nullptr != glyphInfo)
+  {
+    mLastFailedFontId        = glyphInfo->fontId;
+    mLastFailedGlyphId       = glyphInfo->index;
+    mLastFailedGlyphAdvance  = glyphInfo->advance;
+    mLastFailedGlyphWidth    = glyphInfo->width;
+    mLastFailedGlyphHeight   = glyphInfo->height;
+    mLastFailedGlyphXBearing = glyphInfo->xBearing;
+    mLastFailedGlyphYBearing = glyphInfo->yBearing;
+  }
+
+  switch(reason)
+  {
+    case RenderFailureReason::EMPTY_INPUT:
+    {
+      ++mFailureEmptyInputCount;
+      break;
+    }
+    case RenderFailureReason::NO_RENDERABLE_GLYPHS:
+    {
+      ++mFailureNoRenderableGlyphsCount;
+      break;
+    }
+    case RenderFailureReason::NO_POSITION_CACHE:
+    {
+      ++mFailureNoPositionCacheCount;
+      break;
+    }
+    case RenderFailureReason::SIGNATURE_FAILED:
+    {
+      ++mFailureSignatureCount;
+      break;
+    }
+    case RenderFailureReason::NO_GLYPH_MANAGER:
+    {
+      ++mFailureNoGlyphManagerCount;
+      break;
+    }
+    case RenderFailureReason::GLYPH_PLACEMENT_FAILED:
+    {
+      ++mFailureGlyphPlacementCount;
+      break;
+    }
+    case RenderFailureReason::GLYPH_INFO_FAILED:
+    {
+      ++mFailureGlyphInfoCount;
+      break;
+    }
+    case RenderFailureReason::GLYPH_POSITION_FAILED:
+    {
+      ++mFailureGlyphPositionCount;
+      break;
+    }
+    case RenderFailureReason::GLYPH_CACHE_MISS:
+    {
+      ++mFailureCacheMissCount;
+      break;
+    }
+    case RenderFailureReason::EMPTY_MESH:
+    {
+      ++mFailureEmptyMeshCount;
+      break;
+    }
+    case RenderFailureReason::NO_OUTPUT_ACTOR:
+    {
+      ++mFailureNoOutputActorCount;
+      break;
+    }
+    case RenderFailureReason::NO_TEXTURE_SET:
+    {
+      ++mFailureNoTextureSetCount;
+      break;
+    }
+    case RenderFailureReason::NONE:
+    {
+      break;
+    }
+  }
+}
+
+bool TextVisualizerGlyphRenderer::CalculateGlyphCacheSignature(const AtlasViewAdapter& adapter, uint64_t& signature)
 {
   const uint32_t placementCount = adapter.GetGlyphPlacementCount();
   if(0u == placementCount)
   {
+    RecordFailure(RenderFailureReason::SIGNATURE_FAILED);
     return false;
   }
 
@@ -336,9 +591,15 @@ bool TextVisualizerGlyphRenderer::CalculateGlyphCacheSignature(const AtlasViewAd
     GlyphPlacement  placement;
     Text::GlyphInfo glyphInfo;
 
-    if(!adapter.GetGlyphPlacement(placementIndex, placement) ||
-       !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    if(!adapter.GetGlyphPlacement(placementIndex, placement))
     {
+      RecordFailure(RenderFailureReason::GLYPH_PLACEMENT_FAILED, placementIndex);
+      return false;
+    }
+
+    if(!adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    {
+      RecordFailure(RenderFailureReason::GLYPH_INFO_FAILED, placementIndex, placement.glyphIndex);
       return false;
     }
 
@@ -361,13 +622,14 @@ bool TextVisualizerGlyphRenderer::CanReuseGlyphCache(uint64_t signature) const
          !mGlyphCacheEntries.empty();
 }
 
-bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter& adapter, std::vector<GlyphCacheEntry>& entries) const
+bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter& adapter, std::vector<GlyphCacheEntry>& entries)
 {
   entries.clear();
 
   Dali::Ui::AtlasGlyphManager glyphManager = Dali::Ui::AtlasGlyphManager::Get();
   if(!glyphManager)
   {
+    RecordFailure(RenderFailureReason::NO_GLYPH_MANAGER);
     return false;
   }
 
@@ -379,9 +641,16 @@ bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter&
     GlyphPlacement  placement;
     Text::GlyphInfo glyphInfo;
 
-    if(!adapter.GetGlyphPlacement(placementIndex, placement) ||
-       !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    if(!adapter.GetGlyphPlacement(placementIndex, placement))
     {
+      RecordFailure(RenderFailureReason::GLYPH_PLACEMENT_FAILED, placementIndex);
+      ReleaseGlyphReferences(entries);
+      return false;
+    }
+
+    if(!adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    {
+      RecordFailure(RenderFailureReason::GLYPH_INFO_FAILED, placementIndex, placement.glyphIndex);
       ReleaseGlyphReferences(entries);
       return false;
     }
@@ -393,6 +662,7 @@ bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter&
        (0u == slot.mImageId) ||
        (0u == slot.mAtlasId))
     {
+      RecordFailure(RenderFailureReason::GLYPH_CACHE_MISS, placementIndex, placement.glyphIndex, &glyphInfo);
       ReleaseGlyphReferences(entries);
       return false;
     }
@@ -440,6 +710,7 @@ bool TextVisualizerGlyphRenderer::Render(const PreparedText& preparedText, const
      !preparedText.HasGlyphMetrics() ||
      layoutResult.glyphPlacements.Empty())
   {
+    RecordFailure(RenderFailureReason::EMPTY_INPUT);
     ClearMeshes();
     return false;
   }
@@ -454,9 +725,16 @@ bool TextVisualizerGlyphRenderer::Render(const AtlasViewAdapter& adapter)
 
 bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter, const Vector4& textColor)
 {
-  if(!adapter.HasRenderableGlyphs() ||
-     (0u == adapter.GetRendererGlyphPositionCacheCount()))
+  if(!adapter.HasRenderableGlyphs())
   {
+    RecordFailure(RenderFailureReason::NO_RENDERABLE_GLYPHS);
+    ClearMeshes();
+    return false;
+  }
+
+  if(0u == adapter.GetRendererGlyphPositionCacheCount())
+  {
+    RecordFailure(RenderFailureReason::NO_POSITION_CACHE);
     ClearMeshes();
     return false;
   }
@@ -464,6 +742,10 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   uint64_t newGlyphCacheSignature = 0u;
   if(!CalculateGlyphCacheSignature(adapter, newGlyphCacheSignature))
   {
+    if(RenderFailureReason::SIGNATURE_FAILED != mLastFailureReason)
+    {
+      ++mFailureSignatureCount;
+    }
     ClearMeshes();
     return false;
   }
@@ -471,6 +753,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   Dali::Ui::AtlasGlyphManager glyphManager = Dali::Ui::AtlasGlyphManager::Get();
   if(!glyphManager)
   {
+    RecordFailure(RenderFailureReason::NO_GLYPH_MANAGER);
     ClearMeshes();
     return false;
   }
@@ -504,10 +787,21 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     Text::GlyphInfo glyphInfo;
     Vector2         position;
 
-    if(!adapter.GetGlyphPlacement(placementIndex, placement) ||
-       !adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo) ||
-       !adapter.GetRendererGlyphPosition(placementIndex, position))
+    if(!adapter.GetGlyphPlacement(placementIndex, placement))
     {
+      RecordFailure(RenderFailureReason::GLYPH_PLACEMENT_FAILED, placementIndex);
+      return failRender();
+    }
+
+    if(!adapter.GetGlyphInfo(placement.glyphIndex, glyphInfo))
+    {
+      RecordFailure(RenderFailureReason::GLYPH_INFO_FAILED, placementIndex, placement.glyphIndex);
+      return failRender();
+    }
+
+    if(!adapter.GetRendererGlyphPosition(placementIndex, position))
+    {
+      RecordFailure(RenderFailureReason::GLYPH_POSITION_FAILED, placementIndex, placement.glyphIndex, &glyphInfo);
       return failRender();
     }
 
@@ -518,6 +812,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
        (0u == slot.mImageId) ||
        (0u == slot.mAtlasId))
     {
+      RecordFailure(RenderFailureReason::GLYPH_CACHE_MISS, placementIndex, placement.glyphIndex, &glyphInfo);
       return failRender();
     }
 
@@ -525,6 +820,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     glyphManager.GenerateMeshData(slot.mImageId, position, glyphMesh);
     if(glyphMesh.mVertices.Empty() || glyphMesh.mIndices.Empty())
     {
+      RecordFailure(RenderFailureReason::EMPTY_MESH, placementIndex, placement.glyphIndex, &glyphInfo);
       return failRender();
     }
 
@@ -549,12 +845,14 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
 
   if(pendingMeshes.empty())
   {
+    RecordFailure(RenderFailureReason::EMPTY_MESH);
     return failRender();
   }
 
   EnsureOutputActor();
   if(!mOutputActor)
   {
+    RecordFailure(RenderFailureReason::NO_OUTPUT_ACTOR);
     return failRender();
   }
 
@@ -634,6 +932,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
   {
     if(pendingMesh.mesh.mVertices.Empty() || pendingMesh.mesh.mIndices.Empty())
     {
+      RecordFailure(RenderFailureReason::EMPTY_MESH);
       return failRender();
     }
 
@@ -647,6 +946,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
     TextureSet textureSet = glyphManager.GetTextures(pendingMesh.atlasId);
     if(!textureSet)
     {
+      RecordFailure(RenderFailureReason::NO_TEXTURE_SET);
       return failRender();
     }
 

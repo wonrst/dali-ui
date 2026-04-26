@@ -605,6 +605,87 @@ local benchmark 절차:
 - 일부 glyph가 잘못 보이는 현상은 별도 glyph/atlas correctness diagnostics로 다룬다.
 - cache miss handling은 여전히 없다.
 
+## 17. 진행: fallback reason diagnostics
+
+로컬에서 `ENABLE_TEXT_VISUALIZER_LIGHTWEIGHT_RENDERER=true`와 `ENABLE_TEXT_VISUALIZER_RENDER_DIAGNOSTICS=true`로 performance sample을 실행했을 때 다음 관찰이 있었다.
+
+```text
+lightweight attempts=1144 successes=0 fallbacks=1144 fullRebuilds=0 geometryOnly=0 glyphCacheEntries=0 meshRecords=0
+```
+
+해석:
+
+- lightweight renderer가 한 번도 성공하지 않았다.
+- full mesh rebuild와 geometry-only update가 모두 0이므로 renderer backend 성능 비교는 아직 이루어진 것이 아니다.
+- 현재 성능 차이가 체감되지 않는 것은 lightweight path가 실제 render output을 만들지 못하고 기존 `Text::AtlasRenderer`로 100% fallback하기 때문일 수 있다.
+
+이번 진단에서 추가한 상태:
+
+- failure reason enum
+- failure reason별 counters
+- last failed placement index
+- last failed glyph placement index
+- last failed font id
+- last failed glyph id
+- last failed glyph advance / width / height / bearing
+
+분리해서 볼 실패 원인:
+
+- empty input
+- no renderable glyphs
+- no renderer position cache
+- glyph cache signature failure
+- no glyph manager
+- glyph placement lookup failure
+- glyph info lookup failure
+- renderer glyph position lookup failure
+- glyph cache miss
+- empty mesh
+- no output actor
+- no texture set
+
+가장 의심되는 원인:
+
+- space / zero-width / non-renderable glyph 하나가 cache miss 또는 empty mesh로 처리되어 전체 `Render()`가 `false`를 반환할 수 있다.
+- 이 경우 다음 구현은 glyph cache miss handling이 아니라 먼저 non-renderable glyph skip policy일 수 있다.
+- 반대로 실제 visible glyph가 cache miss라면 `CacheGlyph` equivalent 또는 helper extraction 설계가 필요하다.
+
+diagnostics log에서 볼 항목:
+
+- `failureCacheMiss`
+- `failureEmptyMesh`
+- `failurePlacement`
+- `failureGlyphInfo`
+- `failurePosition`
+- `failureNoTexture`
+- `lastFailureReason`
+- `lastFailedPlacementIndex`
+- `lastFailedGlyphIndex`
+- `lastFailedFontId`
+- `lastFailedGlyphId`
+- `lastFailedAdvance`
+- `lastFailedWidth`
+- `lastFailedHeight`
+
+주의:
+
+- 기본 flag는 계속 `false`다.
+- 이 단계는 cache miss handling이 아니다.
+- `FontClient::CreateBitmap()`과 `AtlasGlyphManager::Add()`는 여전히 사용하지 않는다.
+- glyph correctness fix도 아직 하지 않는다.
+
+다음 후보:
+
+```text
+Skip TextVisualizerGlyphRenderer non-renderable glyphs
+```
+
+또는 로그 결과가 visible glyph cache miss라면:
+
+```text
+Design TextVisualizer glyph cache miss handling
+```
+
 또는 already-cached 환경을 전제로:
 
 ```text

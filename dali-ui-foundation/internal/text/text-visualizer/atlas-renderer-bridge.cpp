@@ -303,6 +303,106 @@ bool AtlasRendererBridge::HasLightweightMeshTopologySignature() const
   return mGlyphRenderer.HasMeshTopologySignature();
 }
 
+TextVisualizerGlyphRenderer::RenderFailureReason AtlasRendererBridge::GetLightweightLastFailureReason() const
+{
+  return mGlyphRenderer.GetLastFailureReason();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureEmptyInputCount() const
+{
+  return mGlyphRenderer.GetFailureEmptyInputCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureNoRenderableGlyphsCount() const
+{
+  return mGlyphRenderer.GetFailureNoRenderableGlyphsCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureNoPositionCacheCount() const
+{
+  return mGlyphRenderer.GetFailureNoPositionCacheCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureSignatureCount() const
+{
+  return mGlyphRenderer.GetFailureSignatureCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureNoGlyphManagerCount() const
+{
+  return mGlyphRenderer.GetFailureNoGlyphManagerCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureGlyphPlacementCount() const
+{
+  return mGlyphRenderer.GetFailureGlyphPlacementCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureGlyphInfoCount() const
+{
+  return mGlyphRenderer.GetFailureGlyphInfoCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureGlyphPositionCount() const
+{
+  return mGlyphRenderer.GetFailureGlyphPositionCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureCacheMissCount() const
+{
+  return mGlyphRenderer.GetFailureCacheMissCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureEmptyMeshCount() const
+{
+  return mGlyphRenderer.GetFailureEmptyMeshCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureNoOutputActorCount() const
+{
+  return mGlyphRenderer.GetFailureNoOutputActorCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightFailureNoTextureSetCount() const
+{
+  return mGlyphRenderer.GetFailureNoTextureSetCount();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightLastFailedPlacementIndex() const
+{
+  return mGlyphRenderer.GetLastFailedPlacementIndex();
+}
+
+uint32_t AtlasRendererBridge::GetLightweightLastFailedGlyphIndex() const
+{
+  return mGlyphRenderer.GetLastFailedGlyphIndex();
+}
+
+Text::FontId AtlasRendererBridge::GetLightweightLastFailedFontId() const
+{
+  return mGlyphRenderer.GetLastFailedFontId();
+}
+
+Text::GlyphIndex AtlasRendererBridge::GetLightweightLastFailedGlyphId() const
+{
+  return mGlyphRenderer.GetLastFailedGlyphId();
+}
+
+float AtlasRendererBridge::GetLightweightLastFailedGlyphAdvance() const
+{
+  return mGlyphRenderer.GetLastFailedGlyphAdvance();
+}
+
+float AtlasRendererBridge::GetLightweightLastFailedGlyphWidth() const
+{
+  return mGlyphRenderer.GetLastFailedGlyphWidth();
+}
+
+float AtlasRendererBridge::GetLightweightLastFailedGlyphHeight() const
+{
+  return mGlyphRenderer.GetLastFailedGlyphHeight();
+}
+
 void AtlasRendererBridge::EnsureRenderer()
 {
   if(!mRenderer && HasRenderableGlyphs())

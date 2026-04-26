@@ -575,6 +575,33 @@ void TextVisualizerImpl::LogRenderDiagnostics(const Vector2& size, bool updateRe
     mAtlasRendererBridge.HasLightweightMeshTopologySignature(),
     static_cast<unsigned long long>(mAtlasRendererBridge.GetLightweightMeshTopologySignature()));
 
+  DALI_LOG_RELEASE_INFO(
+    "[TextVisualizer][%p] lightweightFailure cacheMiss=%u emptyMesh=%u placement=%u glyphInfo=%u position=%u "
+    "input=%u noRenderable=%u noPositionCache=%u signature=%u noGlyphManager=%u noOutput=%u noTexture=%u "
+    "lastReason=%u lastPlacement=%u lastGlyphIndex=%u lastFontId=%u lastGlyphId=%u "
+    "lastAdvance=%.2f lastWidth=%.2f lastHeight=%.2f\n",
+    this,
+    mAtlasRendererBridge.GetLightweightFailureCacheMissCount(),
+    mAtlasRendererBridge.GetLightweightFailureEmptyMeshCount(),
+    mAtlasRendererBridge.GetLightweightFailureGlyphPlacementCount(),
+    mAtlasRendererBridge.GetLightweightFailureGlyphInfoCount(),
+    mAtlasRendererBridge.GetLightweightFailureGlyphPositionCount(),
+    mAtlasRendererBridge.GetLightweightFailureEmptyInputCount(),
+    mAtlasRendererBridge.GetLightweightFailureNoRenderableGlyphsCount(),
+    mAtlasRendererBridge.GetLightweightFailureNoPositionCacheCount(),
+    mAtlasRendererBridge.GetLightweightFailureSignatureCount(),
+    mAtlasRendererBridge.GetLightweightFailureNoGlyphManagerCount(),
+    mAtlasRendererBridge.GetLightweightFailureNoOutputActorCount(),
+    mAtlasRendererBridge.GetLightweightFailureNoTextureSetCount(),
+    static_cast<uint32_t>(mAtlasRendererBridge.GetLightweightLastFailureReason()),
+    mAtlasRendererBridge.GetLightweightLastFailedPlacementIndex(),
+    mAtlasRendererBridge.GetLightweightLastFailedGlyphIndex(),
+    mAtlasRendererBridge.GetLightweightLastFailedFontId(),
+    mAtlasRendererBridge.GetLightweightLastFailedGlyphId(),
+    mAtlasRendererBridge.GetLightweightLastFailedGlyphAdvance(),
+    mAtlasRendererBridge.GetLightweightLastFailedGlyphWidth(),
+    mAtlasRendererBridge.GetLightweightLastFailedGlyphHeight());
+
   mRenderDiagnosticsLogged = true;
 }
 

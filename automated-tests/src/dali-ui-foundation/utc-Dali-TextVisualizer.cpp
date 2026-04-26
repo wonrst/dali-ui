@@ -1732,6 +1732,19 @@ int UtcDaliTextVisualizerGlyphRendererEmptyStateP(void)
   DALI_TEST_EQUALS(renderer.GetFullMeshRebuildCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(renderer.GetGlyphCacheSignature(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureEmptyInputCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureNoRenderableGlyphsCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureNoPositionCacheCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureSignatureCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureNoGlyphManagerCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureGlyphPlacementCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureGlyphInfoCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureGlyphPositionCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureEmptyMeshCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureNoOutputActorCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureNoTextureSetCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1831,6 +1844,9 @@ int UtcDaliTextVisualizerGlyphRendererClearP(void)
   DALI_TEST_CHECK(!renderer.HasMeshTopologySignature());
   DALI_TEST_EQUALS(renderer.GetGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(renderer.GetFullMeshRebuildCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureEmptyInputCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1938,6 +1954,9 @@ int UtcDaliTextVisualizerGlyphRendererRenderEmptyP(void)
   DALI_TEST_CHECK(!renderer.HasGlyphCacheEntries());
   DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), 0u, TEST_LOCATION);
   DALI_TEST_CHECK(!renderer.HasGlyphCacheSignature());
+  DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::EMPTY_INPUT), TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureEmptyInputCount(), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -1973,6 +1992,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
     DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), adapter.GetGlyphPlacementCount(), TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheSignature());
     DALI_TEST_CHECK(renderer.GetGlyphCacheSignature() != 0u);
+    DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
   }
   else
   {
@@ -1983,6 +2003,15 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
     DALI_TEST_CHECK(!renderer.HasGlyphCacheEntries());
     DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), 0u, TEST_LOCATION);
     DALI_TEST_CHECK(!renderer.HasGlyphCacheSignature());
+    DALI_TEST_CHECK(renderer.GetFailureCacheMissCount() > 0u ||
+                    renderer.GetFailureEmptyMeshCount() > 0u ||
+                    renderer.GetFailureNoGlyphManagerCount() > 0u ||
+                    renderer.GetFailureSignatureCount() > 0u);
+    if(renderer.GetFailureCacheMissCount() > 0u)
+    {
+      DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::GLYPH_CACHE_MISS), TEST_LOCATION);
+      DALI_TEST_CHECK(renderer.GetLastFailedFontId() != 0u);
+    }
   }
 
   END_TEST;
@@ -2074,6 +2103,9 @@ int UtcDaliTextVisualizerGlyphRendererClearAfterRenderSmokeP(void)
   DALI_TEST_EQUALS(renderer.GetGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(renderer.GetFullMeshRebuildCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureEmptyInputCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -2211,6 +2243,19 @@ int UtcDaliTextVisualizerAtlasRendererBridgeEmptyStateP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightMeshTopologySignature(), 0u, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
+  DALI_TEST_EQUALS(static_cast<uint32_t>(bridge.GetLightweightLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureCacheMissCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureEmptyMeshCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureGlyphPlacementCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureGlyphInfoCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureGlyphPositionCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureEmptyInputCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureNoRenderableGlyphsCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureNoPositionCacheCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureSignatureCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureNoGlyphManagerCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureNoOutputActorCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureNoTextureSetCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRendererOutputSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetRenderHostSize(), Vector3::ZERO, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.IsRendererOutputVisible());
@@ -2237,6 +2282,9 @@ int UtcDaliTextVisualizerAtlasRendererBridgeWithEmptyAdapterP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
+  DALI_TEST_EQUALS(static_cast<uint32_t>(bridge.GetLightweightLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureCacheMissCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureEmptyMeshCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -2296,6 +2344,9 @@ int UtcDaliTextVisualizerAtlasRendererBridgeClearP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightMeshTopologySignature(), 0u, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
+  DALI_TEST_EQUALS(static_cast<uint32_t>(bridge.GetLightweightLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureCacheMissCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureEmptyMeshCount(), 0u, TEST_LOCATION);
 
   END_TEST;
 }
@@ -2574,6 +2625,9 @@ int UtcDaliTextVisualizerAtlasRendererBridgeAttachWithHostP(void)
   DALI_TEST_EQUALS(bridge.GetLightweightGlyphCacheEntryCount(), 0u, TEST_LOCATION);
   DALI_TEST_EQUALS(bridge.GetLightweightMeshRecordCount(), 0u, TEST_LOCATION);
   DALI_TEST_CHECK(!bridge.HasLightweightMeshTopologySignature());
+  DALI_TEST_EQUALS(static_cast<uint32_t>(bridge.GetLightweightLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::NONE), TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureCacheMissCount(), 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(bridge.GetLightweightFailureEmptyMeshCount(), 0u, TEST_LOCATION);
 
   if(attached)
   {
