@@ -686,6 +686,45 @@ Skip TextVisualizerGlyphRenderer non-renderable glyphs
 Design TextVisualizer glyph cache miss handling
 ```
 
+## 18. 진행: skip non-renderable glyphs
+
+fallback reason diagnostics로 다음 실패가 관찰됐다.
+
+```text
+main TextVisualizer:
+attempts=1711 successes=0 fallbacks=1711
+failure cacheMiss=1
+lastGlyphId=3
+lastAdvance=5.00
+lastWidth=0.00
+lastHeight=0.00
+```
+
+해석:
+
+- `lastWidth=0`, `lastHeight=0`, `lastAdvance=5`인 glyph는 space 같은 advance-only glyph로 보인다.
+- 이 glyph는 화면에 mesh로 그릴 대상이 아니므로 atlas에 없어도 정상이다.
+- 이전 prototype은 이 glyph에도 `AtlasGlyphManager::IsCached()`를 호출했고, cache miss를 전체 `Render()` 실패로 처리했다.
+
+변경 정책:
+
+- glyph cache signature는 기존처럼 모든 glyph identity를 포함한다.
+- glyph sequence identity에는 space도 포함되어야 하므로 `"ab"`와 `"a b"`는 다른 signature가 된다.
+- `width == 0 && height == 0`인 glyph는 non-renderable로 보고 atlas lookup / ref acquire / mesh generation 대상에서 제외한다.
+- `width > 0 || height > 0`인 visible glyph cache miss는 여전히 fallback한다.
+- cache miss handling / glyph bitmap 생성 / atlas add는 여전히 구현하지 않았다.
+
+의미:
+
+- advance-only glyph 하나 때문에 lightweight renderer 전체가 fallback하는 false negative를 줄인다.
+- 다음 flag ON 실험에서는 cache miss가 visible glyph에서 나는지, 아니면 renderer가 mesh를 실제로 만들 수 있는지 분리해서 볼 수 있다.
+
+다음 후보:
+
+```text
+Enable lightweight renderer flag locally and inspect fallback diagnostics
+```
+
 또는 already-cached 환경을 전제로:
 
 ```text

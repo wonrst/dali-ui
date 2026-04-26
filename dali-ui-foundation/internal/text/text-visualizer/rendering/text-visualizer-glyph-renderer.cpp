@@ -54,6 +54,11 @@ Dali::Ui::AtlasGlyphManager::GlyphStyle CreateGlyphStyle(const Text::GlyphInfo& 
   return style;
 }
 
+bool IsRenderableGlyph(const Text::GlyphInfo& glyphInfo)
+{
+  return (glyphInfo.width > 0.0f) || (glyphInfo.height > 0.0f);
+}
+
 void HashGlyphCacheValue(uint64_t& hash, uint64_t value)
 {
   hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6u) + (hash >> 2u);
@@ -655,6 +660,11 @@ bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter&
       return false;
     }
 
+    if(!IsRenderableGlyph(glyphInfo))
+    {
+      continue;
+    }
+
     const Dali::Ui::AtlasGlyphManager::GlyphStyle style = CreateGlyphStyle(glyphInfo);
 
     Dali::Ui::AtlasManager::AtlasSlot slot;
@@ -678,7 +688,13 @@ bool TextVisualizerGlyphRenderer::AcquireGlyphReferences(const AtlasViewAdapter&
     entries.push_back(entry);
   }
 
-  return !entries.empty();
+  if(entries.empty())
+  {
+    RecordFailure(RenderFailureReason::NO_RENDERABLE_GLYPHS);
+    return false;
+  }
+
+  return true;
 }
 
 void TextVisualizerGlyphRenderer::ReleaseGlyphReferences(std::vector<GlyphCacheEntry>& entries) const
@@ -799,6 +815,11 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
       return failRender();
     }
 
+    if(!IsRenderableGlyph(glyphInfo))
+    {
+      continue;
+    }
+
     if(!adapter.GetRendererGlyphPosition(placementIndex, position))
     {
       RecordFailure(RenderFailureReason::GLYPH_POSITION_FAILED, placementIndex, placement.glyphIndex, &glyphInfo);
@@ -845,7 +866,7 @@ bool TextVisualizerGlyphRenderer::RenderAdapter(const AtlasViewAdapter& adapter,
 
   if(pendingMeshes.empty())
   {
-    RecordFailure(RenderFailureReason::EMPTY_MESH);
+    RecordFailure(RenderFailureReason::NO_RENDERABLE_GLYPHS);
     return failRender();
   }
 

@@ -102,6 +102,28 @@ float GetGlyphRangeAdvanceForTest(const Dali::Ui::Internal::TextVisualizer::Prep
   return advance;
 }
 
+uint32_t CountRenderableGlyphPlacementsForTest(const Dali::Ui::Internal::TextVisualizer::PreparedText& preparedText,
+                                               const Dali::Ui::Internal::TextVisualizer::LayoutResult&  layoutResult)
+{
+  uint32_t renderableGlyphCount = 0u;
+
+  const Dali::Vector<Dali::Ui::Text::GlyphInfo>& glyphs = preparedText.GetGlyphs();
+  for(Dali::Vector<Dali::Ui::Internal::TextVisualizer::GlyphPlacement>::ConstIterator it = layoutResult.glyphPlacements.Begin(), endIt = layoutResult.glyphPlacements.End();
+      it != endIt; ++it)
+  {
+    if(it->glyphIndex < glyphs.Count())
+    {
+      const Dali::Ui::Text::GlyphInfo& glyph = glyphs[it->glyphIndex];
+      if((glyph.width > 0.0f) || (glyph.height > 0.0f))
+      {
+        ++renderableGlyphCount;
+      }
+    }
+  }
+
+  return renderableGlyphCount;
+}
+
 uint32_t FindFirstAllowedLineBreakGlyphEndForTest(const Dali::Ui::Internal::TextVisualizer::PreparedText& preparedText)
 {
   const Dali::Vector<Dali::Ui::Text::CharacterIndex>& glyphToCharacterMap = preparedText.GetGlyphToCharacterMap();
@@ -1976,6 +1998,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
   adapter.SetLayoutResult(&layoutResult);
   adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
 
+  const uint32_t renderableGlyphCount = CountRenderableGlyphPlacementsForTest(preparedText, layoutResult);
   const bool renderResult = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
   DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
 
@@ -1989,7 +2012,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
     DALI_TEST_EQUALS(renderer.GetFullMeshRebuildCount(), 1u, TEST_LOCATION);
     DALI_TEST_EQUALS(renderer.GetGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheEntries());
-    DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), adapter.GetGlyphPlacementCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), renderableGlyphCount, TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheSignature());
     DALI_TEST_CHECK(renderer.GetGlyphCacheSignature() != 0u);
     DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
@@ -2012,6 +2035,41 @@ int UtcDaliTextVisualizerGlyphRendererRenderWithoutCachedGlyphsFailsSafelyP(void
       DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::GLYPH_CACHE_MISS), TEST_LOCATION);
       DALI_TEST_CHECK(renderer.GetLastFailedFontId() != 0u);
     }
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextVisualizerGlyphRendererSkipsNonRenderableGlyphCacheMissP(void)
+{
+  UiTestApplication                                               application;
+  const auto                                                      preparedText = CreatePreparedText("a b", 10.0f);
+  Dali::Vector<Rect<float>>                                       exclusionRegions;
+  Dali::Ui::Internal::TextVisualizer::LayoutResult                layoutResult;
+  Dali::Ui::Internal::TextVisualizer::AtlasViewAdapter            adapter;
+  Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer renderer;
+
+  Dali::Ui::Internal::TextVisualizer::LayoutEngine::LayoutGlyphs(preparedText, preparedText.GetTotalGlyphAdvance() + 20.0f, 0.0f, exclusionRegions, layoutResult);
+
+  adapter.SetPreparedText(&preparedText);
+  adapter.SetLayoutResult(&layoutResult);
+  adapter.SetControlSize(Vector2(layoutResult.width, layoutResult.height));
+
+  const uint32_t renderableGlyphCount = CountRenderableGlyphPlacementsForTest(preparedText, layoutResult);
+  const bool     renderResult         = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
+  DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
+
+  if(renderResult)
+  {
+    DALI_TEST_CHECK(renderer.HasGlyphCacheEntries());
+    DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), renderableGlyphCount, TEST_LOCATION);
+    DALI_TEST_CHECK(renderer.GetGlyphCacheEntryCount() <= adapter.GetGlyphPlacementCount());
+    DALI_TEST_EQUALS(renderer.GetFailureCacheMissCount(), 0u, TEST_LOCATION);
+  }
+  else if(renderer.GetFailureCacheMissCount() > 0u)
+  {
+    DALI_TEST_EQUALS(static_cast<uint32_t>(renderer.GetLastFailureReason()), static_cast<uint32_t>(Dali::Ui::Internal::TextVisualizer::TextVisualizerGlyphRenderer::RenderFailureReason::GLYPH_CACHE_MISS), TEST_LOCATION);
+    DALI_TEST_CHECK((renderer.GetLastFailedGlyphWidth() > 0.0f) || (renderer.GetLastFailedGlyphHeight() > 0.0f));
   }
 
   END_TEST;
@@ -2046,6 +2104,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderAfterAtlasRendererWarmupSmokeP(void)
   const bool renderResult = renderer.Render(preparedText, layoutResult, adapter, Vector4::ONE);
   DALI_TEST_CHECK(renderResult == renderer.HasMeshRecords());
 
+  const uint32_t renderableGlyphCount = CountRenderableGlyphPlacementsForTest(preparedText, layoutResult);
   if(renderResult)
   {
     DALI_TEST_CHECK(renderer.HasOutputActor());
@@ -2056,7 +2115,7 @@ int UtcDaliTextVisualizerGlyphRendererRenderAfterAtlasRendererWarmupSmokeP(void)
     DALI_TEST_EQUALS(renderer.GetFullMeshRebuildCount(), 1u, TEST_LOCATION);
     DALI_TEST_EQUALS(renderer.GetGeometryOnlyUpdateCount(), 0u, TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheEntries());
-    DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), adapter.GetGlyphPlacementCount(), TEST_LOCATION);
+    DALI_TEST_EQUALS(renderer.GetGlyphCacheEntryCount(), renderableGlyphCount, TEST_LOCATION);
     DALI_TEST_CHECK(renderer.HasGlyphCacheSignature());
     DALI_TEST_CHECK(renderer.GetGlyphCacheSignature() != 0u);
   }
