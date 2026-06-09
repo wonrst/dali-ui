@@ -20,9 +20,12 @@
 
 // EXTERNAL INCLUDES
 #include <dali/devel-api/text-abstraction/font-client.h>
+#include <dali/devel-api/text-abstraction/script.h>
 #include <dali/integration-api/debug.h>
 #include <dali/integration-api/trace.h>
+#include <algorithm>
 #include <chrono>
+#include <vector>
 
 namespace Dali
 {
@@ -48,6 +51,142 @@ uint32_t GetMilliSeconds()
   return static_cast<uint32_t>(duration.count());
 }
 #endif
+
+bool NeedsEmojiCompositionFallback(const Character* const textBuffer, Length numberOfCharacters, Script script)
+{
+  if(TextAbstraction::EMOJI_COLOR != script || numberOfCharacters <= 1u)
+  {
+    return false;
+  }
+
+  for(Length index = 0u; index < numberOfCharacters; ++index)
+  {
+    const Character character = *(textBuffer + index);
+    if(TextAbstraction::IsZeroWidthJoiner(character) ||
+       TextAbstraction::IsEmojiModifier(character) ||
+       TextAbstraction::IsRegionalIndicator(character) ||
+       TextAbstraction::IsTagSpec(character) ||
+       TextAbstraction::IsTagEnd(character))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void AddEmojiCoverageCharacter(std::vector<Character>& coverageCharacters, Character character)
+{
+  if(TextAbstraction::IsEmojiPresentationSelector(character) ||
+     TextAbstraction::IsTextPresentationSelector(character) ||
+     TextAbstraction::IsZeroWidthJoiner(character) ||
+     TextAbstraction::IsTagSpec(character) ||
+     TextAbstraction::IsTagEnd(character))
+  {
+    return;
+  }
+
+  if(coverageCharacters.end() == std::find(coverageCharacters.begin(), coverageCharacters.end(), character))
+  {
+    coverageCharacters.push_back(character);
+  }
+}
+
+void CollectEmojiCoverageCharacters(const Character* const  textBuffer,
+                                    Length                  numberOfCharacters,
+                                    std::vector<Character>& coverageCharacters)
+{
+  coverageCharacters.clear();
+  coverageCharacters.reserve(numberOfCharacters);
+
+  for(Length index = 0u; index < numberOfCharacters; ++index)
+  {
+    AddEmojiCoverageCharacter(coverageCharacters, *(textBuffer + index));
+  }
+}
+
+bool IsSingleVisibleGlyphShape(TextAbstraction::Shaping& shaping, Length numberOfGlyphs)
+{
+  if(0u == numberOfGlyphs)
+  {
+    return false;
+  }
+
+  Vector<GlyphInfo>      glyphs;
+  Vector<CharacterIndex> glyphToCharacterMap;
+  glyphs.Resize(numberOfGlyphs);
+  glyphToCharacterMap.Resize(numberOfGlyphs);
+  shaping.GetGlyphs(glyphs.Begin(), glyphToCharacterMap.Begin());
+
+  Length visibleGlyphCount = 0u;
+  for(Vector<GlyphInfo>::ConstIterator it = glyphs.Begin(), endIt = glyphs.End(); it != endIt; ++it)
+  {
+    if(0u == it->index)
+    {
+      return false;
+    }
+
+    if(it->advance > 0.f)
+    {
+      ++visibleGlyphCount;
+      if(visibleGlyphCount > 1u)
+      {
+        return false;
+      }
+    }
+  }
+
+  return 1u == visibleGlyphCount;
+}
+
+Length ShapeTextRun(TextAbstraction::Shaping&    shaping,
+                    TextAbstraction::FontClient& fontClient,
+                    const Character* const       textBuffer,
+                    Length                       numberOfCharacters,
+                    FontId                       fontId,
+                    Script                       script)
+{
+  const Length numberOfGlyphs = shaping.Shape(fontClient, textBuffer, numberOfCharacters, fontId, script);
+  if(!NeedsEmojiCompositionFallback(textBuffer, numberOfCharacters, script) ||
+     IsSingleVisibleGlyphShape(shaping, numberOfGlyphs))
+  {
+    return numberOfGlyphs;
+  }
+
+  TextAbstraction::FontDescription fontDescription;
+  fontClient.GetDescription(fontId, fontDescription);
+
+  std::vector<Character> coverageCharacters;
+  CollectEmojiCoverageCharacters(textBuffer, numberOfCharacters, coverageCharacters);
+  if(coverageCharacters.empty())
+  {
+    return numberOfGlyphs;
+  }
+
+  std::vector<FontId> candidates;
+  fontClient.GetFallbackFontCandidates(fontDescription,
+                                       coverageCharacters.data(),
+                                       static_cast<Length>(coverageCharacters.size()),
+                                       fontClient.GetPointSize(fontId),
+                                       true,
+                                       candidates);
+
+  for(FontId candidateFontId : candidates)
+  {
+    if(candidateFontId == fontId)
+    {
+      continue;
+    }
+
+    const Length candidateNumberOfGlyphs = shaping.Shape(fontClient, textBuffer, numberOfCharacters, candidateFontId, script);
+    if(IsSingleVisibleGlyphShape(shaping, candidateNumberOfGlyphs))
+    {
+      return candidateNumberOfGlyphs;
+    }
+  }
+
+  return shaping.Shape(fontClient, textBuffer, numberOfCharacters, fontId, script);
+}
 
 void ShapeText(TextAbstraction::Shaping& shaping, TextAbstraction::FontClient& fontClient,
                const Vector<Character>& text, const Vector<LineBreakInfo>& lineBreakInfo,
@@ -204,9 +343,12 @@ void ShapeText(TextAbstraction::Shaping& shaping, TextAbstraction::FontClient& f
 #endif
 
     // Shape the text for the current chunk.
-    const Length numberOfGlyphs = shaping.Shape(fontClient, textBuffer + previousIndex,
-                                                (currentIndex - previousIndex), // The number of characters to shape.
-                                                currentFontId, currentScript);
+    const Length numberOfGlyphs = ShapeTextRun(shaping,
+                                               fontClient,
+                                               textBuffer + previousIndex,
+                                               (currentIndex - previousIndex), // The number of characters to shape.
+                                               currentFontId,
+                                               currentScript);
 
 #if defined(TRACE_ENABLED)
     if(logEnabled)

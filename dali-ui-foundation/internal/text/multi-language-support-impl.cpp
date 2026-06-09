@@ -24,6 +24,8 @@
 #include <dali/integration-api/adaptor-framework/adaptor.h>
 #include <dali/integration-api/debug.h>
 #include <dali/integration-api/trace.h>
+#include <algorithm>
+#include <vector>
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/emoji-helper.h>
@@ -231,6 +233,103 @@ FontId FindTextPresentationFontForCharacter(TextAbstraction::FontClient&        
   }
 
   return 0u;
+}
+
+bool NeedsComposedColorEmojiFontProbe(const Character* const textBuffer,
+                                      Length                 sequenceStart,
+                                      Length                 sequenceLength)
+{
+  for(Length index = sequenceStart; index < sequenceStart + sequenceLength; ++index)
+  {
+    const Character character = *(textBuffer + index);
+    if(TextAbstraction::IsZeroWidthJoiner(character) ||
+       TextAbstraction::IsEmojiModifier(character) ||
+       TextAbstraction::IsRegionalIndicator(character) ||
+       TextAbstraction::IsTagSpec(character) ||
+       TextAbstraction::IsTagEnd(character))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool IsEmojiSequenceCoverageCharacter(Character character)
+{
+  return !TextAbstraction::IsEmojiPresentationSelector(character) &&
+         !TextAbstraction::IsTextPresentationSelector(character) &&
+         !TextAbstraction::IsZeroWidthJoiner(character) &&
+         !TextAbstraction::IsTagSpec(character) &&
+         !TextAbstraction::IsTagEnd(character);
+}
+
+void AddCoverageCharacter(std::vector<Character>& coverageCharacters, Character character)
+{
+  if(!IsEmojiSequenceCoverageCharacter(character))
+  {
+    return;
+  }
+
+  if(coverageCharacters.end() == std::find(coverageCharacters.begin(), coverageCharacters.end(), character))
+  {
+    coverageCharacters.push_back(character);
+  }
+}
+
+bool FontSupportsEmojiSequenceCoverage(TextAbstraction::FontClient& fontClient,
+                                       FontId                       fontId,
+                                       const Character* const       textBuffer,
+                                       Length                       sequenceStart,
+                                       Length                       sequenceLength)
+{
+  if(0u == fontId)
+  {
+    return false;
+  }
+
+  for(Length index = sequenceStart; index < sequenceStart + sequenceLength; ++index)
+  {
+    const Character character = *(textBuffer + index);
+    if(IsEmojiSequenceCoverageCharacter(character) &&
+       !fontClient.IsCharacterSupportedByFont(fontId, character))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+FontId FindColorEmojiFontForSequenceCoverage(TextAbstraction::FontClient&            fontClient,
+                                             const Character* const                  textBuffer,
+                                             Length                                  sequenceStart,
+                                             Length                                  sequenceLength,
+                                             const TextAbstraction::FontDescription& fontDescription,
+                                             const TextAbstraction::PointSize26Dot6& pointSize)
+{
+  std::vector<Character> coverageCharacters;
+  coverageCharacters.reserve(sequenceLength);
+
+  for(Length index = sequenceStart; index < sequenceStart + sequenceLength; ++index)
+  {
+    AddCoverageCharacter(coverageCharacters, *(textBuffer + index));
+  }
+
+  if(coverageCharacters.empty())
+  {
+    return 0u;
+  }
+
+  std::vector<FontId> candidates;
+  fontClient.GetFallbackFontCandidates(fontDescription,
+                                       coverageCharacters.data(),
+                                       static_cast<Length>(coverageCharacters.size()),
+                                       pointSize,
+                                       true,
+                                       candidates);
+
+  return candidates.empty() ? 0u : candidates.front();
 }
 
 bool CanReusePreviousEmojiFont(TextAbstraction::FontClient& fontClient, FontId previousFontId, Character character)
@@ -1114,7 +1213,7 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
         }
       }
     }
-    const bool useForcedEmojiSequenceFont =
+    bool useForcedEmojiSequenceFont =
       hasForcedEmojiSequenceFont && index <= forcedEmojiSequenceEndIndex && 0u != forcedEmojiSequenceFontId;
     if(useForcedEmojiSequenceFont)
     {
@@ -1180,6 +1279,35 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
       {
         fontId      = textFontId;
         isValidFont = true;
+      }
+    }
+
+    if(!useForcedEmojiSequenceFont && !hasForcedEmojiSequenceFont && isEmojiScript)
+    {
+      Length sequenceLength = 0u;
+      Script sequenceScript = script;
+      if(previousScript != script &&
+         GetEmojiSequence(textBuffer, index, lastCharacter, script, sequenceLength, sequenceScript) &&
+         sequenceLength > 1u &&
+         TextAbstraction::IsEmojiColorScript(sequenceScript) &&
+         NeedsComposedColorEmojiFontProbe(textBuffer, index, sequenceLength) &&
+         !FontSupportsEmojiSequenceCoverage(fontClient, fontId, textBuffer, index, sequenceLength))
+      {
+        forcedEmojiSequenceFontId =
+          FindColorEmojiFontForSequenceCoverage(fontClient,
+                                                textBuffer,
+                                                index,
+                                                sequenceLength,
+                                                currentFontDescription,
+                                                currentFontPointSize);
+        hasForcedEmojiSequenceFont = 0u != forcedEmojiSequenceFontId;
+        if(hasForcedEmojiSequenceFont)
+        {
+          forcedEmojiSequenceEndIndex = index + sequenceLength - 1u;
+          fontId                      = forcedEmojiSequenceFontId;
+          isValidFont                 = true;
+          useForcedEmojiSequenceFont  = true;
+        }
       }
     }
 
