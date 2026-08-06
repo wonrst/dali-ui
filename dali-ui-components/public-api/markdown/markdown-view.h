@@ -33,16 +33,31 @@ namespace Internal
 class MarkdownViewImpl;
 }
 
+class MarkdownViewStyle;
+
 /**
  * @brief A view that renders Markdown content.
  */
-class DALI_UI_API MarkdownView : public View
+class DALI_UI_COMPONENTS_API MarkdownView : public View
 {
 public:
   MarkdownView();
   ~MarkdownView();
 
+  /**
+   * @brief Creates a MarkdownView using the default style from the active UiConfig.
+   *
+   * @return The created MarkdownView.
+   */
   static MarkdownView New();
+
+  /**
+   * @brief Creates a MarkdownView using an explicit creation-time style.
+   *
+   * @param[in] style The immutable style to apply.
+   * @return The created MarkdownView.
+   */
+  static MarkdownView New(const MarkdownViewStyle& style);
   static MarkdownView DownCast(BaseHandle handle);
 
   /**

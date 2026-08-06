@@ -1,0 +1,73 @@
+From 3ccd552db93b2ed5ca41d689c95f6843a81a4fe3 Mon Sep 17 00:00:00 2001
+From: Bowon Ryu <bowon.ryu@samsung.com>
+Date: Thu, 6 Aug 2026 19:51:07 +0900
+Subject: [PATCH] image view test
+
+Signed-off-by: Bowon Ryu <bowon.ryu@samsung.com>
+---
+ .../integration-api/image-view-impl.cpp       | 21 +++++++++++++++----
+ .../integration-api/image-view-impl.h         |  8 +++++++
+ 2 files changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/dali-ui-foundation/integration-api/image-view-impl.cpp b/dali-ui-foundation/integration-api/image-view-impl.cpp
+index f9b22d8e..3fd9bca0 100644
+--- a/dali-ui-foundation/integration-api/image-view-impl.cpp
++++ b/dali-ui-foundation/integration-api/image-view-impl.cpp
+@@ -401,9 +401,12 @@ void ImageViewImpl::SetResourceUrl(const Dali::String& url)
+     // Re-show placeholder while new image loads
+     UpdatePlaceholderVisual();
+ 
+-    if(mLoadPolicy == Ui::Image::LoadPolicy::IMMEDIATE)
++    if(mLoadPolicy == Ui::Image::LoadPolicy::IMMEDIATE || HasFixedSize())
+     {
+-      // Start loading immediately regardless of scene attachment.
++      // A fixed-size ImageView does not need a measure pass to resolve its
++      // geometry. Rebuild the visual directly while preserving its load
++      // policy: ATTACHED visuals still defer loading until scene attachment,
++      // whereas IMMEDIATE visuals start loading now.
+       mVisualDirty = false;
+       UpdateVisual();
+     }
+@@ -797,8 +800,18 @@ void ImageViewImpl::OnViewResourceReady(Ui::View view)
+   // Main image is ready: remove placeholder
+   viewData.UnregisterVisual(ImageViewImpl::Property::PLACEHOLDER_IMAGE);
+ 
+-  // Request a re-layout now that the natural size is known, so aspect-ratio adjustment applies.
+-  InvalidateMeasure();
++  // The natural size can affect measurement only when at least one dimension
++  // is not explicitly fixed. A fully fixed ImageView already has its final
++  // geometry, so re-measuring it would only propagate a redundant layout pass.
++  if(!HasFixedSize())
++  {
++    InvalidateMeasure();
++  }
++}
++
++bool ImageViewImpl::HasFixedSize() const
++{
++  return GetRequestedWidth() > 0.0f && GetRequestedHeight() > 0.0f;
+ }
+ 
+ void ImageViewImpl::SetImageColorInternal(const Vector4& color)
+diff --git a/dali-ui-foundation/integration-api/image-view-impl.h b/dali-ui-foundation/integration-api/image-view-impl.h
+index 2291ba7e..e85bf7b4 100644
+--- a/dali-ui-foundation/integration-api/image-view-impl.h
++++ b/dali-ui-foundation/integration-api/image-view-impl.h
+@@ -333,6 +333,14 @@ protected: // From ViewImpl
+   LayoutRect OnArrange(const LayoutRect& bounds) override;
+ 
+ private: // Internal methods
++  /**
++   * @brief Returns whether both layout dimensions are explicitly fixed.
++   *
++   * When both dimensions are fixed, the image's natural size cannot affect
++   * the measured size of this view.
++   */
++  bool HasFixedSize() const;
++
+   /**
+    * @brief Rebuilds and re-registers the image visual from current property values.
+    */
+-- 
+2.25.1
+

@@ -23,6 +23,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-components/internal/markdown/markdown-render-model.h>
+#include <dali-ui-components/public-api/styles/markdown-view-style.h>
 
 namespace Dali
 {
@@ -74,7 +75,7 @@ public:
  * @param[in] node The render node.
  * @return The created component.
  */
-std::unique_ptr<MarkdownComponent> CreateMarkdownComponent(const MarkdownRenderNode& node);
+std::unique_ptr<MarkdownComponent> CreateMarkdownComponent(const MarkdownRenderNode& node, const MarkdownViewStyle& style);
 
 } // namespace Internal
 } // namespace Ui
