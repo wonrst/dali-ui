@@ -274,6 +274,29 @@ public: // Setters for chaining
   bool IsMultiLine() const;
 
   /**
+   * @brief Sets the maximum number of lines used to layout the text.
+   *
+   * A positive value limits the text to at most the specified number of lines.
+   * @c Text::MAX_LINES_UNLIMITED removes the limit. Negative values are treated
+   * as @c Text::MAX_LINES_UNLIMITED. This setting does not enable multi-line
+   * layout automatically.
+   *
+   * @note When a maximum line count is set, GetNaturalSize(),
+   * GetHeightForWidth(), and GetLineCount() reflect the configured line limit.
+   * Text fitting also respects the configured line limit.
+   *
+   * @param[in] maxLines The maximum number of lines, or @c Text::MAX_LINES_UNLIMITED for no limit.
+   */
+  void SetMaxLines(int maxLines);
+
+  /**
+   * @brief Gets the maximum number of lines used to layout the text.
+   *
+   * @return The maximum number of lines, or @c Text::MAX_LINES_UNLIMITED if there is no limit.
+   */
+  int GetMaxLines() const;
+
+  /**
    * @brief Sets the line wrap mode.
    *
    * @param[in] mode The line wrap mode to apply.

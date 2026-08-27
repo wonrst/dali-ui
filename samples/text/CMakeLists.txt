@@ -10,6 +10,7 @@ IF(NOT COMMAND DALI_ADD_SAMPLE)
 ENDIF()
 
 DALI_ADD_SAMPLE(text.example text-example.cpp)
+DALI_ADD_SAMPLE(text-max-lines.example text-max-lines-example.cpp)
 DALI_ADD_SAMPLE(text-layout-direction.example text-layout-direction-example.cpp)
 DALI_ADD_SAMPLE(text-markup.example text-markup-example.cpp)
 DALI_ADD_SAMPLE(text-marquee.example text-marquee-example.cpp)
