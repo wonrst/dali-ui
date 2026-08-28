@@ -28,15 +28,16 @@ using namespace Dali::Ui;
 
 namespace
 {
-constexpr float       CONTROLS_PANEL_HEIGHT       = 328.0f;
+constexpr float       CONTROLS_PANEL_HEIGHT       = 368.0f;
 constexpr float       CONTROL_HEIGHT              = 34.0f;
 constexpr float       CONTROL_SPACING             = 6.0f;
 constexpr float       MENU_TITLE_WIDTH            = 86.0f;
 constexpr float       STATUS_HEIGHT               = 104.0f;
 constexpr std::size_t FADE_CASE_COUNT             = 7u;
-constexpr std::size_t DURATION_CASE_COUNT         = 4u;
+constexpr std::size_t BLUR_CASE_COUNT             = 6u;
+constexpr std::size_t DURATION_CASE_COUNT         = 5u;
 constexpr std::size_t TEXT_CASE_COUNT             = 3u;
-constexpr std::size_t DEFAULT_DURATION_CASE_INDEX = 2u;
+constexpr std::size_t DEFAULT_DURATION_CASE_INDEX = 3u;
 constexpr std::size_t DEFAULT_TEXT_CASE_INDEX     = 1u;
 constexpr uint32_t    PANEL_COLOR                 = 0x111827;
 constexpr uint32_t    BUTTON_COLOR                = 0x1E293B;
@@ -83,16 +84,37 @@ const char* const FADE_STATUS_LABELS[FADE_CASE_COUNT] = {
   "Long (0.75)",
   "Whole Text (1)"};
 
+// Off preserves the sample's original Fade-only configuration. The remaining
+// choices are kept together so this verification row can be removed without
+// affecting the rest of the Reveal guide.
+const float BLUR_STRENGTHS[BLUR_CASE_COUNT] = {
+  0.0f,
+  Text::Reveal::AUTO_BLUR_STRENGTH,
+  0.25f,
+  0.50f,
+  0.75f,
+  1.00f};
+
+const char* const BLUR_BUTTON_LABELS[BLUR_CASE_COUNT] = {
+  "Off",
+  "AUTO",
+  "0.25",
+  "0.50",
+  "0.75",
+  "1.00"};
+
 // Animation duration is application-owned wall-clock policy. Text::Reveal
 // only consumes normalized progress, so the same Reveal configuration can be
-// played over one, two, four, or eight seconds.
+// played over half, one, two, four, or eight seconds.
 const float DURATION_SECONDS[DURATION_CASE_COUNT] = {
+  0.5f,
   1.0f,
   2.0f,
   4.0f,
   8.0f};
 
 const char* const DURATION_BUTTON_LABELS[DURATION_CASE_COUNT] = {
+  "0.5 s",
   "1 s",
   "2 s",
   "4 s",
@@ -252,6 +274,18 @@ private:
       });
     }
 
+    StackLayout blurControls = NewMenuRow("BLUR");
+    for(std::size_t blurIndex = 0u; blurIndex < BLUR_CASE_COUNT; ++blurIndex)
+    {
+      mBlurButtons[blurIndex] = NewButton(BLUR_BUTTON_LABELS[blurIndex]);
+      blurControls.Add(mBlurButtons[blurIndex]);
+      mBlurButtons[blurIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurIndex](View, InputEvent)
+      {
+        mBlurStrengthIndex = blurIndex;
+        ConfigureAndReplay();
+      });
+    }
+
     StackLayout durationControls = NewMenuRow("DURATION");
     for(std::size_t durationIndex = 0u; durationIndex < DURATION_CASE_COUNT; ++durationIndex)
     {
@@ -291,6 +325,7 @@ private:
     controlsPanel.Add(configurationControls);
     controlsPanel.Add(textControls);
     controlsPanel.Add(fadeControls);
+    controlsPanel.Add(blurControls);
     controlsPanel.Add(durationControls);
     controlsPanel.Add(playbackControls);
     controlsPanel.Add(mStatus);
@@ -354,6 +389,7 @@ private:
     SetButtonSelected(mRevealButton, mRevealEnabled);
     UpdateTextButtons();
     UpdateFadeButtons();
+    UpdateBlurButtons();
     UpdateDurationButtons();
     Replay();
   }
@@ -382,6 +418,7 @@ private:
     Text::Reveal reveal;
     reveal.SetUnit(mUnit);
     reveal.SetFadeDurationRatio(FADE_DURATION_RATIOS[mFadeDurationRatioIndex]);
+    reveal.SetBlurStrength(BLUR_STRENGTHS[mBlurStrengthIndex]);
     mPreview.SetTextReveal(reveal);
   }
 
@@ -398,6 +435,14 @@ private:
     for(std::size_t durationIndex = 0u; durationIndex < DURATION_CASE_COUNT; ++durationIndex)
     {
       SetButtonSelected(mDurationButtons[durationIndex], durationIndex == mDurationCaseIndex);
+    }
+  }
+
+  void UpdateBlurButtons()
+  {
+    for(std::size_t blurIndex = 0u; blurIndex < BLUR_CASE_COUNT; ++blurIndex)
+    {
+      SetButtonSelected(mBlurButtons[blurIndex], blurIndex == mBlurStrengthIndex);
     }
   }
 
@@ -568,6 +613,7 @@ private:
     status << "TEXT " << TEXT_BUTTON_LABELS[mTextCaseIndex]
            << " | UNIT " << (mUnit == Text::Reveal::Unit::CHARACTER ? "CHARACTER" : "WORD")
            << " | Fade: " << FADE_STATUS_LABELS[mFadeDurationRatioIndex]
+           << " | BLUR " << BLUR_BUTTON_LABELS[mBlurStrengthIndex]
            << " | DURATION " << std::fixed << std::setprecision(1) << GetAnimationDuration() << " s"
            << "\nPATH " << (mAsync ? "Async" : "Sync")
            << " | FILL " << (mGradientEnabled ? "Gradient" : "Solid")
@@ -628,6 +674,7 @@ private:
   Label                                   mUnitButton;
   std::array<Label, TEXT_CASE_COUNT>      mTextButtons;
   std::array<Label, FADE_CASE_COUNT>      mFadeButtons;
+  std::array<Label, BLUR_CASE_COUNT>      mBlurButtons;
   std::array<Label, DURATION_CASE_COUNT>  mDurationButtons;
   Label                                   mAsyncButton;
   Label                                   mFillButton;
@@ -639,6 +686,7 @@ private:
   Text::Reveal::Unit                      mUnit{Text::Reveal::Unit::CHARACTER};
   std::size_t                             mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
   std::size_t                             mFadeDurationRatioIndex{0u};
+  std::size_t                             mBlurStrengthIndex{0u};
   std::size_t                             mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
   bool                                    mAsync{false};
   bool                                    mGradientEnabled{true};

@@ -37,6 +37,7 @@
 #include <dali-ui-foundation/internal/text/rendering/styles/character-spacing-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/strikethrough-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-run-snapshot.h>
@@ -1517,22 +1518,88 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
   }
 }
 
-void Typesetter::Impl::BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan)
+bool Typesetter::Impl::BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan)
 {
   DALI_ASSERT_ALWAYS(!mRevealRasterContext && "Nested reveal metadata raster is not supported");
   mRevealRasterContext           = std::make_unique<RevealRasterContext>();
   mRevealRasterContext->metadata = PixelBuffer::New(width, height, Pixel::RGBA8888);
-  mRevealRasterContext->plan     = &plan;
+  if(!mRevealRasterContext->metadata)
+  {
+    mRevealRasterContext.reset();
+    return false;
+  }
+  mRevealRasterContext->plan = &plan;
   memset(mRevealRasterContext->metadata.GetBuffer(), 0u, static_cast<size_t>(width) * height * 4u);
+  return true;
 }
 
 PixelData Typesetter::Impl::EndRevealMetadata()
 {
-  DALI_ASSERT_ALWAYS(mRevealRasterContext && "Reveal metadata raster was not started");
+  if(!mRevealRasterContext)
+  {
+    return {};
+  }
   Internal::Reveal::ExpandMetadataOwnership(mRevealRasterContext->metadata.GetBuffer(),
                                             mRevealRasterContext->metadata.GetWidth(),
                                             mRevealRasterContext->metadata.GetHeight());
   PixelData result = PixelBuffer::Convert(mRevealRasterContext->metadata);
+  mRevealRasterContext.reset();
+  return result;
+}
+
+PixelData Typesetter::Impl::EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMask,
+                                                      float        fadeBlurScale,
+                                                      float        targetBlurRadius,
+                                                      bool         coverageAware,
+                                                      uint32_t     cropOffsetY,
+                                                      uint32_t     cropHeight,
+                                                      bool&        fadeBlurSucceeded)
+{
+  fadeBlurSucceeded = false;
+  if(!mRevealRasterContext)
+  {
+    return {};
+  }
+  if(!normalGlyphMask || normalGlyphMask.GetPixelFormat() != Pixel::L8)
+  {
+    return EndRevealMetadata();
+  }
+
+  const uint32_t width  = mRevealRasterContext->metadata.GetWidth();
+  const uint32_t height = mRevealRasterContext->metadata.GetHeight();
+  if(normalGlyphMask.GetWidth() != width || normalGlyphMask.GetHeight() != height ||
+     width > 65535u || height > 65535u ||
+     !Internal::Reveal::PrepareFadeBlurBuffer(normalGlyphMask, fadeBlurScale, targetBlurRadius))
+  {
+    return EndRevealMetadata();
+  }
+
+  Internal::Reveal::ExpandMetadataOwnership(mRevealRasterContext->metadata.GetBuffer(), width, height);
+
+  uint8_t* metadata = mRevealRasterContext->metadata.GetBuffer();
+  Internal::Reveal::WriteFadeBlurCoverage(normalGlyphMask, metadata, width, height);
+  Internal::Reveal::MaterializeFadeBlurTiming(metadata,
+                                              width,
+                                              height,
+                                              fadeBlurScale,
+                                              targetBlurRadius,
+                                              coverageAware);
+
+  if(cropHeight > 0u)
+  {
+    if(!Internal::Reveal::CropFadeBlurBuffer(mRevealRasterContext->metadata,
+                                             0u,
+                                             cropOffsetY,
+                                             width,
+                                             cropHeight))
+    {
+      mRevealRasterContext.reset();
+      return {};
+    }
+  }
+
+  fadeBlurSucceeded = true;
+  PixelData result  = PixelBuffer::Convert(mRevealRasterContext->metadata);
   mRevealRasterContext.reset();
   return result;
 }

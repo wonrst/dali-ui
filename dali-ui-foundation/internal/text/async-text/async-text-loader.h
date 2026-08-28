@@ -119,6 +119,7 @@ struct AsyncTextParameters
     textFitStepSize{1.f},
     marqueeLoopDelay{0.0f},
     textRevealFadeDurationRatio{Text::Reveal::AUTO_FADE_DURATION_RATIO},
+    textRevealBlurStrength{0.0f},
     renderScale{1.0f},
     renderScaleWidth{0.f},
     renderScaleHeight{0.f},
@@ -221,6 +222,7 @@ struct AsyncTextParameters
   float textFitStepSize;
   float marqueeLoopDelay;
   float textRevealFadeDurationRatio; ///< Authored AUTO sentinel or normalized per-unit fade duration.
+  float textRevealBlurStrength;      ///< Authored AUTO sentinel or normalized blur strength.
   float renderScale;                 ///< The render scale.
   float renderScaleWidth;            ///< The requested original textWidth when using render scale.
   float renderScaleHeight;           ///< The requested original textHeight when using render scale.
@@ -289,6 +291,7 @@ struct AsyncTextRenderInfo
     maskPixelData(),
     marqueePixelData(),
     revealMetadataTiles(),
+    revealPreservedBlurTiles(),
     size(),
     textLogicalBounds(0.0f, 0.0f, 1.0f, 1.0f),
     textGradientMarqueeViewportBounds(0.0f, 0.0f, 1.0f, 1.0f),
@@ -304,6 +307,7 @@ struct AsyncTextRenderInfo
     marqueeTextureAnchor(),
     marqueeFittingStartGeometry(),
     textRevealFadeDuration(0.0f),
+    textRevealFadeBlurScale(0.0f),
     hasMultipleTextColors(false),
     containsColorGlyph(false),
     styleEnabled(false),
@@ -316,7 +320,8 @@ struct AsyncTextRenderInfo
     isTextDirectionRTL(false),
     isCutoutEnabled(false),
     isEmbossEnabled(false),
-    isTextRevealEnabled(false)
+    isTextRevealEnabled(false),
+    isTextRevealFadeBlurEnabled(false)
   {
   }
 
@@ -335,6 +340,7 @@ struct AsyncTextRenderInfo
   PixelData                                 maskPixelData;
   PixelData                                 marqueePixelData;
   std::vector<PixelData>                    revealMetadataTiles;               ///< One RGBA8888 buffer per height tile.
+  std::vector<PixelData>                    revealPreservedBlurTiles;          ///< Optional downsampled RGBA buffer per height tile.
   Size                                      size;                              ///< Actual rendered buffer size. For marquee, this is the scrolling texture size.
   Vector4                                   textLogicalBounds;                 ///< Normalized logical text bounds inside @p size.
   Vector4                                   textGradientMarqueeViewportBounds; ///< Normalized TextGradient bounds inside the visible marquee viewport.
@@ -350,6 +356,7 @@ struct AsyncTextRenderInfo
   MarqueeTextureAnchor                      marqueeTextureAnchor;        ///< Marquee result in logical texture coordinates.
   MarqueeFittingStartGeometry               marqueeFittingStartGeometry; ///< Effective fitting static translation.
   float                                     textRevealFadeDuration;
+  float                                     textRevealFadeBlurScale; ///< Resolved worker preprocessing scale, or zero when disabled.
   bool                                      hasMultipleTextColors : 1;
   bool                                      containsColorGlyph : 1;
   bool                                      styleEnabled : 1;
@@ -363,6 +370,7 @@ struct AsyncTextRenderInfo
   bool                                      isCutoutEnabled : 1;
   bool                                      isEmbossEnabled : 1;
   bool                                      isTextRevealEnabled : 1;
+  bool                                      isTextRevealFadeBlurEnabled : 1;
 };
 
 /**

@@ -1211,6 +1211,7 @@ int UtcDaliLabelTextRevealPublicApiP(void)
   DALI_TEST_EQUALS(label.GetPropertyIndex("uTextRevealProgress"), Property::INVALID_INDEX, TEST_LOCATION);
 
   Text::Reveal reveal;
+  DALI_TEST_EQUALS(reveal.GetBlurStrength(), 0.0f, 0.0001f, TEST_LOCATION);
   reveal.SetUnit(Text::Reveal::Unit::WORD);
   reveal.SetFadeDurationRatio(0.0f);
   label.SetTextReveal(reveal);
@@ -1219,6 +1220,36 @@ int UtcDaliLabelTextRevealPublicApiP(void)
   label.SetTextReveal(nearlyEqualReveal);
   DALI_TEST_CHECK(label.GetTextReveal() == reveal);
   DALI_TEST_CHECK(label.GetTextReveal().GetFadeDurationRatio() == 0.0f);
+  DALI_TEST_EQUALS(label.GetTextReveal().GetBlurStrength(), 0.0f, 0.0001f, TEST_LOCATION);
+
+  Text::Reveal blurReveal(reveal);
+  blurReveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), Text::Reveal::AUTO_BLUR_STRENGTH, TEST_LOCATION);
+  DALI_TEST_CHECK(blurReveal != reveal);
+  blurReveal.SetBlurStrength(2.0f);
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), 1.0f, 0.0001f, TEST_LOCATION);
+  blurReveal.SetBlurStrength(-2.0f);
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), 0.0f, 0.0001f, TEST_LOCATION);
+  blurReveal.SetBlurStrength(std::numeric_limits<float>::quiet_NaN());
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), 0.0f, 0.0001f, TEST_LOCATION);
+  blurReveal.SetBlurStrength(std::numeric_limits<float>::infinity());
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), 1.0f, 0.0001f, TEST_LOCATION);
+  blurReveal.SetBlurStrength(-std::numeric_limits<float>::infinity());
+  DALI_TEST_EQUALS(blurReveal.GetBlurStrength(), 0.0f, 0.0001f, TEST_LOCATION);
+
+  Text::Reveal configuredBlur(reveal);
+  configuredBlur.SetBlurStrength(0.5f);
+  Text::Reveal copiedBlur(configuredBlur);
+  DALI_TEST_CHECK(copiedBlur == configuredBlur);
+  Text::Reveal assignedBlur;
+  assignedBlur = configuredBlur;
+  DALI_TEST_CHECK(assignedBlur == configuredBlur);
+  Text::Reveal movedBlur(std::move(copiedBlur));
+  DALI_TEST_CHECK(movedBlur == configuredBlur);
+  Text::Reveal moveAssignedBlur;
+  moveAssignedBlur = std::move(assignedBlur);
+  DALI_TEST_CHECK(moveAssignedBlur == configuredBlur);
+
   label.SetTextRevealProgress(-2.0f);
   DALI_TEST_EQUALS(label.GetTextRevealProgress(), 0.0f, 0.0001f, TEST_LOCATION);
   label.SetTextRevealProgress(2.0f);
@@ -1278,6 +1309,140 @@ int UtcDaliLabelTextRevealPublicApiP(void)
   DALI_TEST_EQUALS(label.GetPropertyIndex("uTextRevealProgress"), progressIndex, TEST_LOCATION);
   DALI_TEST_CHECK(label.GetRendererAt(0u).GetTextures().GetTextureCount() >= 2u);
   DALI_TEST_EQUALS(label.GetTextRevealProgress(), 0.4f, 0.0001f, TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliLabelTextRevealClearResourceReuseP(void)
+{
+  UiTestApplication       application;
+  Text::StyledTextBuilder builder = Text::StyledTextBuilder::New("Clear colored text resource");
+  DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 6u, 13u));
+
+  Label label = Label::New();
+  label.SetStyledText(builder.Build());
+  label.SetProperty(Actor::Property::SIZE, Vector3(420.0f, 96.0f, 0.0f));
+  label.SetTextRevealProgress(1.0f);
+  application.GetScene().Add(label);
+
+  TestGlAbstraction& gl = application.GetGlAbstraction();
+  gl.EnableTextureCallTrace(true);
+  for(float strength : {0.0f, Text::Reveal::AUTO_BLUR_STRENGTH})
+  {
+    Text::Reveal reveal;
+    reveal.SetBlurStrength(strength);
+    label.SetTextReveal(reveal);
+    application.SendNotification();
+    application.Render(16);
+    application.SendNotification();
+    application.Render(16);
+
+    Renderer   renderer     = label.GetRendererAt(0u);
+    TextureSet textures     = renderer.GetTextures();
+    Texture    sharpTexture = textures.GetTexture(0u);
+    DALI_TEST_CHECK(sharpTexture);
+    DALI_TEST_EQUALS(textures.GetTextureCount(), strength == 0.0f ? 2u : 3u, TEST_LOCATION);
+
+    gl.ResetTextureCallStack();
+    label.SetTextReveal(Text::Reveal::None());
+    DALI_TEST_CHECK(label.GetRendererAt(0u) == renderer);
+    DALI_TEST_CHECK(renderer.GetTextures() == textures);
+    DALI_TEST_EQUALS(textures.GetTextureCount(), 1u, TEST_LOCATION);
+    DALI_TEST_CHECK(textures.GetTexture(0u) == sharpTexture);
+
+    for(uint32_t frame = 0u; frame < 4u; ++frame)
+    {
+      application.SendNotification();
+      application.Render(16);
+      DALI_TEST_CHECK(label.GetRendererAt(0u) == renderer);
+      DALI_TEST_CHECK(renderer.GetTextures() == textures);
+      DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+      DALI_TEST_EQUALS(textures.GetTextureCount(), 1u, TEST_LOCATION);
+      DALI_TEST_CHECK(textures.GetTexture(0u) == sharpTexture);
+    }
+    DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+    DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+  }
+  END_TEST;
+}
+
+int UtcDaliLabelTextRevealAsyncClearLifecycleP(void)
+{
+  UiTestApplication application;
+  application.GetGlAbstraction().SetCheckFramebufferStatusResult(GL_FRAMEBUFFER_COMPLETE);
+
+  struct Case
+  {
+    float strength;
+    bool  preservedColor;
+  };
+  constexpr Case CASES[] = {
+    {0.0f, false},
+    {Text::Reveal::AUTO_BLUR_STRENGTH, false},
+    {Text::Reveal::AUTO_BLUR_STRENGTH, true},
+  };
+
+  for(const Case& item : CASES)
+  {
+    Label label = Label::New();
+    if(item.preservedColor)
+    {
+      Text::StyledTextBuilder builder = Text::StyledTextBuilder::New("Async clear colored text resource");
+      DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 6u, 18u));
+      label.SetStyledText(builder.Build());
+    }
+    else
+    {
+      label.SetText("Async clear plain text resource");
+    }
+    label.SetProperty(Actor::Property::SIZE, Vector3(420.0f, 96.0f, 0.0f));
+    label.SetAsyncRendering(true);
+    label.SetTextRevealProgress(1.0f);
+    application.GetScene().Add(label);
+
+    Text::Reveal reveal;
+    reveal.SetBlurStrength(item.strength);
+    const uint32_t revealTextureCount = item.preservedColor ? 3u : 2u;
+    label.SetTextReveal(reveal);
+    application.SendNotification();
+    application.Render(16);
+    for(uint32_t trigger = 0u;
+        trigger < 4u &&
+        (label.GetRendererCount() == 0u ||
+         label.GetRendererAt(0u).GetTextures().GetTextureCount() != revealTextureCount);
+        ++trigger)
+    {
+      DALI_TEST_CHECK(Test::WaitForEventThreadTrigger(1, ASYNC_TEXT_THREAD_TIMEOUT));
+      application.SendNotification();
+      application.Render(16);
+    }
+    DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+    TextureSet revealTextures = label.GetRendererAt(0u).GetTextures();
+    DALI_TEST_EQUALS(revealTextures.GetTextureCount(), revealTextureCount, TEST_LOCATION);
+    Texture metadata = revealTextures.GetTexture(revealTextureCount - 1u);
+    Texture preserved = item.preservedColor ? revealTextures.GetTexture(revealTextureCount - 2u) : Texture();
+    DALI_TEST_CHECK(metadata);
+    DALI_TEST_CHECK(!item.preservedColor || preserved);
+
+    label.SetTextReveal(Text::Reveal::None());
+    application.SendNotification();
+    application.Render(16);
+    for(uint32_t trigger = 0u;
+        trigger < 4u && label.GetRendererAt(0u).GetTextures().GetTextureCount() != 1u;
+        ++trigger)
+    {
+      DALI_TEST_CHECK(Test::WaitForEventThreadTrigger(1, ASYNC_TEXT_THREAD_TIMEOUT));
+      application.SendNotification();
+      application.Render(16);
+    }
+    DALI_TEST_CHECK(label.GetTextReveal() == Text::Reveal::None());
+    DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+    TextureSet ordinaryTextures = label.GetRendererAt(0u).GetTextures();
+    DALI_TEST_EQUALS(ordinaryTextures.GetTextureCount(), 1u, TEST_LOCATION);
+    DALI_TEST_CHECK(ordinaryTextures.GetTexture(0u));
+    DALI_TEST_CHECK(ordinaryTextures.GetTexture(0u) != metadata);
+    DALI_TEST_CHECK(!preserved || ordinaryTextures.GetTexture(0u) != preserved);
+    label.Unparent();
+  }
   END_TEST;
 }
 
@@ -1577,12 +1742,17 @@ int UtcDaliLabelTextRevealAsyncP(void)
   Dali::TextAbstraction::FontClient fontClient = Dali::TextAbstraction::FontClient::Get();
   (void)fontClient;
 
-  Label label = Label::New("Async CHARACTER reveal e\u0301 office العربية 😀");
+  Text::StyledTextBuilder builder =
+    Text::StyledTextBuilder::New("Async CHARACTER reveal e\u0301 office العربية color");
+  DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 6u, 14u));
+  Label label = Label::New();
+  label.SetStyledText(builder.Build());
   label.SetRequestedWidth(420.0f);
   label.SetRequestedHeight(96.0f);
   label.SetAsyncRendering(true);
   Text::Reveal reveal;
   reveal.SetUnit(Text::Reveal::Unit::CHARACTER);
+  reveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
   label.SetTextReveal(reveal);
   label.SetTextRevealProgress(0.25f);
 
@@ -1595,7 +1765,16 @@ int UtcDaliLabelTextRevealAsyncP(void)
   Renderer renderer = label.GetRendererAt(0u);
   DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealProgress") != Property::INVALID_INDEX);
   DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealFadeDuration") != Property::INVALID_INDEX);
-  DALI_TEST_CHECK(renderer.GetTextures().GetTextureCount() >= 2u);
+  TextureSet textures = renderer.GetTextures();
+  DALI_TEST_CHECK(textures.GetTextureCount() >= 3u);
+  Texture sharp         = textures.GetTexture(0u);
+  Texture preservedBlur = textures.GetTexture(textures.GetTextureCount() - 2u);
+  Texture metadata      = textures.GetTexture(textures.GetTextureCount() - 1u);
+  DALI_TEST_CHECK(sharp && preservedBlur && metadata);
+  DALI_TEST_CHECK(preservedBlur.GetWidth() <= sharp.GetWidth());
+  DALI_TEST_CHECK(preservedBlur.GetHeight() <= sharp.GetHeight());
+  DALI_TEST_EQUALS(metadata.GetWidth(), sharp.GetWidth(), TEST_LOCATION);
+  DALI_TEST_EQUALS(metadata.GetHeight(), sharp.GetHeight(), TEST_LOCATION);
   DALI_TEST_EQUALS(label.GetTextRevealProgress(), 0.25f, 0.0001f, TEST_LOCATION);
   END_TEST;
 }
@@ -1615,7 +1794,9 @@ int UtcDaliLabelTextRevealAsyncRenderScaleP(void)
     label.SetRequestedHeight(96.0f);
     label.SetAsyncRendering(true);
     label.SetRenderScale(renderScale);
-    label.SetTextReveal(Text::Reveal());
+    Text::Reveal reveal;
+    reveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
+    label.SetTextReveal(reveal);
     label.SetTextRevealProgress(0.4f);
 
     application.GetScene().Add(label);
@@ -1719,12 +1900,17 @@ int UtcDaliLabelTextRevealHeightTilingP(void)
     text += "X\n";
   }
 
-  Label label = Label::New(Dali::String(text.c_str()));
+  Text::StyledTextBuilder builder = Text::StyledTextBuilder::New(Dali::String(text.c_str()));
+  DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 0u, 1u));
+  Label label = Label::New();
+  label.SetStyledText(builder.Build());
   label.SetMultiLine(true);
   label.SetFontSize(32.0f);
   label.SetRequestedWidth(96.0f);
   label.SetRequestedHeight(static_cast<float>(maxTextureSize + 64u));
-  label.SetTextReveal(Text::Reveal());
+  Text::Reveal reveal;
+  reveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
+  label.SetTextReveal(reveal);
   label.SetTextRevealProgress(0.5f);
   application.GetScene().Add(label);
   application.SendNotification();
@@ -1738,9 +1924,12 @@ int UtcDaliLabelTextRevealHeightTilingP(void)
     Renderer renderer = label.GetRendererAt(rendererIndex);
     DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealProgress") != Property::INVALID_INDEX);
     TextureSet textures = renderer.GetTextures();
-    DALI_TEST_CHECK(textures.GetTextureCount() >= 2u);
-    Texture metadata = textures.GetTexture(textures.GetTextureCount() - 1u);
-    DALI_TEST_CHECK(metadata);
+    DALI_TEST_CHECK(textures.GetTextureCount() >= 3u);
+    Texture preservedBlur = textures.GetTexture(textures.GetTextureCount() - 2u);
+    Texture metadata      = textures.GetTexture(textures.GetTextureCount() - 1u);
+    DALI_TEST_CHECK(preservedBlur && metadata);
+    DALI_TEST_CHECK(preservedBlur.GetWidth() <= metadata.GetWidth());
+    DALI_TEST_CHECK(preservedBlur.GetHeight() <= metadata.GetHeight());
     DALI_TEST_CHECK(metadata.GetHeight() > 0u);
     DALI_TEST_CHECK(metadata.GetHeight() <= maxTextureSize);
   }
@@ -1763,14 +1952,19 @@ int UtcDaliLabelTextRevealAsyncHeightTilingP(void)
     text += "Y\n";
   }
 
-  Label label = Label::New(Dali::String(text.c_str()));
+  Text::StyledTextBuilder builder = Text::StyledTextBuilder::New(Dali::String(text.c_str()));
+  DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 0u, 1u));
+  Label label = Label::New();
+  label.SetStyledText(builder.Build());
   label.SetMultiLine(true);
   label.SetFontSize(32.0f);
   label.SetRequestedWidth(96.0f);
   label.SetRequestedHeight(static_cast<float>(maxTextureSize + 64u));
   label.SetAsyncRendering(true);
   label.SetRenderScale(1.25f);
-  label.SetTextReveal(Text::Reveal());
+  Text::Reveal reveal;
+  reveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
+  label.SetTextReveal(reveal);
   label.SetTextRevealProgress(0.75f);
   application.GetScene().Add(label);
   application.SendNotification();
@@ -1783,10 +1977,13 @@ int UtcDaliLabelTextRevealAsyncHeightTilingP(void)
     Renderer renderer = label.GetRendererAt(rendererIndex);
     DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealProgress") != Property::INVALID_INDEX);
     TextureSet textures = renderer.GetTextures();
-    DALI_TEST_CHECK(textures.GetTextureCount() >= 2u);
-    Texture textTexture = textures.GetTexture(0u);
-    Texture metadata    = textures.GetTexture(textures.GetTextureCount() - 1u);
-    DALI_TEST_CHECK(textTexture && metadata);
+    DALI_TEST_CHECK(textures.GetTextureCount() >= 3u);
+    Texture textTexture   = textures.GetTexture(0u);
+    Texture preservedBlur = textures.GetTexture(textures.GetTextureCount() - 2u);
+    Texture metadata      = textures.GetTexture(textures.GetTextureCount() - 1u);
+    DALI_TEST_CHECK(textTexture && preservedBlur && metadata);
+    DALI_TEST_CHECK(preservedBlur.GetWidth() <= metadata.GetWidth());
+    DALI_TEST_CHECK(preservedBlur.GetHeight() <= metadata.GetHeight());
     DALI_TEST_EQUALS(metadata.GetWidth(), textTexture.GetWidth(), TEST_LOCATION);
     DALI_TEST_EQUALS(metadata.GetHeight(), textTexture.GetHeight(), TEST_LOCATION);
     DALI_TEST_CHECK(metadata.GetHeight() > 0u);
@@ -1845,10 +2042,20 @@ int UtcDaliLabelTextRevealAnimationConfigurationRatioP(void)
     0.15f,
     0.3f,
     1.0f};
+  const float blurStrengths[] = {
+    0.0f,
+    Text::Reveal::AUTO_BLUR_STRENGTH,
+    0.5f,
+    1.0f,
+    Text::Reveal::AUTO_BLUR_STRENGTH,
+    0.0f,
+    0.25f,
+    0.75f};
   for(uint32_t iteration = 0u; iteration < 8u; ++iteration)
   {
     reveal.SetUnit((iteration & 1u) ? Text::Reveal::Unit::CHARACTER : Text::Reveal::Unit::WORD);
     reveal.SetFadeDurationRatio(ratios[iteration % (sizeof(ratios) / sizeof(ratios[0]))]);
+    reveal.SetBlurStrength(blurStrengths[iteration]);
     if(iteration == 3u)
     {
       label.SetTextReveal(Text::Reveal::None());
@@ -1867,6 +2074,10 @@ int UtcDaliLabelTextRevealAnimationConfigurationRatioP(void)
     {
       DALI_TEST_EQUALS(label.GetTextReveal().GetFadeDurationRatio(),
                        ratios[iteration % (sizeof(ratios) / sizeof(ratios[0]))],
+                       0.0001f,
+                       TEST_LOCATION);
+      DALI_TEST_EQUALS(label.GetTextReveal().GetBlurStrength(),
+                       blurStrengths[iteration],
                        0.0001f,
                        TEST_LOCATION);
     }

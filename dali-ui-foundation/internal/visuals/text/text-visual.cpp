@@ -26,12 +26,12 @@
 #include <dali/integration-api/string-utils.h>
 #include <dali/integration-api/texture-integ.h>
 #include <dali/integration-api/trace.h>
-#include <string.h>
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/integration-api/view-depth-index-ranges.h>
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/color-glyph-helper.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
 #include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/text-effects-style.h>
 #include <dali-ui-foundation/internal/text/text-enumerations-impl.h>
@@ -101,8 +101,7 @@ constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_CONIC_START_ANGLE_NAME = "uT
 constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_MODE_NAME              = "uTextGradientOverlayMode";
 constexpr const char* UNIFORM_TEXT_REVEAL_PROGRESS_NAME                    = "uTextRevealProgress";
 constexpr const char* UNIFORM_TEXT_REVEAL_FADE_DURATION_NAME               = "uTextRevealFadeDuration";
-
-bool IsAsyncRenderRequest(Ui::Integration::Text::Async::RequestType requestType)
+bool                  IsAsyncRenderRequest(Ui::Integration::Text::Async::RequestType requestType)
 {
   switch(requestType)
   {
@@ -171,6 +170,47 @@ bool HasCompleteTextRevealMetadata(const Text::AsyncTextRenderInfo& renderInfo, 
   }
 
   return rendererOffsetY == rendererHeight;
+}
+
+bool HasCompleteTextRevealFadeBlur(const Text::AsyncTextRenderInfo& renderInfo)
+{
+  if(!renderInfo.isTextRevealFadeBlurEnabled || renderInfo.revealMetadataTiles.empty())
+  {
+    return false;
+  }
+
+  const float scale = renderInfo.textRevealFadeBlurScale;
+  if(scale != 0.25f && scale != 0.5f && scale != 1.0f)
+  {
+    return false;
+  }
+
+  const bool preservedColorRequired = renderInfo.hasMultipleTextColors || renderInfo.containsColorGlyph;
+  if(!preservedColorRequired)
+  {
+    return renderInfo.revealPreservedBlurTiles.empty();
+  }
+  if(renderInfo.revealPreservedBlurTiles.size() != renderInfo.revealMetadataTiles.size())
+  {
+    return false;
+  }
+  if(!renderInfo.revealPreservedBlurTiles.front())
+  {
+    return false;
+  }
+
+  for(size_t index = 0u; index < renderInfo.revealMetadataTiles.size(); ++index)
+  {
+    const PixelData& metadata  = renderInfo.revealMetadataTiles[index];
+    const PixelData& preserved = renderInfo.revealPreservedBlurTiles[index];
+    if(!preserved || preserved.GetPixelFormat() != Pixel::RGBA8888 ||
+       preserved.GetWidth() != std::max(1u, static_cast<uint32_t>(std::round(metadata.GetWidth() * scale))) ||
+       preserved.GetHeight() != std::max(1u, static_cast<uint32_t>(std::round(metadata.GetHeight() * scale))))
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 #ifdef TRACE_ENABLED
@@ -1055,6 +1095,14 @@ void TextVisual::CreateTextureSet(TilingInfo& info, VisualRenderer& renderer, Sa
     ++textureSetIndex;
   }
 
+  if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+  {
+    DALI_ASSERT_ALWAYS(info.revealPreservedBlurPixelData &&
+                       info.revealPreservedBlurPixelData.GetPixelFormat() == Pixel::RGBA8888);
+    AddTexture(textureSet, info.revealPreservedBlurPixelData, sampler, textureSetIndex);
+    ++textureSetIndex;
+  }
+
   if(mTextShaderFeatureCache.IsEnabledTextReveal())
   {
     // Reveal metadata is an all-or-nothing renderer input. Async publication
@@ -1330,10 +1378,21 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
     const bool featureStyleEnabled =
       (textGradientCompositionEnabled || textGradientMixedCompositionEnabled) ? renderInfo.styleTextureEnabled
                                                                               : renderInfo.styleEnabled;
-    const bool textRevealEnabled =
+    const bool textRevealMetadataComplete =
       revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED &&
       HasCompleteTextRevealMetadata(renderInfo, maxTextureSize) &&
       !isMarqueeEnabled && !isCutoutEnabled;
+    // The worker may intentionally downgrade an authored FadeBlur request to
+    // valid Fade metadata after optional blur processing fails. Publication
+    // therefore follows the resolved worker variant, while malformed results
+    // that still claim FadeBlur remain an atomic ordinary fallback.
+    const bool textRevealFadeBlurResolved = textRevealMetadataComplete &&
+                                            renderInfo.isTextRevealFadeBlurEnabled &&
+                                            !renderInfo.isEmbossEnabled;
+    const bool textRevealFadeBlurEnabled = textRevealFadeBlurResolved &&
+                                           HasCompleteTextRevealFadeBlur(renderInfo);
+    const bool textRevealEnabled = textRevealMetadataComplete &&
+                                   (!textRevealFadeBlurResolved || textRevealFadeBlurEnabled);
     if(revealData)
     {
       revealData->fadeDuration = textRevealEnabled ? renderInfo.textRevealFadeDuration : 0.0f;
@@ -1348,7 +1407,10 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       .EnableTextGradient(textGradientCompositionEnabled)
       .EnableTextGradientMixed(textGradientMixedCompositionEnabled)
       .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
-      .EnableTextReveal(textRevealEnabled);
+      .EnableTextReveal(textRevealEnabled)
+      .EnableTextRevealFadeBlur(textRevealFadeBlurEnabled,
+                                textRevealFadeBlurEnabled &&
+                                  (renderInfo.hasMultipleTextColors || renderInfo.containsColorGlyph));
 
     Shader shader = GetTextShader(mFactoryCache, featureBuilder);
     mImpl->mRenderer.SetShader(shader);
@@ -1419,6 +1481,12 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
         ++textureSetIndex;
       }
 
+      if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+      {
+        AddTexture(textureSet, renderInfo.revealPreservedBlurTiles.front(), sampler, textureSetIndex);
+        ++textureSetIndex;
+      }
+
       if(textRevealEnabled)
       {
         Sampler nearestSampler = Sampler::New();
@@ -1485,6 +1553,10 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       size_t revealTileIndex = 0u;
       if(textRevealEnabled)
       {
+        if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+        {
+          info.revealPreservedBlurPixelData = renderInfo.revealPreservedBlurTiles[revealTileIndex];
+        }
         info.revealPixelData = renderInfo.revealMetadataTiles[revealTileIndex++];
       }
 
@@ -1525,6 +1597,10 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
 
         if(textRevealEnabled)
         {
+          if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+          {
+            info.revealPreservedBlurPixelData = renderInfo.revealPreservedBlurTiles[revealTileIndex];
+          }
           info.revealPixelData = renderInfo.revealMetadataTiles[revealTileIndex++];
         }
 
@@ -2039,10 +2115,12 @@ void TextVisual::BindGradientOverlayAnimConstraints(VisualRenderer& renderer,
 
 void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit unit,
                                      float                        fadeDurationRatio,
+                                     float                        blurStrength,
                                      Property::Index              progressPropertyIndex,
                                      uint64_t                     revision)
 {
-  auto* data = GetTextVisualRevealData(mRevealData);
+  blurStrength = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : blurStrength;
+  auto* data   = GetTextVisualRevealData(mRevealData);
   if(!data)
   {
     if(unit == Text::Internal::Reveal::Unit::DISABLED)
@@ -2052,6 +2130,7 @@ void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit unit,
   }
   else if(data->unit == unit &&
           Equals(data->fadeDurationRatio, fadeDurationRatio) &&
+          Equals(data->blurStrength, blurStrength) &&
           data->progressPropertyIndex == progressPropertyIndex &&
           data->revision == revision)
   {
@@ -2061,19 +2140,83 @@ void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit unit,
   data                        = &GetOrCreateTextVisualRevealData(mRevealData);
   data->unit                  = unit;
   data->fadeDurationRatio     = fadeDurationRatio;
+  data->blurStrength          = blurStrength;
   data->progressPropertyIndex = progressPropertyIndex;
   data->revision              = revision;
-  mRendererUpdateNeeded       = true;
   if(unit == Text::Internal::Reveal::Unit::DISABLED)
   {
     RemoveTextRevealConstraints();
     data->fadeDuration = 0.0f;
+    if(TryClearTextRevealResources())
+    {
+      mRendererUpdateNeeded = false;
+      return;
+    }
   }
+  mRendererUpdateNeeded = true;
 
   if(IsOnScene())
   {
     UpdateRenderer();
   }
+}
+
+bool TextVisual::TryClearTextRevealResources()
+{
+  // Async Reveal clear intentionally follows the normal request/publication
+  // lifecycle so pending and stale completions remain revision-safe.
+  if(mController->IsAsyncRendering() ||
+     !IsOnScene() ||
+     mRendererUpdateNeeded ||
+     mApplyingFittingMode ||
+     mIsTextLoadingTaskRunning ||
+     mImpl->mTransformMapChanged ||
+     GetResourceStatus() != Ui::Visual::ResourceStatus::READY ||
+     !mTextShaderFeatureCache.IsEnabledTextReveal() ||
+     mRendererList.empty())
+  {
+    return false;
+  }
+
+  const uint32_t revealTextureCount =
+    1u + static_cast<uint32_t>(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved());
+  for(const VisualRenderer& renderer : mRendererList)
+  {
+    if(!renderer)
+    {
+      return false;
+    }
+    const TextureSet textures = renderer.GetTextures();
+    const uint32_t   count    = textures ? textures.GetTextureCount() : 0u;
+    if(count <= revealTextureCount)
+    {
+      return false;
+    }
+    for(uint32_t offset = 0u; offset < revealTextureCount; ++offset)
+    {
+      if(!textures.GetTexture(count - 1u - offset))
+      {
+        return false;
+      }
+    }
+  }
+
+  TextVisualShaderFeature::FeatureBuilder featureBuilder = mTextShaderFeatureCache;
+  featureBuilder.EnableTextReveal(false).EnableTextRevealFadeBlur(false, false);
+  Shader shader = GetTextShader(mFactoryCache, featureBuilder);
+  for(VisualRenderer& renderer : mRendererList)
+  {
+    TextureSet textures = renderer.GetTextures();
+    for(uint32_t offset = 0u; offset < revealTextureCount; ++offset)
+    {
+      const uint32_t last = textures.GetTextureCount() - 1u;
+      textures.SetSampler(last, Sampler());
+      textures.SetTexture(last, Texture());
+    }
+    renderer.SetShader(shader);
+  }
+  ResourceReady(Ui::Visual::ResourceStatus::READY);
+  return true;
 }
 
 void TextVisual::RemoveTextRevealConstraints()
@@ -2509,6 +2652,21 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
   const bool textRevealEnabled =
     revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED &&
     !isMarqueeEnabled && !mController->IsTextCutout();
+  bool textRevealFadeBlurEnabled =
+    textRevealEnabled && revealData->blurStrength != 0.0f && !embossEnabled;
+  bool hasInlineReplacement = false;
+  if(textRevealFadeBlurEnabled)
+  {
+    const Text::ReplacementRenderState& replacementState = mController->GetReplacementRenderState();
+    hasInlineReplacement                                 = replacementState.processingModel &&
+                           replacementState.projection.HasReplacements();
+    if(hasInlineReplacement &&
+       Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(*mController->GetRenderTextModel(), true) <= 0.0f)
+    {
+      // A replacement-only model has no text foreground to blur.
+      textRevealFadeBlurEnabled = false;
+    }
+  }
   if(revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED && !textRevealEnabled)
   {
     DALI_LOG_DEBUG_INFO("Text::Reveal foreground rendering is disabled while marquee or cutout is active\n");
@@ -2524,7 +2682,9 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     .EnableTextGradient(textGradientCompositionEnabled)
     .EnableTextGradientMixed(textGradientMixedCompositionEnabled)
     .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
-    .EnableTextReveal(textRevealEnabled);
+    .EnableTextReveal(textRevealEnabled)
+    .EnableTextRevealFadeBlur(textRevealFadeBlurEnabled,
+                              hasMultipleTextColors || containsColorGlyph);
 
   Shader shader = GetTextShader(mFactoryCache, featureBuilder);
   mImpl->mRenderer.SetShader(shader);
@@ -2560,7 +2720,7 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       }
     }
 
-    if(textRevealEnabled)
+    if(mTextShaderFeatureCache.IsEnabledTextReveal())
     {
       BindTextRevealConstraint(mImpl->mRenderer);
     }
@@ -2594,6 +2754,20 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       revealPlan = mTypesetter->CreateFinalRevealPlan(revealPlan, revealData->unit);
     }
 
+    Text::Internal::Reveal::FadeBlurParameters fadeBlurParameters;
+    uint32_t                                   fadeBlurGuardBand = 0u;
+    if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur())
+    {
+      fadeBlurParameters = Text::Internal::Reveal::ResolveFadeBlurParameters(
+        Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(
+          *mController->GetRenderTextModel(),
+          hasInlineReplacement),
+        revealData->blurStrength,
+        static_cast<uint32_t>(std::max(1.0f, size.width)),
+        static_cast<uint32_t>(std::max(1.0f, size.height)));
+      fadeBlurGuardBand = Text::Internal::Reveal::GetFadeBlurGuardBand(fadeBlurParameters);
+    }
+
     int verifiedWidth  = data.GetWidth();
     int verifiedHeight = data.GetHeight();
 
@@ -2623,6 +2797,130 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       info.maskPixelData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_MASK, false, Pixel::L8);
     }
 
+    auto setRevealMode = [&](bool enableReveal, bool enableFadeBlur, bool enablePreservedBlur)
+    {
+      TextVisualShaderFeature::FeatureBuilder featureBuilder = mTextShaderFeatureCache;
+      featureBuilder.EnableTextReveal(enableReveal)
+        .EnableTextRevealFadeBlur(enableFadeBlur, enablePreservedBlur);
+      shader = GetTextShader(mFactoryCache, featureBuilder);
+      mImpl->mRenderer.SetShader(shader);
+      for(VisualRenderer& renderer : mRendererList)
+      {
+        renderer.SetShader(shader);
+      }
+    };
+    auto removePublishedRevealResources = [&](bool removePreservedBlur)
+    {
+      for(VisualRenderer& renderer : mRendererList)
+      {
+        TextureSet textures   = renderer.GetTextures();
+        auto       removeLast = [&]()
+        {
+          const uint32_t count = textures.GetTextureCount();
+          if(count > 0u)
+          {
+            textures.SetSampler(count - 1u, Sampler());
+            textures.SetTexture(count - 1u, Texture());
+          }
+        };
+        removeLast(); // Reveal metadata
+        if(removePreservedBlur)
+        {
+          removeLast();
+        }
+      }
+    };
+    auto downgradeToFade = [&]()
+    {
+      setRevealMode(true, false, false);
+    };
+    auto downgradeToOrdinary = [&]()
+    {
+      const bool hadPreservedBlur = mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved();
+      removePublishedRevealResources(hadPreservedBlur);
+      RemoveTextRevealConstraints();
+      setRevealMode(false, false, false);
+      revealData->fadeDuration = 0.0f;
+    };
+    auto populateRevealResources = [&](TilingInfo& tile)
+    {
+      tile.revealPixelData              = {};
+      tile.revealPreservedBlurPixelData = {};
+      if(!mTextShaderFeatureCache.IsEnabledTextReveal())
+      {
+        return;
+      }
+
+      if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+      {
+        tile.revealPreservedBlurPixelData = mTypesetter->RenderTextRevealFadeBlurPreserved(
+          Vector2(static_cast<float>(tile.width), static_cast<float>(tile.height)),
+          textDirection,
+          fadeBlurParameters.scale,
+          fadeBlurParameters.targetRadius,
+          tile.offsetHeight,
+          size,
+          fadeBlurGuardBand);
+        if(!tile.revealPreservedBlurPixelData)
+        {
+          if(mRendererList.empty())
+          {
+            downgradeToFade();
+          }
+          else
+          {
+            downgradeToOrdinary();
+            return;
+          }
+        }
+      }
+
+      const bool fadeBlurRequested = mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur();
+      bool       fadeBlurSucceeded = !fadeBlurRequested;
+      tile.revealPixelData         = mTypesetter->RenderTextRevealMetadata(
+        Vector2(static_cast<float>(tile.width), static_cast<float>(tile.height)), textDirection,
+        revealPlan, revealData->fadeDuration, tile.offsetHeight, size, false, Size::ZERO,
+        fadeBlurRequested ? fadeBlurParameters.scale : 0.0f,
+        fadeBlurParameters.targetRadius,
+        fadeBlurRequested && mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved(),
+        fadeBlurRequested ? fadeBlurGuardBand : 0u,
+        &fadeBlurSucceeded);
+
+      if(fadeBlurRequested && !fadeBlurSucceeded)
+      {
+        tile.revealPreservedBlurPixelData = {};
+        if(mRendererList.empty())
+        {
+          // Prepare failure returns compatible Fade metadata.
+          downgradeToFade();
+        }
+        else
+        {
+          downgradeToOrdinary();
+          tile.revealPixelData = {};
+          return;
+        }
+      }
+      if(!tile.revealPixelData && mTextShaderFeatureCache.IsEnabledTextReveal())
+      {
+        if(mRendererList.empty() && fadeBlurRequested)
+        {
+          downgradeToFade();
+          tile.revealPixelData = mTypesetter->RenderTextRevealMetadata(
+            Vector2(static_cast<float>(tile.width), static_cast<float>(tile.height)),
+            textDirection,
+            revealPlan,
+            revealData->fadeDuration,
+            tile.offsetHeight,
+            size);
+        }
+        if(!tile.revealPixelData)
+        {
+          downgradeToOrdinary();
+        }
+      }
+    };
+
     // Get the current offset for recalculate the offset when tiling.
     Property::Map retMap;
     if(mImpl->mTransform)
@@ -2636,14 +2934,9 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     }
 
     // Create a textureset in the default renderer.
-    if(textRevealEnabled)
-    {
-      info.revealPixelData = mTypesetter->RenderTextRevealMetadata(
-        Vector2(static_cast<float>(info.width), static_cast<float>(info.height)), textDirection,
-        revealPlan, revealData->fadeDuration, info.offsetHeight, size);
-    }
+    populateRevealResources(info);
     CreateTextureSet(info, mImpl->mRenderer, sampler);
-    if(textRevealEnabled)
+    if(mTextShaderFeatureCache.IsEnabledTextReveal())
     {
       BindTextRevealConstraint(mImpl->mRenderer);
     }
@@ -2663,15 +2956,11 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       info.height = (verifiedHeight - maxTextureSize) > 0 ? maxTextureSize : verifiedHeight;
       // New offset for tiling.
       info.transformOffset.y += maxTextureSize;
-      if(textRevealEnabled)
-      {
-        info.revealPixelData = mTypesetter->RenderTextRevealMetadata(
-          Vector2(static_cast<float>(info.width), static_cast<float>(info.height)), textDirection,
-          revealPlan, revealData->fadeDuration, info.offsetHeight, size);
-      }
+      populateRevealResources(info);
+      tilingRenderer.SetShader(shader);
       // Create a textureset int the new tiling renderer.
       CreateTextureSet(info, tilingRenderer, sampler);
-      if(textRevealEnabled)
+      if(mTextShaderFeatureCache.IsEnabledTextReveal())
       {
         BindTextRevealConstraint(tilingRenderer);
       }
@@ -2868,17 +3157,111 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
   {
     auto* revealData = GetTextVisualRevealData(mRevealData);
     DALI_ASSERT_ALWAYS(revealData);
-    const auto sourcePlan = BuildTextRevealSourcePlan();
-    const auto finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan, revealData->unit);
-    PixelData  metadata   = mTypesetter->RenderTextRevealMetadata(size, textDirection, finalPlan, revealData->fadeDuration);
+    const auto sourcePlan      = BuildTextRevealSourcePlan();
+    const auto finalPlan       = mTypesetter->CreateFinalRevealPlan(sourcePlan, revealData->unit);
+    auto       disableFadeBlur = [&]()
+    {
+      if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur())
+      {
+        TextVisualShaderFeature::FeatureBuilder featureBuilder = mTextShaderFeatureCache;
+        featureBuilder.EnableTextRevealFadeBlur(false, false);
+        Shader shader = GetTextShader(mFactoryCache, featureBuilder);
+        mImpl->mRenderer.SetShader(shader);
+      }
+    };
+    auto disableReveal = [&]()
+    {
+      TextVisualShaderFeature::FeatureBuilder featureBuilder = mTextShaderFeatureCache;
+      featureBuilder.EnableTextReveal(false).EnableTextRevealFadeBlur(false, false);
+      Shader shader = GetTextShader(mFactoryCache, featureBuilder);
+      mImpl->mRenderer.SetShader(shader);
+      revealData->fadeDuration = 0.0f;
+    };
 
-    DALI_ASSERT_ALWAYS(metadata && metadata.GetPixelFormat() == Pixel::RGBA8888 &&
-                       metadata.GetWidth() == static_cast<uint32_t>(size.width) &&
-                       metadata.GetHeight() == static_cast<uint32_t>(size.height));
+    Text::Internal::Reveal::FadeBlurParameters fadeBlurParameters;
+    if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur())
+    {
+      const Text::ModelInterface&         model                = *mController->GetRenderTextModel();
+      const Text::ReplacementRenderState& replacementState     = mController->GetReplacementRenderState();
+      const bool                          hasInlineReplacement = replacementState.processingModel &&
+                                        replacementState.projection.HasReplacements();
+      const float referencePixelSize =
+        Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(model, hasInlineReplacement);
+      if(referencePixelSize > 0.0f)
+      {
+        fadeBlurParameters = Text::Internal::Reveal::ResolveFadeBlurParameters(
+          referencePixelSize,
+          revealData->blurStrength,
+          static_cast<uint32_t>(std::max(1.0f, size.width)),
+          static_cast<uint32_t>(std::max(1.0f, size.height)));
+      }
+      else
+      {
+        disableFadeBlur();
+      }
+    }
 
-    Sampler nearestSampler = Sampler::New();
-    nearestSampler.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
-    AddTexture(textureSet, metadata, nearestSampler, textureSetIndex);
+    PixelData preservedBlur;
+    if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved())
+    {
+      preservedBlur = mTypesetter->RenderTextRevealFadeBlurPreserved(size,
+                                                                     textDirection,
+                                                                     fadeBlurParameters.scale,
+                                                                     fadeBlurParameters.targetRadius);
+      if(!preservedBlur || preservedBlur.GetPixelFormat() != Pixel::RGBA8888)
+      {
+        disableFadeBlur();
+        preservedBlur = {};
+      }
+    }
+
+    bool      fadeBlurSucceeded = !mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur();
+    PixelData metadata =
+      mTypesetter->RenderTextRevealMetadata(size, textDirection, finalPlan, revealData->fadeDuration,
+                                            0u, Size::ZERO, false, Size::ZERO,
+                                            mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur()
+                                              ? fadeBlurParameters.scale
+                                              : 0.0f,
+                                            fadeBlurParameters.targetRadius,
+                                            mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved(),
+                                            0u,
+                                            &fadeBlurSucceeded);
+    if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur() && !fadeBlurSucceeded)
+    {
+      disableFadeBlur();
+      preservedBlur = {};
+    }
+    if(!metadata || metadata.GetPixelFormat() != Pixel::RGBA8888 ||
+       metadata.GetWidth() != static_cast<uint32_t>(size.width) ||
+       metadata.GetHeight() != static_cast<uint32_t>(size.height))
+    {
+      // A failed blur crop returns no compatible payload. Retry the existing
+      // Fade metadata path before giving up Reveal entirely.
+      disableFadeBlur();
+      preservedBlur = {};
+      metadata      = mTypesetter->RenderTextRevealMetadata(size,
+                                                            textDirection,
+                                                            finalPlan,
+                                                            revealData->fadeDuration);
+    }
+
+    if(metadata && metadata.GetPixelFormat() == Pixel::RGBA8888 &&
+       metadata.GetWidth() == static_cast<uint32_t>(size.width) &&
+       metadata.GetHeight() == static_cast<uint32_t>(size.height))
+    {
+      if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved() && preservedBlur)
+      {
+        AddTexture(textureSet, preservedBlur, sampler, textureSetIndex);
+        ++textureSetIndex;
+      }
+      Sampler nearestSampler = Sampler::New();
+      nearestSampler.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
+      AddTexture(textureSet, metadata, nearestSampler, textureSetIndex);
+    }
+    else
+    {
+      disableReveal();
+    }
   }
 
   return textureSet;

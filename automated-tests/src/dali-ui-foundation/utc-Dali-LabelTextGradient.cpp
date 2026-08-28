@@ -21,12 +21,16 @@
 #include <dali-ui-foundation/public-api/gradient/radial-gradient.h>
 #include <dali-ui-foundation/public-api/animation/duration.h>
 #include <dali-ui-foundation/public-api/animation/label-animation-bridge.autogen.h>
+#include <dali-ui-foundation/public-api/text/styled-text/font-span.h>
+#include <dali-ui-foundation/public-api/text/styled-text/foreground-color-span.h>
+#include <dali-ui-foundation/public-api/text/styled-text/styled-text-builder.h>
 #include <dali-ui-foundation/public-api/views/text-controls/label.h>
 #include <dali-ui-test-suite-utils.h>
 #include <dali-ui/ui-event-thread-callback.h>
 #include <dali.h>
 #include <dali/devel-api/text-abstraction/font-client.h>
 
+#include <cmath>
 #include <utility>
 #include <vector>
 
@@ -1104,6 +1108,215 @@ int UtcDaliLabelTextRevealGradientOverlayCompositionP(void)
   Renderer renderer = label.GetRendererAt(0u);
   DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealProgress") != Property::INVALID_INDEX);
   DALI_TEST_CHECK(renderer.GetTextures().GetTextureCount() >= 4u);
+  END_TEST;
+}
+
+int UtcDaliLabelTextRevealFadeBlurCompositionP(void)
+{
+  UiTestApplication application;
+
+  Text::StyledTextBuilder builder = Text::StyledTextBuilder::New("Gradient A🦋B preserved color");
+  DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 9u, 10u));
+  Label label = Label::New();
+  label.SetStyledText(builder.Build());
+  label.SetProperty(Actor::Property::SIZE, Vector3(420.0f, 96.0f, 0.0f));
+  label.SetTextGradient(MakeRenderableLinear(Vector2::ZERO, Vector2::ONE, 0.2f));
+  label.SetTextGradientOverlay(MakeRenderableLinear(Vector2::ONE, Vector2::ZERO, 0.4f));
+  label.SetTextGradientOverlayMode(Text::GradientOverlayMode::SCREEN);
+
+  Text::Shadow shadow;
+  shadow.SetOffset(Vector2(2.0f, 2.0f));
+  Text::Outline outline;
+  outline.SetWidth(1.0f);
+  Text::Underline underline;
+  Text::LineThrough lineThrough;
+  label.SetTextShadow(shadow);
+  label.SetTextOutline(outline);
+  label.SetTextUnderline(underline);
+  label.SetTextLineThrough(lineThrough);
+
+  Text::Reveal reveal;
+  reveal.SetBlurStrength(1.0f);
+  label.SetTextReveal(reveal);
+  label.SetTextRevealProgress(0.0f);
+
+  application.GetScene().Add(label);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+
+  DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+  Renderer   renderer = label.GetRendererAt(0u);
+  TextureSet textures = renderer.GetTextures();
+  // preserved RGBA + normal mask + two gradient lookups + style + overlay
+  // + preserved-color preblur + Reveal metadata reaches, but does not exceed,
+  // the GLES2 eight-fragment-sampler boundary.
+  DALI_TEST_EQUALS(textures.GetTextureCount(), 8u, TEST_LOCATION);
+  Texture sharpPreserved = textures.GetTexture(0u);
+  Texture preservedBlur  = textures.GetTexture(6u);
+  Texture metadata       = textures.GetTexture(7u);
+  DALI_TEST_CHECK(sharpPreserved && preservedBlur && metadata);
+  DALI_TEST_EQUALS(preservedBlur.GetPixelFormat(), Pixel::RGBA8888, TEST_LOCATION);
+  DALI_TEST_EQUALS(metadata.GetPixelFormat(), Pixel::RGBA8888, TEST_LOCATION);
+  // Explicit full strength follows AUTO, so the selected resolution depends
+  // on final font metrics. Keep this composition UTC independent of the
+  // platform font while accepting only supported preprocessing scales.
+  bool hasSupportedBlurScale = false;
+  for(float scale : {0.25f, 0.5f, 1.0f})
+  {
+    hasSupportedBlurScale |=
+      preservedBlur.GetWidth() ==
+        std::max(1u, static_cast<uint32_t>(std::round(sharpPreserved.GetWidth() * scale))) &&
+      preservedBlur.GetHeight() ==
+        std::max(1u, static_cast<uint32_t>(std::round(sharpPreserved.GetHeight() * scale)));
+  }
+  DALI_TEST_CHECK(hasSupportedBlurScale);
+  DALI_TEST_EQUALS(metadata.GetWidth(), sharpPreserved.GetWidth(), TEST_LOCATION);
+  DALI_TEST_EQUALS(metadata.GetHeight(), sharpPreserved.GetHeight(), TEST_LOCATION);
+
+  std::vector<Texture> resources;
+  resources.reserve(textures.GetTextureCount());
+  for(uint32_t index = 0u; index < textures.GetTextureCount(); ++index)
+  {
+    resources.push_back(textures.GetTexture(index));
+  }
+
+  TestGlAbstraction& gl = application.GetGlAbstraction();
+  gl.EnableTextureCallTrace(true);
+  gl.ResetTextureCallStack();
+  for(float progress : {0.25f, 0.5f, 1.0f})
+  {
+    label.SetTextRevealProgress(progress);
+    application.SendNotification();
+    application.Render(16);
+    DALI_TEST_CHECK(label.GetRendererAt(0u) == renderer);
+    TextureSet current = renderer.GetTextures();
+    DALI_TEST_EQUALS(current.GetTextureCount(), resources.size(), TEST_LOCATION);
+    for(uint32_t index = 0u; index < current.GetTextureCount(); ++index)
+    {
+      DALI_TEST_CHECK(current.GetTexture(index) == resources[index]);
+    }
+  }
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliLabelTextRevealFadeBlurAutomaticScaleP(void)
+{
+  UiTestApplication application;
+
+  auto setStyledTextSize = [](Label& target, float fontSize)
+  {
+    Text::StyledTextBuilder builder = Text::StyledTextBuilder::New("Adaptive A🦋B scale");
+    Text::FontAttributes    fontAttributes;
+    fontAttributes.SetSize(fontSize);
+    DALI_TEST_CHECK(builder.SetSpan(Text::FontSpan::New(fontAttributes), 0u, 18u));
+    DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(UiColor(Color::RED)), 9u, 10u));
+    target.SetStyledText(builder.Build());
+  };
+
+  auto configureAutomatic = [](Label& target)
+  {
+    Text::Reveal reveal;
+    reveal.SetBlurStrength(Text::Reveal::AUTO_BLUR_STRENGTH);
+    target.SetTextReveal(reveal);
+    target.SetTextRevealProgress(0.0f);
+  };
+
+  Label label = Label::New();
+  setStyledTextSize(label, 20.0f);
+  label.SetProperty(Actor::Property::SIZE, Vector3(320.0f, 96.0f, 0.0f));
+  configureAutomatic(label);
+  application.GetScene().Add(label);
+
+  auto renderAndCheckScale = [&](Label& target, float scale)
+  {
+    application.SendNotification();
+    application.Render(16);
+    application.SendNotification();
+    application.Render(16);
+
+    DALI_TEST_EQUALS(target.GetRendererCount(), 1u, TEST_LOCATION);
+    TextureSet textures = target.GetRendererAt(0u).GetTextures();
+    // Sharp RGBA + authored preserved-color preblur + Reveal metadata. The
+    // authored span keeps this independent of installed color-emoji fonts.
+    DALI_TEST_EQUALS(textures.GetTextureCount(), 3u, TEST_LOCATION);
+    Texture sharp         = textures.GetTexture(0u);
+    Texture preservedBlur = textures.GetTexture(1u);
+    Texture metadata      = textures.GetTexture(2u);
+    DALI_TEST_CHECK(sharp && preservedBlur && metadata);
+    DALI_TEST_EQUALS(preservedBlur.GetWidth(),
+                     std::max(1u, static_cast<uint32_t>(std::round(sharp.GetWidth() * scale))),
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(preservedBlur.GetHeight(),
+                     std::max(1u, static_cast<uint32_t>(std::round(sharp.GetHeight() * scale))),
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(metadata.GetWidth(), sharp.GetWidth(), TEST_LOCATION);
+    DALI_TEST_EQUALS(metadata.GetHeight(), sharp.GetHeight(), TEST_LOCATION);
+  };
+
+  renderAndCheckScale(label, 0.5f);
+
+  // Large text naturally reaches R8 and keeps the existing quarter resource.
+  setStyledTextSize(label, 84.0f);
+  label.SetProperty(Actor::Property::SIZE, Vector3(320.0f, 180.0f, 0.0f));
+  renderAndCheckScale(label, 0.25f);
+
+  END_TEST;
+}
+
+int UtcDaliLabelTextRevealFadeBlurAnimationP(void)
+{
+  UiTestApplication application;
+
+  Label label = Label::New("FadeBlur A🦋B animation remains paint-only");
+  label.SetProperty(Actor::Property::SIZE, Vector3(420.0f, 96.0f, 0.0f));
+  application.GetScene().Add(label);
+
+  const float strengths[] = {0.0f, Text::Reveal::AUTO_BLUR_STRENGTH, 0.25f, 0.5f, 0.75f, 1.0f};
+
+  TestGlAbstraction& gl = application.GetGlAbstraction();
+  gl.EnableTextureCallTrace(true);
+  for(float strength : strengths)
+  {
+    label.SetTextReveal(Text::Reveal::None());
+    Text::Reveal reveal;
+    reveal.SetBlurStrength(strength);
+    label.SetTextReveal(reveal);
+    label.SetTextRevealProgress(0.0f);
+    application.SendNotification();
+    application.Render(16);
+    application.SendNotification();
+    application.Render(16);
+
+    Renderer             renderer = label.GetRendererAt(0u);
+    TextureSet           textures = renderer.GetTextures();
+    std::vector<Texture> resources;
+    resources.reserve(textures.GetTextureCount());
+    for(uint32_t index = 0u; index < textures.GetTextureCount(); ++index)
+    {
+      resources.push_back(textures.GetTexture(index));
+    }
+
+    gl.ResetTextureCallStack();
+    for(uint32_t frame = 0u; frame < 1000u; ++frame)
+    {
+      label.SetTextRevealProgress(static_cast<float>(frame + 1u) / 1000.0f);
+      application.SendNotification();
+      application.Render(1);
+      DALI_TEST_CHECK(label.GetRendererAt(0u) == renderer);
+      TextureSet current = renderer.GetTextures();
+      DALI_TEST_EQUALS(current.GetTextureCount(), resources.size(), TEST_LOCATION);
+      for(uint32_t index = 0u; index < current.GetTextureCount(); ++index)
+      {
+        DALI_TEST_CHECK(current.GetTexture(index) == resources[index]);
+      }
+    }
+    DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+    DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+  }
   END_TEST;
 }
 

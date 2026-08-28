@@ -41,12 +41,14 @@ public:
   Impl()
   : mUnit(Unit::CHARACTER),
     mFadeDurationRatio(AUTO_FADE_DURATION_RATIO),
+    mBlurStrength(0.0f),
     mIsNone(false)
   {
   }
 
   Unit  mUnit;
   float mFadeDurationRatio;
+  float mBlurStrength;
   bool  mIsNone;
 };
 
@@ -115,7 +117,9 @@ bool Reveal::operator==(const Reveal& rhs) const
   {
     return mImpl->mIsNone == rhs.mImpl->mIsNone;
   }
-  return mImpl->mUnit == rhs.mImpl->mUnit && Dali::Equals(mImpl->mFadeDurationRatio, rhs.mImpl->mFadeDurationRatio);
+  return mImpl->mUnit == rhs.mImpl->mUnit &&
+         Dali::Equals(mImpl->mFadeDurationRatio, rhs.mImpl->mFadeDurationRatio) &&
+         Dali::Equals(mImpl->mBlurStrength, rhs.mImpl->mBlurStrength);
 }
 
 bool Reveal::operator!=(const Reveal& rhs) const
@@ -160,6 +164,31 @@ float Reveal::GetFadeDurationRatio() const
   DALI_ASSERT_VALID_REVEAL(mImpl);
   DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
   return mImpl->mFadeDurationRatio;
+}
+
+void Reveal::SetBlurStrength(float strength)
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
+  if(strength == AUTO_BLUR_STRENGTH)
+  {
+    mImpl->mBlurStrength = AUTO_BLUR_STRENGTH;
+  }
+  else if(std::isnan(strength))
+  {
+    mImpl->mBlurStrength = 0.0f;
+  }
+  else
+  {
+    mImpl->mBlurStrength = std::max(0.0f, std::min(1.0f, strength));
+  }
+}
+
+float Reveal::GetBlurStrength() const
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
+  return mImpl->mBlurStrength;
 }
 
 } // namespace Text

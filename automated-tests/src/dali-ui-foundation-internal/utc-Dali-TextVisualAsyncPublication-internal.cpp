@@ -138,13 +138,15 @@ UiText::AsyncTextParameters MakeParameters(const std::string& text)
 UiText::AsyncTextParameters MakeRevealParameters(const std::string&          text,
                                                  uint64_t                    revision,
                                                  UiText::Internal::Reveal::Unit unit,
-                                                 float                       fadeDurationRatio)
+                                                 float                       fadeDurationRatio,
+                                                 float                       blurStrength = 0.0f)
 {
   UiText::AsyncTextParameters parameters = MakeParameters(text);
   parameters.isMarqueeEnabled            = false;
   parameters.isTextRevealEnabled         = true;
   parameters.textRevealUnit              = unit;
   parameters.textRevealFadeDurationRatio = fadeDurationRatio;
+  parameters.textRevealBlurStrength       = blurStrength;
   parameters.textRevealRevision          = revision;
   return parameters;
 }
@@ -164,14 +166,15 @@ UiText::AsyncTextRenderInfo MakeRevealRenderInfo(uint32_t width, uint32_t height
 void ConfigureReveal(RenderedTextVisual&            rendered,
                      UiText::Internal::Reveal::Unit unit,
                      float                          fadeDurationRatio,
-                     uint64_t                       revision)
+                     uint64_t                       revision,
+                     float                          blurStrength = 0.0f)
 {
   Property::Index progress = rendered.view.GetPropertyIndex("testRevealProgress");
   if(progress == Property::INVALID_INDEX)
   {
     progress = rendered.view.RegisterProperty("testRevealProgress", 0.5f);
   }
-  UiInternal::TextVisual::ConfigureTextReveal(rendered.visual, unit, fadeDurationRatio, progress, revision);
+  UiInternal::TextVisual::ConfigureTextReveal(rendered.visual, unit, fadeDurationRatio, blurStrength, progress, revision);
 }
 
 void PublishDirect(RenderedTextVisual&                   rendered,
@@ -571,6 +574,7 @@ int UtcDaliTextVisualRevealNoneRejectsOlderCompletionP(void)
 
   UiInternal::TextVisual::ConfigureTextReveal(rendered.visual, UiText::Internal::Reveal::Unit::DISABLED,
                                               UiText::Reveal::AUTO_FADE_DURATION_RATIO,
+                                              0.0f,
                                               Property::INVALID_INDEX, 2u);
   PublishDirect(rendered, oldParameters, oldRenderInfo);
   DALI_TEST_EQUALS(observer.mCompletionCount, 0u, TEST_LOCATION);
@@ -638,6 +642,33 @@ int UtcDaliTextVisualRevealUnitRejectsOlderCompletionP(void)
                 MakeRevealParameters("current word unit", 2u, UiText::Internal::Reveal::Unit::WORD, 0.2f),
                 MakeRevealRenderInfo(32u, 16u));
   DALI_TEST_EQUALS(observer.mCompletionCount, 1u, TEST_LOCATION);
+
+  UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, nullptr);
+  END_TEST;
+}
+
+int UtcDaliTextVisualRevealBlurStrengthRejectsOlderCompletionP(void)
+{
+  UiTestApplication application;
+  application.GetGlAbstraction().SetCheckFramebufferStatusResult(GL_FRAMEBUFFER_COMPLETE);
+
+  RenderedTextVisual      rendered = CreateTextVisual(application);
+  ReentrantAsyncInterface observer(rendered.visual, rendered.view, CompletionAction::NONE);
+  UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, &observer);
+
+  ConfigureReveal(rendered,
+                  UiText::Internal::Reveal::Unit::CHARACTER,
+                  0.2f,
+                  1u,
+                  UiText::Reveal::AUTO_BLUR_STRENGTH);
+  const auto staleParameters = MakeRevealParameters("stale automatic blur",
+                                                    1u,
+                                                    UiText::Internal::Reveal::Unit::CHARACTER,
+                                                    0.2f,
+                                                    UiText::Reveal::AUTO_BLUR_STRENGTH);
+  ConfigureReveal(rendered, UiText::Internal::Reveal::Unit::CHARACTER, 0.2f, 2u, 0.5f);
+  PublishDirect(rendered, staleParameters, MakeRevealRenderInfo(32u, 16u));
+  DALI_TEST_EQUALS(observer.mCompletionCount, 0u, TEST_LOCATION);
 
   UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, nullptr);
   END_TEST;
@@ -828,6 +859,124 @@ int UtcDaliTextVisualRevealMetadataFallbackRecoversP(void)
   DALI_TEST_EQUALS(rendered.view.GetRendererCount(), 1u, TEST_LOCATION);
   DALI_TEST_CHECK(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount() >= 2u);
   DALI_TEST_CHECK(rendered.view.GetRendererAt(0u).GetShader() != ordinaryShader);
+
+  UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, nullptr);
+  END_TEST;
+}
+
+int UtcDaliTextVisualRevealFadeBlurPublicationP(void)
+{
+  UiTestApplication application;
+  application.GetGlAbstraction().SetCheckFramebufferStatusResult(GL_FRAMEBUFFER_COMPLETE);
+
+  RenderedTextVisual      rendered = CreateTextVisual(application);
+  ReentrantAsyncInterface observer(rendered.visual, rendered.view, CompletionAction::NONE);
+  UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, &observer);
+  ConfigureReveal(rendered,
+                  UiText::Internal::Reveal::Unit::CHARACTER,
+                  0.2f,
+                  1u,
+                  UiText::Reveal::AUTO_BLUR_STRENGTH);
+  const UiText::AsyncTextParameters parameters =
+    MakeRevealParameters("valid invalid valid FadeBlur publication",
+                         1u,
+                         UiText::Internal::Reveal::Unit::CHARACTER,
+                         0.2f,
+                         UiText::Reveal::AUTO_BLUR_STRENGTH);
+
+  auto MakeFadeBlurRenderInfo = []()
+  {
+    UiText::AsyncTextRenderInfo renderInfo = MakeRevealRenderInfo(32u, 16u);
+    renderInfo.textPixelData                 = CreatePixelData(32u, 16u, Pixel::RGBA8888);
+    renderInfo.hasMultipleTextColors         = true;
+    renderInfo.isTextRevealFadeBlurEnabled   = true;
+    renderInfo.textRevealFadeBlurScale       = 0.5f;
+    renderInfo.revealPreservedBlurTiles.push_back(CreatePixelData(16u, 8u, Pixel::RGBA8888));
+    return renderInfo;
+  };
+
+  PublishDirect(rendered, parameters, MakeFadeBlurRenderInfo());
+  DALI_TEST_EQUALS(observer.mCompletionCount, 1u, TEST_LOCATION);
+  DALI_TEST_CHECK(HasTextRevealRenderer(rendered.view));
+  DALI_TEST_EQUALS(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+  const Shader fadeBlurShader = rendered.view.GetRendererAt(0u).GetShader();
+
+  UiText::AsyncTextRenderInfo incomplete = MakeFadeBlurRenderInfo();
+  incomplete.revealPreservedBlurTiles.clear();
+  PublishDirect(rendered, parameters, incomplete);
+  DALI_TEST_EQUALS(observer.mCompletionCount, 2u, TEST_LOCATION);
+  DALI_TEST_CHECK(HasValidTexture(rendered.view));
+  DALI_TEST_CHECK(!HasTextRevealRenderer(rendered.view));
+  const Shader ordinaryShader = rendered.view.GetRendererAt(0u).GetShader();
+
+  // Optional worker blur failure intentionally republishes complete ordinary
+  // Reveal metadata. Authored AUTO remains unchanged, but publication must use
+  // the resolved Fade result rather than reject it as malformed FadeBlur.
+  UiText::AsyncTextRenderInfo downgradedFade = MakeRevealRenderInfo(32u, 16u);
+  downgradedFade.isTextRevealFadeBlurEnabled = false;
+  PublishDirect(rendered, parameters, downgradedFade);
+  DALI_TEST_EQUALS(observer.mCompletionCount, 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(HasTextRevealRenderer(rendered.view));
+  DALI_TEST_EQUALS(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount(), 2u, TEST_LOCATION);
+  const Shader fadeShader = rendered.view.GetRendererAt(0u).GetShader();
+  DALI_TEST_CHECK(fadeShader != fadeBlurShader);
+  DALI_TEST_CHECK(fadeShader != ordinaryShader);
+
+  PublishDirect(rendered, parameters, MakeFadeBlurRenderInfo());
+  DALI_TEST_EQUALS(observer.mCompletionCount, 4u, TEST_LOCATION);
+  DALI_TEST_CHECK(HasTextRevealRenderer(rendered.view));
+  DALI_TEST_EQUALS(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+  DALI_TEST_CHECK(rendered.view.GetRendererAt(0u).GetShader() == fadeBlurShader);
+
+  UiText::AsyncTextRenderInfo mismatched = MakeFadeBlurRenderInfo();
+  mismatched.revealPreservedBlurTiles.front() = CreatePixelData(15u, 8u, Pixel::RGBA8888);
+  PublishDirect(rendered, parameters, mismatched);
+  DALI_TEST_EQUALS(observer.mCompletionCount, 5u, TEST_LOCATION);
+  DALI_TEST_CHECK(!HasTextRevealRenderer(rendered.view));
+
+  UiText::AsyncTextRenderInfo missingMetadata = MakeFadeBlurRenderInfo();
+  missingMetadata.revealMetadataTiles.clear();
+  PublishDirect(rendered, parameters, missingMetadata);
+  DALI_TEST_EQUALS(observer.mCompletionCount, 6u, TEST_LOCATION);
+  DALI_TEST_CHECK(!HasTextRevealRenderer(rendered.view));
+
+  UiText::AsyncTextRenderInfo mismatchedMetadata = MakeFadeBlurRenderInfo();
+  mismatchedMetadata.revealMetadataTiles.front() = CreatePixelData(31u, 16u, Pixel::RGBA8888);
+  PublishDirect(rendered, parameters, mismatchedMetadata);
+  DALI_TEST_EQUALS(observer.mCompletionCount, 7u, TEST_LOCATION);
+  DALI_TEST_CHECK(!HasTextRevealRenderer(rendered.view));
+
+  PublishDirect(rendered, parameters, MakeFadeBlurRenderInfo());
+  DALI_TEST_EQUALS(observer.mCompletionCount, 8u, TEST_LOCATION);
+  DALI_TEST_CHECK(HasTextRevealRenderer(rendered.view));
+  DALI_TEST_EQUALS(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+
+  // Tiny resources make scale inference ambiguous. Publication must honor the
+  // explicit worker result and validate both rounded dimensions against it.
+  for(uint32_t width = 1u; width <= 4u; ++width)
+  {
+    for(float scale : {0.25f, 0.5f, 1.0f})
+    {
+      constexpr uint32_t          HEIGHT = 3u;
+      UiText::AsyncTextRenderInfo narrow = MakeRevealRenderInfo(width, HEIGHT);
+      narrow.textPixelData               = CreatePixelData(width, HEIGHT, Pixel::RGBA8888);
+      narrow.hasMultipleTextColors       = true;
+      narrow.isTextRevealFadeBlurEnabled = true;
+      narrow.textRevealFadeBlurScale     = scale;
+      narrow.revealPreservedBlurTiles.push_back(
+        CreatePixelData(std::max(1u, static_cast<uint32_t>(std::round(width * scale))),
+                        std::max(1u, static_cast<uint32_t>(std::round(HEIGHT * scale))),
+                        Pixel::RGBA8888));
+      PublishDirect(rendered, parameters, narrow);
+      DALI_TEST_CHECK(HasTextRevealRenderer(rendered.view));
+      DALI_TEST_EQUALS(rendered.view.GetRendererAt(0u).GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+    }
+  }
+
+  UiText::AsyncTextRenderInfo invalidScale = MakeFadeBlurRenderInfo();
+  invalidScale.textRevealFadeBlurScale     = 0.0f;
+  PublishDirect(rendered, parameters, invalidScale);
+  DALI_TEST_CHECK(!HasTextRevealRenderer(rendered.view));
 
   UiInternal::TextVisual::SetAsyncTextInterface(rendered.visual, nullptr);
   END_TEST;

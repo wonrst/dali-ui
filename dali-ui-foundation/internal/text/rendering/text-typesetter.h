@@ -274,6 +274,10 @@ public:
    * The supplied plan must already be projected onto the final glyph sequence.
    * Tile calls for one layout must all receive the same plan.
    *
+   * In the Fade+Blur path, RG remains the sharp ownership, B is
+   * replaced with conservative 8-bit blur ownership, and A is replaced with
+   * full-size preblurred default-glyph coverage.
+   *
    * @param[in] tileSize The dimensions of the metadata texture to create.
    * @param[in] textDirection The resolved text direction.
    * @param[in] plan The final-glyph reveal plan shared by all tiles.
@@ -282,6 +286,11 @@ public:
    * @param[in] fullSize The full rendered text size, or Size::ZERO for a non-tiled render.
    * @param[in] ignoreHorizontalAlignment Whether horizontal alignment is ignored.
    * @param[in] originSize The original size used to resolve vertical alignment.
+   * @param[in] fadeBlurScale Preblur resolution scale, or zero for ordinary Reveal metadata.
+   * @param[in] targetBlurRadius Blur radius in final text pixels.
+   * @param[in] fadeBlurHasPreservedColor Whether a separate preserved-color blur uses the timing field.
+   * @param[in] fadeBlurGuardBand Vertical source pixels included around a height tile.
+   * @param[out] fadeBlurSucceeded Optional result for requested Fade+Blur processing.
    * @return RGBA8888 reveal metadata for the requested full texture or tile.
    */
   PixelData RenderTextRevealMetadata(
@@ -292,7 +301,37 @@ public:
     uint32_t                      tileOffsetY               = 0u,
     const Vector2&                fullSize                  = Size::ZERO,
     bool                          ignoreHorizontalAlignment = false,
-    const Vector2&                originSize                = Size::ZERO);
+    const Vector2&                originSize                = Size::ZERO,
+    float                         fadeBlurScale             = 0.0f,
+    float                         targetBlurRadius          = 8.0f,
+    bool                          fadeBlurHasPreservedColor = false,
+    uint32_t                      fadeBlurGuardBand         = 0u,
+    bool*                         fadeBlurSucceeded         = nullptr);
+
+  /**
+   * @brief Rasterizes and preblurs color glyphs and authored-color glyphs.
+   *
+   * Default-color glyph coverage is carried by Reveal metadata,
+   * so this RGBA resource contains only pixels whose foreground color must be
+   * preserved. The result remains premultiplied and is generated only during
+   * renderer setup.
+   *
+   * @param[in] tileSize The visible full-text or height-tile size.
+   * @param[in] textDirection The resolved text direction.
+   * @param[in] fadeBlurScale The preblur resolution scale.
+   * @param[in] targetBlurRadius The blur radius in final text pixels.
+   * @param[in] tileOffsetY The vertical tile offset in the full rendered text.
+   * @param[in] fullSize The full rendered text size, or Size::ZERO for a non-tiled render.
+   * @param[in] fadeBlurGuardBand Vertical source pixels included around a height tile.
+   * @return Downsampled RGBA8888 preserved-color preblur data.
+   */
+  PixelData RenderTextRevealFadeBlurPreserved(const Vector2& tileSize,
+                                              Direction      textDirection,
+                                              float          fadeBlurScale,
+                                              float          targetBlurRadius  = 8.0f,
+                                              uint32_t       tileOffsetY       = 0u,
+                                              const Vector2& fullSize          = Size::ZERO,
+                                              uint32_t       fadeBlurGuardBand = 0u);
 
   /**
    * @brief Create & draw the image buffer of single background color.

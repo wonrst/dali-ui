@@ -36,8 +36,8 @@ namespace Text
  * control the playback duration by animating TextRevealProgress.
  *
  * By default, text is revealed by character using an automatically selected
- * fade duration. The reveal unit and fade duration ratio can be configured
- * explicitly.
+ * fade duration and no blur. The reveal unit, fade duration ratio, and an
+ * optional blur strength can be configured explicitly.
  *
  * Reveal affects only the text foreground. Text decorations and other style
  * layers such as shadow, outline, underline, strikethrough, and background are
@@ -60,6 +60,16 @@ public:
    * returns this value rather than the internally resolved duration ratio.
    */
   static constexpr float AUTO_FADE_DURATION_RATIO = -1.0f;
+
+  /**
+   * @brief Selects an automatically resolved blur strength.
+   *
+   * The implementation selects a perceptually suitable blur from the final
+   * rendered text size. This value represents authored automatic behavior;
+   * GetBlurStrength() returns this value rather than an internally resolved
+   * value.
+   */
+  static constexpr float AUTO_BLUR_STRENGTH = -1.0f;
 
   /**
    * @brief Unit used to divide the visible text into reveal steps.
@@ -192,6 +202,32 @@ public:
    * @return AUTO_FADE_DURATION_RATIO or the authored ratio in [0.0, 1.0].
    */
   float GetFadeDurationRatio() const;
+
+  /**
+   * @brief Sets the blur strength applied while reveal units fade in.
+   *
+   * Zero disables blur and preserves Fade-only Reveal behavior.
+   * AUTO_BLUR_STRENGTH selects a blur suitable for the final rendered text.
+   * Values from 0.0 to 1.0 specify increasing visual blur strength; the
+   * implementation may adapt the internal preprocessing resolution and blur
+   * radius to the rendered text and device scale.
+   *
+   * Values outside [0.0, 1.0] are clamped, except AUTO_BLUR_STRENGTH. NaN is
+   * normalized to 0.0.
+   *
+   * @param[in] strength AUTO_BLUR_STRENGTH or a value in [0.0, 1.0].
+   */
+  void SetBlurStrength(float strength);
+
+  /**
+   * @brief Returns the authored blur strength.
+   *
+   * If automatic blur is selected, this returns AUTO_BLUR_STRENGTH rather
+   * than the value resolved for the current text layout.
+   *
+   * @return AUTO_BLUR_STRENGTH or the authored strength in [0.0, 1.0].
+   */
+  float GetBlurStrength() const;
 
 private:
   class Impl;

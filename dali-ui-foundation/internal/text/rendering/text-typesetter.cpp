@@ -31,6 +31,7 @@
 #include <dali-ui-foundation/internal/text/rendering/styles/character-spacing-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/strikethrough-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
@@ -694,8 +695,17 @@ PixelData Typesetter::RenderTextRevealMetadata(
   uint32_t                      tileOffsetY,
   const Vector2&                fullSize,
   bool                          ignoreHorizontalAlignment,
-  const Vector2&                originSize)
+  const Vector2&                originSize,
+  float                         fadeBlurScale,
+  float                         targetBlurRadius,
+  bool                          fadeBlurHasPreservedColor,
+  uint32_t                      fadeBlurGuardBand,
+  bool*                         fadeBlurSucceeded)
 {
+  if(fadeBlurSucceeded)
+  {
+    *fadeBlurSucceeded = fadeBlurScale <= 0.0f;
+  }
   // Reuse the normal glyph traversal, but offset it into a tile-local target.
   // The caller projects one canonical final plan before visiting any tile.
   auto& viewModel = *mImpl->GetViewModel();
@@ -731,20 +741,130 @@ PixelData Typesetter::RenderTextRevealMetadata(
       penY = static_cast<int32_t>(controlHeight - layoutHeight);
       break;
   }
-  penY -= static_cast<int32_t>(tileOffsetY);
+  const uint32_t visibleHeight = static_cast<uint32_t>(tileSize.height);
+  const uint32_t fullHeight    = fullSize.height > 0.0f ? static_cast<uint32_t>(fullSize.height) : visibleHeight;
+  const uint32_t topGuard      = fadeBlurScale > 0.0f
+                                   ? std::min(fadeBlurGuardBand, tileOffsetY)
+                                   : 0u;
+  const uint32_t visibleEndY   = std::min(fullHeight, tileOffsetY + visibleHeight);
+  const uint32_t bottomGuard   = fadeBlurScale > 0.0f
+                                   ? std::min(fadeBlurGuardBand, fullHeight - visibleEndY)
+                                   : 0u;
+  const uint32_t rasterOffsetY = tileOffsetY - topGuard;
+  penY -= static_cast<int32_t>(rasterOffsetY);
 
   const auto startGlyph = viewModel.GetStartIndexOfElidedGlyphs();
   const auto endGlyph   = viewModel.GetEndIndexOfElidedGlyphs();
   fadeDuration          = plan.fadeDuration;
 
   const uint32_t width  = static_cast<uint32_t>(tileSize.width);
-  const uint32_t height = static_cast<uint32_t>(tileSize.height);
-  mImpl->BeginRevealMetadata(width, height, plan);
+  const uint32_t height = visibleHeight + topGuard + bottomGuard;
+  if(!mImpl->BeginRevealMetadata(width, height, plan))
+  {
+    return {};
+  }
   PixelBuffer traversal = mImpl->CreateImageBuffer(width, height, Typesetter::STYLE_NONE,
                                                    ignoreHorizontalAlignment, Pixel::RGBA8888,
                                                    penX, penY, startGlyph, endGlyph);
   (void)traversal;
+  if(fadeBlurScale > 0.0f)
+  {
+    PixelBuffer normalGlyphMask =
+      mImpl->CreateTextGradientMaskImageBuffer(width, height, ignoreHorizontalAlignment, Pixel::L8,
+                                               penX, penY, startGlyph, endGlyph);
+    bool      succeeded = false;
+    PixelData result    = mImpl->EndRevealFadeBlurMetadata(normalGlyphMask,
+                                                           fadeBlurScale,
+                                                           targetBlurRadius,
+                                                           !fadeBlurHasPreservedColor,
+                                                           topGuard,
+                                                           visibleHeight,
+                                                           succeeded);
+    if(fadeBlurSucceeded)
+    {
+      *fadeBlurSucceeded = succeeded;
+    }
+    return result;
+  }
   return mImpl->EndRevealMetadata();
+}
+
+PixelData Typesetter::RenderTextRevealFadeBlurPreserved(const Vector2& tileSize,
+                                                        Direction      textDirection,
+                                                        float          fadeBlurScale,
+                                                        float          targetBlurRadius,
+                                                        uint32_t       tileOffsetY,
+                                                        const Vector2& fullSize,
+                                                        uint32_t       fadeBlurGuardBand)
+{
+  DALI_TRACE_SCOPE(gTraceFilter, "DALI_TEXT_RENDERING_TYPESETTER_REVEAL_FADE_BLUR_PRESERVED");
+
+  auto& viewModel = *(mImpl->GetViewModel());
+  viewModel.ElideGlyphs(mImpl->GetFontClient());
+
+  const Size&   layoutSize   = viewModel.GetLayoutSize();
+  const int32_t outlineWidth = static_cast<int32_t>(viewModel.GetOutlineWidth());
+  int32_t       penX         = 0;
+  switch(viewModel.GetHorizontalAlignment())
+  {
+    case Alignment::START:
+      break;
+    case Alignment::CENTER:
+      penX += textDirection == Direction::LEFT_TO_RIGHT ? -outlineWidth : outlineWidth;
+      break;
+    case Alignment::END:
+      penX += textDirection == Direction::LEFT_TO_RIGHT ? -outlineWidth * 2 : outlineWidth * 2;
+      break;
+  }
+
+  const Vector2  renderSize    = fullSize.height > 0.0f ? fullSize : tileSize;
+  const uint32_t visibleHeight = static_cast<uint32_t>(tileSize.height);
+  const uint32_t fullHeight    = static_cast<uint32_t>(renderSize.height);
+  const uint32_t topGuard      = std::min(fadeBlurGuardBand, tileOffsetY);
+  const uint32_t visibleEndY   = std::min(fullHeight, tileOffsetY + visibleHeight);
+  const uint32_t bottomGuard   = std::min(fadeBlurGuardBand, fullHeight - visibleEndY);
+  const uint32_t rasterOffsetY = tileOffsetY - topGuard;
+
+  int32_t penY = 0;
+  switch(viewModel.GetVerticalAlignment())
+  {
+    case Alignment::START:
+      break;
+    case Alignment::CENTER:
+      penY = static_cast<int32_t>(std::round(0.5f * (renderSize.height - layoutSize.height)));
+      break;
+    case Alignment::END:
+      penY = static_cast<int32_t>(renderSize.height - layoutSize.height);
+      break;
+  }
+  penY -= static_cast<int32_t>(rasterOffsetY);
+
+  const uint32_t width  = static_cast<uint32_t>(tileSize.width);
+  const uint32_t height = visibleHeight + topGuard + bottomGuard;
+  PixelBuffer    preserved =
+    mImpl->CreateTextGradientPreservedImageBuffer(width, height, false, Pixel::RGBA8888,
+                                                  penX, penY,
+                                                  viewModel.GetStartIndexOfElidedGlyphs(),
+                                                  viewModel.GetEndIndexOfElidedGlyphs());
+
+  if(!Internal::Reveal::PrepareFadeBlurBuffer(preserved, fadeBlurScale, targetBlurRadius))
+  {
+    return {};
+  }
+  if(topGuard > 0u || bottomGuard > 0u)
+  {
+    const uint32_t scaledTop    = static_cast<uint32_t>(std::round(topGuard * fadeBlurScale));
+    const uint32_t scaledHeight = std::max(1u, static_cast<uint32_t>(std::round(visibleHeight * fadeBlurScale)));
+    if(!Internal::Reveal::CropFadeBlurBuffer(preserved,
+                                             0u,
+                                             scaledTop,
+                                             preserved.GetWidth(),
+                                             scaledHeight))
+    {
+      return {};
+    }
+  }
+  return PixelBuffer::Convert(preserved);
 }
 
 PixelBuffer Typesetter::CreateFullBackgroundBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,

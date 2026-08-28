@@ -30,6 +30,9 @@ UNIFORM sampler2D sOverlayStyle;
   #endif
 #endif
 
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED
+UNIFORM sampler2D sTextRevealFadeBlurPreserved;
+#endif
 #ifdef IS_REQUIRED_TEXT_REVEAL
 UNIFORM sampler2D sTextRevealMetadata;
 #endif
@@ -193,8 +196,36 @@ highp float ResolveTextRevealOpacity(highp vec2 texCoord)
 }
 #endif
 
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+highp float ResolveTextRevealFadeBlurProgress(highp float normalizedStart)
+{
+  highp float revealProgress = clamp(uTextRevealProgress, 0.0, 1.0);
+  highp float localProgress;
+  if(uTextRevealFadeDuration <= 0.000001)
+  {
+    localProgress = step(normalizedStart, revealProgress) * step(0.000001, revealProgress);
+  }
+  else
+  {
+    localProgress = clamp((revealProgress - normalizedStart) / uTextRevealFadeDuration, 0.0, 1.0);
+  }
+  localProgress *= sign(max(revealProgress, 0.0));
+  return mix(localProgress, 1.0, step(1.0, revealProgress));
+}
+#endif
+
 void main()
 {
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  mediump vec4 textRevealFadeBlurMetadata = TEXTURE(sTextRevealMetadata, vTexCoord);
+  highp float sharpEncodedStart =
+    floor(textRevealFadeBlurMetadata.r * 255.0 + 0.5) * 256.0 +
+    floor(textRevealFadeBlurMetadata.g * 255.0 + 0.5);
+  highp float sharpRevealProgress = ResolveTextRevealFadeBlurProgress(sharpEncodedStart / 65535.0);
+  highp float blurRevealProgress = ResolveTextRevealFadeBlurProgress(textRevealFadeBlurMetadata.b);
+  mediump vec4 fadeBlurColor;
+#endif
+
 #ifdef IS_REQUIRED_STYLE
   mediump vec4 styleTexture = TEXTURE( sStyle, vTexCoord );
 #endif
@@ -214,6 +245,17 @@ void main()
   mediump vec4 gradientFill = vec4(gradientColor.rgb * textTexture,
                                    gradientColor.a * textTexture * uTextColorAnimatable.a);
   textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  mediump float fadeBlurCoverage = textRevealFadeBlurMetadata.a;
+  mediump vec4 fadeBlurGradientFill = vec4(gradientColor.rgb * fadeBlurCoverage,
+                                           gradientColor.a * fadeBlurCoverage * uTextColorAnimatable.a);
+  #ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED
+  mediump vec4 fadeBlurPreserved = TEXTURE(sTextRevealFadeBlurPreserved, vTexCoord);
+  fadeBlurColor = fadeBlurGradientFill + fadeBlurPreserved * (1.0 - fadeBlurGradientFill.a);
+  #else
+  fadeBlurColor = fadeBlurGradientFill;
+  #endif
+#endif
 #elif defined(IS_REQUIRED_TEXT_GRADIENT)
   mediump float textTexture = TEXTURE(sTexture, vTexCoord).r;
   highp vec2 textGradientCoord =
@@ -221,6 +263,11 @@ void main()
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
   textColor = vec4(gradientColor.rgb * textTexture, gradientColor.a * textTexture * uTextColorAnimatable.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  mediump float fadeBlurCoverage = textRevealFadeBlurMetadata.a;
+  fadeBlurColor = vec4(gradientColor.rgb * fadeBlurCoverage,
+                       gradientColor.a * fadeBlurCoverage * uTextColorAnimatable.a);
+#endif
 #elif defined(IS_REQUIRED_MULTI_COLOR) || defined(IS_REQUIRED_EMOJI)
   // Multiple color or use emoji.
   textColor = TEXTURE(sTexture, vTexCoord);
@@ -252,6 +299,15 @@ void main()
 
 #ifdef IS_REQUIRED_TEXT_GRADIENT
 #elif defined(IS_REQUIRED_MULTI_COLOR)
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  mediump vec4 fadeBlurDefaultColor = uTextColorAnimatable * textRevealFadeBlurMetadata.a;
+  #ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED
+  mediump vec4 fadeBlurPreserved = TEXTURE(sTextRevealFadeBlurPreserved, vTexCoord);
+  fadeBlurColor = fadeBlurDefaultColor + fadeBlurPreserved * (1.0 - fadeBlurDefaultColor.a);
+  #else
+  fadeBlurColor = fadeBlurDefaultColor;
+  #endif
+#endif
 #elif defined(IS_REQUIRED_EMOJI)
   // Single color with emoji.
   mediump float maskTexture = TEXTURE(sMask, vTexCoord).r;
@@ -261,6 +317,15 @@ void main()
   // Emoji color are not animated.
   mediump float vstep = step( 0.0001, textColor.a );
   textColor.rgb = mix(textColor.rgb, uTextColorAnimatable.rgb, vstep * maskTexture * (1.0 - uHasMultipleTextColors));
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  mediump vec4 fadeBlurDefaultColor = uTextColorAnimatable * textRevealFadeBlurMetadata.a;
+  #ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED
+  mediump vec4 fadeBlurPreserved = TEXTURE(sTextRevealFadeBlurPreserved, vTexCoord);
+  fadeBlurColor = fadeBlurDefaultColor + fadeBlurPreserved * (1.0 - fadeBlurDefaultColor.a);
+  #else
+  fadeBlurColor = fadeBlurDefaultColor;
+  #endif
+#endif
 #elif defined(IS_REQUIRED_EMBOSS)
 // Single color with emboss, without emoji.
   mediump float textAlpha = TEXTURE(sTexture, vTexCoord).r;
@@ -289,16 +354,28 @@ void main()
   // Single color without emoji.
   mediump float textTexture = TEXTURE(sTexture, vTexCoord).r;
   textColor = uTextColorAnimatable * textTexture;
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  fadeBlurColor = uTextColorAnimatable * textRevealFadeBlurMetadata.a;
+#endif
 #endif
 
 #ifdef IS_REQUIRED_TEXT_GRADIENT_OVERLAY
   textColor = ApplyTextGradientOverlay(textColor, vTexCoord);
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  fadeBlurColor = ApplyTextGradientOverlay(fadeBlurColor, vTexCoord);
+#endif
 #endif
 
 #ifdef IS_REQUIRED_TEXT_REVEAL
+#ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
+  // p^2 sharp + p(1-p) preblur preserves opacity ~= p while reducing blur to zero.
+  textColor = textColor * (sharpRevealProgress * sharpRevealProgress) +
+              fadeBlurColor * (blurRevealProgress * (1.0 - blurRevealProgress));
+#else
 #ifndef TEXT_REVEAL_RESOLVED_IN_EMBOSS
   // textColor is premultiplied, so scale rgb and alpha together.
   textColor *= ResolveTextRevealOpacity(vTexCoord);
+#endif
 #endif
 #endif
 

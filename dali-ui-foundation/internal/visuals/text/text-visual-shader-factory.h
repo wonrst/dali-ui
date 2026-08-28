@@ -132,6 +132,24 @@ enum Type
 };
 } // namespace TextReveal
 
+namespace TextRevealFadeBlur
+{
+enum Type
+{
+  NO_TEXT_REVEAL_FADE_BLUR = 0,
+  HAS_TEXT_REVEAL_FADE_BLUR
+};
+} // namespace TextRevealFadeBlur
+
+namespace TextRevealFadeBlurPreserved
+{
+enum Type
+{
+  NO_TEXT_REVEAL_FADE_BLUR_PRESERVED = 0,
+  HAS_TEXT_REVEAL_FADE_BLUR_PRESERVED
+};
+} // namespace TextRevealFadeBlurPreserved
+
 /**
  * @brief Collection of current text visual feature.
  */
@@ -148,6 +166,7 @@ public:
   FeatureBuilder& EnableTextGradientMixed(bool enableTextGradientMixed);
   FeatureBuilder& EnableTextGradientOverlay(bool enableTextGradientOverlay);
   FeatureBuilder& EnableTextReveal(bool enableTextReveal);
+  FeatureBuilder& EnableTextRevealFadeBlur(bool enableTextRevealFadeBlur, bool enablePreservedColorBlur);
 
   VisualFactoryCache::ShaderType GetShaderType() const;
   void                           GetVertexShaderPrefixList(std::string& vertexShaderPrefixList) const;
@@ -199,6 +218,16 @@ public:
   {
     return mTextReveal == TextReveal::HAS_TEXT_REVEAL;
   }
+  bool IsEnabledTextRevealFadeBlur() const
+  {
+    return IsEnabledTextReveal() &&
+           mTextRevealFadeBlur == TextRevealFadeBlur::HAS_TEXT_REVEAL_FADE_BLUR;
+  }
+  bool IsEnabledTextRevealFadeBlurPreserved() const
+  {
+    return IsEnabledTextRevealFadeBlur() &&
+           mTextRevealFadeBlurPreserved == TextRevealFadeBlurPreserved::HAS_TEXT_REVEAL_FADE_BLUR_PRESERVED;
+  }
 
 private:
   TextMultiColor::Type
@@ -210,8 +239,10 @@ private:
   TextGradient::Type
     mTextGradient : 2; ///< Whether text uses TextGradient fill, or not. default as TextGradient::NO_TEXT_GRADIENT
   TextGradientOverlay::Type
-    mTextGradientOverlay : 2; ///< Whether text uses TextGradientOverlay, or not. default as TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY
-  TextReveal::Type mTextReveal : 2;          ///< Sequential foreground reveal shader variant. (2 bits to avoid signed 1-bit bitfield issue on MSVC)
+                                    mTextGradientOverlay : 2;         ///< Whether text uses TextGradientOverlay, or not. default as TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY
+  TextReveal::Type                  mTextReveal : 2;                  ///< Sequential foreground reveal shader variant.
+  TextRevealFadeBlur::Type          mTextRevealFadeBlur : 2;          ///< Whether Reveal uses preblur composition.
+  TextRevealFadeBlurPreserved::Type mTextRevealFadeBlurPreserved : 2; ///< Adds preserved-color preblur sampling.
 };
 
 } // namespace TextVisualShaderFeature

@@ -31,6 +31,7 @@
 #include <dali-ui-foundation/internal/text/color-segmentation.h>
 #include <dali-ui-foundation/internal/text/hyphenator.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-start-geometry.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-layout-data.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-placement.h>
@@ -1448,7 +1449,10 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
       mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES, false, textPixelFormat);
   }
 
-  renderInfo.isTextRevealEnabled = parameters.isTextRevealEnabled && !cutoutEnabled && !parameters.isMarqueeEnabled;
+  renderInfo.isTextRevealEnabled         = parameters.isTextRevealEnabled && !cutoutEnabled && !parameters.isMarqueeEnabled;
+  renderInfo.isTextRevealFadeBlurEnabled = renderInfo.isTextRevealEnabled &&
+                                           parameters.textRevealBlurStrength != 0.0f &&
+                                           !embossEnabled;
   if(renderInfo.isTextRevealEnabled && renderInfo.textPixelData)
   {
     const auto     sourceRevealPlan = parameters.textRevealUnit == Internal::Reveal::Unit::WORD
@@ -1470,19 +1474,107 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     // With render scale, the worker raster is larger than the renderer's
     // logical projection. Height tiling uploads only the renderer-sized region
     // from that raster, so Reveal metadata must use those exact tile extents.
-    const uint32_t metadataTileWidth   = isRendererTiled
-                                           ? static_cast<uint32_t>(renderInfo.size.width)
-                                           : metadataWidth;
-    const uint32_t tiledMetadataHeight = isRendererTiled
-                                           ? static_cast<uint32_t>(renderInfo.size.height)
-                                           : metadataHeight;
-    for(uint32_t offsetY = 0u; offsetY < tiledMetadataHeight; offsetY += tileLimit)
+    const uint32_t                       metadataTileWidth   = isRendererTiled
+                                                                 ? static_cast<uint32_t>(renderInfo.size.width)
+                                                                 : metadataWidth;
+    const uint32_t                       tiledMetadataHeight = isRendererTiled
+                                                                 ? static_cast<uint32_t>(renderInfo.size.height)
+                                                                 : metadataHeight;
+    Internal::Reveal::FadeBlurParameters fadeBlurParameters;
+    uint32_t                             fadeBlurGuardBand = 0u;
+    if(renderInfo.isTextRevealFadeBlurEnabled)
     {
-      const uint32_t tileHeight = std::min(tileLimit, tiledMetadataHeight - offsetY);
-      renderInfo.revealMetadataTiles.push_back(
-        mTypesetter->RenderTextRevealMetadata(
-          Vector2(static_cast<float>(metadataTileWidth), static_cast<float>(tileHeight)), textDirection,
-          revealPlan, renderInfo.textRevealFadeDuration, offsetY, fullMetadataSize));
+      const bool hasInlineReplacement = replacementState && replacementState->processingModel &&
+                                        replacementState->projection.HasReplacements();
+      const float referencePixelSize =
+        Internal::Reveal::ResolveFadeBlurReferencePixelSize(*renderModel, hasInlineReplacement);
+      if(referencePixelSize > 0.0f)
+      {
+        fadeBlurParameters                 = Internal::Reveal::ResolveFadeBlurParameters(referencePixelSize,
+                                                                                         parameters.textRevealBlurStrength,
+                                                                                         metadataWidth,
+                                                                                         metadataHeight);
+        fadeBlurGuardBand                  = Internal::Reveal::GetFadeBlurGuardBand(fadeBlurParameters);
+        renderInfo.textRevealFadeBlurScale = fadeBlurParameters.scale;
+      }
+      else
+      {
+        // A replacement-only model has no foreground glyph for Reveal.
+        renderInfo.isTextRevealFadeBlurEnabled = false;
+      }
+    }
+    bool fadeBlurHasPreservedColor = renderInfo.isTextRevealFadeBlurEnabled &&
+                                     (hasMultipleTextColors || containsColorGlyph);
+    bool fadeBlurGenerationFailed = false;
+    if(fadeBlurHasPreservedColor)
+    {
+      for(uint32_t offsetY = 0u; offsetY < tiledMetadataHeight; offsetY += tileLimit)
+      {
+        const uint32_t tileHeight = std::min(tileLimit, tiledMetadataHeight - offsetY);
+        const Vector2  tileSize(static_cast<float>(metadataTileWidth), static_cast<float>(tileHeight));
+        PixelData      preserved = mTypesetter->RenderTextRevealFadeBlurPreserved(tileSize,
+                                                                                  textDirection,
+                                                                                  fadeBlurParameters.scale,
+                                                                                  fadeBlurParameters.targetRadius,
+                                                                                  offsetY,
+                                                                                  fullMetadataSize,
+                                                                                  fadeBlurGuardBand);
+        if(!preserved)
+        {
+          fadeBlurGenerationFailed = true;
+          break;
+        }
+        renderInfo.revealPreservedBlurTiles.push_back(preserved);
+      }
+    }
+
+    auto renderMetadataTiles = [&](bool fadeBlurEnabled)
+    {
+      renderInfo.revealMetadataTiles.clear();
+      for(uint32_t offsetY = 0u; offsetY < tiledMetadataHeight; offsetY += tileLimit)
+      {
+        const uint32_t tileHeight = std::min(tileLimit, tiledMetadataHeight - offsetY);
+        const Vector2  tileSize(static_cast<float>(metadataTileWidth), static_cast<float>(tileHeight));
+        bool           fadeBlurSucceeded = !fadeBlurEnabled;
+        PixelData      metadata          = mTypesetter->RenderTextRevealMetadata(
+          tileSize, textDirection,
+          revealPlan, renderInfo.textRevealFadeDuration, offsetY, fullMetadataSize, false, Size::ZERO,
+          fadeBlurEnabled ? fadeBlurParameters.scale : 0.0f,
+          fadeBlurParameters.targetRadius,
+          fadeBlurEnabled && fadeBlurHasPreservedColor,
+          fadeBlurEnabled ? fadeBlurGuardBand : 0u,
+          &fadeBlurSucceeded);
+        if(!metadata || (fadeBlurEnabled && !fadeBlurSucceeded))
+        {
+          renderInfo.revealMetadataTiles.clear();
+          return false;
+        }
+        renderInfo.revealMetadataTiles.push_back(metadata);
+      }
+      return true;
+    };
+
+    if(!fadeBlurGenerationFailed)
+    {
+      fadeBlurGenerationFailed = !renderMetadataTiles(renderInfo.isTextRevealFadeBlurEnabled);
+    }
+    if(fadeBlurGenerationFailed && renderInfo.isTextRevealFadeBlurEnabled)
+    {
+      // Blur metadata is not interchangeable with Fade metadata. Regenerate
+      // the small Reveal payload without blur before publishing atomically.
+      renderInfo.revealPreservedBlurTiles.clear();
+      renderInfo.isTextRevealFadeBlurEnabled = false;
+      renderInfo.textRevealFadeBlurScale     = 0.0f;
+      fadeBlurHasPreservedColor              = false;
+      if(!renderMetadataTiles(false))
+      {
+        renderInfo.isTextRevealEnabled = false;
+      }
+    }
+    if(!renderInfo.isTextRevealEnabled)
+    {
+      renderInfo.revealMetadataTiles.clear();
+      renderInfo.revealPreservedBlurTiles.clear();
     }
   }
 

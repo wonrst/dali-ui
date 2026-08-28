@@ -130,9 +130,24 @@ public:
    */
   TextAbstraction::FontClient& GetFontClient();
 
-  void BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan);
+  bool BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan);
 
   PixelData EndRevealMetadata();
+
+  /**
+   * @brief Finalizes Fade+Blur metadata.
+   *
+   * The sharp 16-bit ownership remains in R/G. B stores a conservative,
+   * later-start-wins blur ownership and A stores blurred default-glyph
+   * coverage, allowing both values to share the existing metadata sampler.
+   */
+  PixelData EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMask,
+                                      float        fadeBlurScale,
+                                      float        targetBlurRadius,
+                                      bool         coverageAware,
+                                      uint32_t     cropOffsetY,
+                                      uint32_t     cropHeight,
+                                      bool&        fadeBlurSucceeded);
 
 public: // Image buffer creation
   void DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth, const uint32_t bufferHeight,

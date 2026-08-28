@@ -778,11 +778,13 @@ void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
   const Ui::Text::Reveal::Unit authoredUnit              = enabled ? reveal.GetUnit() : Ui::Text::Reveal::Unit::CHARACTER;
   const float                  authoredFadeDurationRatio = enabled ? reveal.GetFadeDurationRatio()
                                                                    : Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
+  const float                  authoredBlurStrength      = enabled ? reveal.GetBlurStrength() : 0.0f;
   auto*                        data                      = Internal::Text::GetTextRevealData(mTextRevealData);
   if((!data && !enabled) ||
      (data && data->enabled == enabled &&
       (!enabled || (data->unit == authoredUnit &&
-                    Dali::Equals(data->fadeDurationRatio, authoredFadeDurationRatio)))))
+                    Dali::Equals(data->fadeDurationRatio, authoredFadeDurationRatio) &&
+                    Dali::Equals(data->blurStrength, authoredBlurStrength)))))
   {
     return;
   }
@@ -791,21 +793,24 @@ void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
   data->enabled           = enabled;
   data->unit              = authoredUnit;
   data->fadeDurationRatio = authoredFadeDurationRatio;
+  data->blurStrength      = authoredBlurStrength;
   ++data->revision;
 
   Ui::Text::Internal::Reveal::Unit unit              = Ui::Text::Internal::Reveal::Unit::DISABLED;
   float                            fadeDurationRatio = Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
+  float                            blurStrength      = 0.0f;
   Property::Index                  progressIndex     = Property::INVALID_INDEX;
   if(data->enabled)
   {
     unit              = Ui::Text::Internal::Reveal::ToInternalUnit(data->unit);
     fadeDurationRatio = data->fadeDurationRatio;
+    blurStrength      = data->blurStrength;
     progressIndex     = EnsureTextRevealProgress();
   }
 
   if(mVisual)
   {
-    Internal::TextVisual::ConfigureTextReveal(mVisual, unit, fadeDurationRatio, progressIndex, data->revision);
+    Internal::TextVisual::ConfigureTextReveal(mVisual, unit, fadeDurationRatio, blurStrength, progressIndex, data->revision);
   }
 
   if(mController && mController->IsAsyncRendering())
@@ -826,6 +831,7 @@ Ui::Text::Reveal LabelImpl::GetTextReveal() const
   Ui::Text::Reveal reveal;
   reveal.SetUnit(data->unit);
   reveal.SetFadeDurationRatio(data->fadeDurationRatio);
+  reveal.SetBlurStrength(data->blurStrength);
   return reveal;
 }
 
@@ -1697,6 +1703,7 @@ void LabelImpl::SetAsyncRendering(bool asyncRendering)
       Internal::TextVisual::ConfigureTextReveal(mVisual,
                                                 Ui::Text::Internal::Reveal::ToInternalUnit(revealData->unit),
                                                 revealData->fadeDurationRatio,
+                                                revealData->blurStrength,
                                                 EnsureTextRevealProgress(),
                                                 revealData->revision);
     }
@@ -4200,6 +4207,7 @@ Ui::Text::AsyncTextParameters LabelImpl::GetAsyncTextParameters(const Text::Asyn
   {
     parameters.textRevealUnit              = Ui::Text::Internal::Reveal::ToInternalUnit(revealData->unit);
     parameters.textRevealFadeDurationRatio = revealData->fadeDurationRatio;
+    parameters.textRevealBlurStrength      = revealData->blurStrength;
   }
   Property::Map variationsMap;
   mController->GetVariationsMap(variationsMap);

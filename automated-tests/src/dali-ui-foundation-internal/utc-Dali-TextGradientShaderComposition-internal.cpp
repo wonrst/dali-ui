@@ -46,7 +46,10 @@ namespace UiInternal  = Dali::Ui::Internal;
 constexpr const char* TEXT_GRADIENT_DEFINE         = "#define IS_REQUIRED_TEXT_GRADIENT\n";
 constexpr const char* TEXT_GRADIENT_MIXED_DEFINE   = "#define IS_REQUIRED_TEXT_GRADIENT_MIXED\n";
 constexpr const char* TEXT_GRADIENT_OVERLAY_DEFINE = "#define IS_REQUIRED_TEXT_GRADIENT_OVERLAY\n";
-constexpr const char* TEXT_REVEAL_DEFINE          = "#define IS_REQUIRED_TEXT_REVEAL\n";
+constexpr const char* TEXT_REVEAL_DEFINE                     = "#define IS_REQUIRED_TEXT_REVEAL\n";
+constexpr const char* TEXT_REVEAL_FADE_BLUR_DEFINE           = "#define IS_REQUIRED_TEXT_REVEAL_FADE_BLUR\n";
+constexpr const char* TEXT_REVEAL_FADE_BLUR_PRESERVED_DEFINE =
+  "#define IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED\n";
 constexpr const char* TEXT_STYLE_DEFINE            = "#define IS_REQUIRED_TEXT_STYLE\n";
 constexpr const char* TEXT_OVERLAY_STYLE_DEFINE    = "#define IS_REQUIRED_TEXT_OVERLAY_STYLE\n";
 constexpr float       EPSILON                      = 0.0001f;
@@ -675,7 +678,15 @@ int UtcDaliTextRevealForegroundShaderCompositionP(void)
   revealOnly.EnableTextReveal(true);
   const std::string revealOnlyPrefix = GetFragmentPrefix(revealOnly);
   DALI_TEST_CHECK(revealOnlyPrefix.find(TEXT_REVEAL_DEFINE) != std::string::npos);
+  DALI_TEST_CHECK(revealOnlyPrefix.find(TEXT_REVEAL_FADE_BLUR_DEFINE) == std::string::npos);
+  DALI_TEST_CHECK(revealOnlyPrefix.find(TEXT_REVEAL_FADE_BLUR_PRESERVED_DEFINE) == std::string::npos);
   DALI_TEST_CHECK(revealOnlyPrefix.find("#define IS_REQUIRED_EMBOSS\n") == std::string::npos);
+
+  TextFeature::FeatureBuilder ordinary;
+  const std::string ordinaryPrefix = GetFragmentPrefix(ordinary);
+  DALI_TEST_CHECK(ordinaryPrefix.find(TEXT_REVEAL_DEFINE) == std::string::npos);
+  DALI_TEST_CHECK(ordinaryPrefix.find(TEXT_REVEAL_FADE_BLUR_DEFINE) == std::string::npos);
+  DALI_TEST_CHECK(ordinaryPrefix.find(TEXT_REVEAL_FADE_BLUR_PRESERVED_DEFINE) == std::string::npos);
 
   TextFeature::FeatureBuilder revealBevel;
   revealBevel.EnableTextReveal(true).EnableEmboss(true);

@@ -131,6 +131,7 @@ public:
    * @param[in] visual The text visual to configure.
    * @param[in] unit The internal reveal unit, or DISABLED to remove reveal rendering.
    * @param[in] fadeDurationRatio The authored automatic sentinel or normalized fade duration.
+   * @param[in] blurStrength The authored automatic sentinel or normalized blur strength.
    * @param[in] progressPropertyIndex The stable Label scene property used as progress.
    * @param[in] revision The revision used to reject stale asynchronous results.
    */
@@ -138,10 +139,11 @@ public:
     Ui::Integration::Visual::Base    visual,
     Ui::Text::Internal::Reveal::Unit unit,
     float                            fadeDurationRatio,
+    float                            blurStrength,
     Property::Index                  progressPropertyIndex,
     uint64_t                         revision)
   {
-    GetVisualObject(visual).ConfigureTextReveal(unit, fadeDurationRatio, progressPropertyIndex, revision);
+    GetVisualObject(visual).ConfigureTextReveal(unit, fadeDurationRatio, blurStrength, progressPropertyIndex, revision);
   }
 
   /**
@@ -441,6 +443,7 @@ private:
     PixelData stylePixelData;
     PixelData overlayStylePixelData;
     PixelData maskPixelData;
+    PixelData revealPreservedBlurPixelData;
     PixelData revealPixelData;
     int32_t   width;
     int32_t   height;
@@ -452,6 +455,7 @@ private:
       stylePixelData(),
       overlayStylePixelData(),
       maskPixelData(),
+      revealPreservedBlurPixelData(),
       revealPixelData(),
       width(width),
       height(height),
@@ -589,13 +593,22 @@ private:
    *
    * @param[in] unit The reveal unit, or DISABLED.
    * @param[in] fadeDurationRatio The authored automatic sentinel or normalized fade duration.
+   * @param[in] blurStrength The authored automatic sentinel or normalized blur strength.
    * @param[in] progressPropertyIndex The Label scene progress property index.
    * @param[in] revision The current reveal configuration revision.
    */
   void ConfigureTextReveal(Ui::Text::Internal::Reveal::Unit unit,
                            float                            fadeDurationRatio,
+                           float                            blurStrength,
                            Property::Index                  progressPropertyIndex,
                            uint64_t                         revision);
+
+  /**
+   * @brief Removes Reveal-only renderer resources while retaining valid sharp text resources.
+   *
+   * @return True when the current synchronous publication was updated in place.
+   */
+  bool TryClearTextRevealResources();
 
   /**
    * @brief Removes all constraints that bind reveal progress to renderers.

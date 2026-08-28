@@ -17,6 +17,7 @@
 
 #include <dali-ui-foundation/internal/text/controller/text-controller-impl.h>
 #include <dali-ui-foundation/internal/text/controller/text-controller.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
@@ -25,6 +26,8 @@
 #include <dali-ui-foundation/public-api/animation/duration.h>
 #include <dali-ui-foundation/public-api/animation/label-animation-bridge.autogen.h>
 #include <dali-ui-foundation/public-api/text/style/reveal.h>
+#include <dali-ui-foundation/public-api/text/styled-text/font-span.h>
+#include <dali-ui-foundation/public-api/text/styled-text/styled-text-builder.h>
 #include <dali-ui-foundation/public-api/views/text-controls/label.h>
 #include <dali-ui-test-suite-utils.h>
 #include <dali.h>
@@ -69,7 +72,8 @@ float CalculateRevealOpacityReference(float progress, float unitStart, float fad
 UiText::ControllerPtr BuildReplacementController(const char*                                 text,
                                                  std::initializer_list<UiText::CharacterRun> ranges,
                                                  const Size&                                 size,
-                                                 bool                                        elideText = false)
+                                                 bool                                        elideText         = false,
+                                                 float                                       replacementHeight = 24.0f)
 {
   UiText::ControllerPtr     controller = UiText::Controller::New();
   UiText::Controller::Impl& impl       = UiText::Controller::Impl::GetImplementation(*controller.Get());
@@ -84,7 +88,7 @@ UiText::ControllerPtr BuildReplacementController(const char*                    
     UiText::ReplacementRunSnapshot replacement;
     replacement.logicalCharacterRange = range;
     replacement.metrics.width         = 32.0f;
-    replacement.metrics.height        = 24.0f;
+    replacement.metrics.height        = replacementHeight;
     replacement.type                  = UiText::ReplacementType::IMAGE;
     replacement.occurrenceIdentity    = identity++;
     replacement.image.source          = "unused.png";
@@ -94,6 +98,44 @@ UiText::ControllerPtr BuildReplacementController(const char*                    
   source.hasValidReplacementSource            = !source.runs.Empty();
   impl.GetOrCreateReplacementSourceSnapshot() = source;
   controller->Relayout(size);
+  return controller;
+}
+
+UiText::ControllerPtr BuildReferenceMetricController(const char* text,
+                                                     float       fontSize,
+                                                     float       relativeLineSize,
+                                                     float       uiScale,
+                                                     const Size& layoutSize)
+{
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetMultiLineEnabled(true);
+  controller->SetText(text);
+  controller->SetDefaultFontSize(fontSize, UiText::Controller::PIXEL_SIZE);
+  controller->SetRelativeLineSize(relativeLineSize);
+  controller->SetUiScale(uiScale);
+  controller->Relayout(layoutSize);
+  return controller;
+}
+
+UiText::ControllerPtr BuildMixedSizeReferenceMetricController(float       largeSize,
+                                                              bool        heading,
+                                                              const Size& layoutSize)
+{
+  const char*               text    = heading
+                                        ? "Heading body line body line body line body line body line body line"
+                                        : "small BIG small";
+  UiText::StyledTextBuilder builder = UiText::StyledTextBuilder::New(text);
+  UiText::FontAttributes    attributes;
+  attributes.SetSize(largeSize);
+  DALI_TEST_CHECK(builder.SetSpan(UiText::FontSpan::New(attributes),
+                                  heading ? 0u : 6u,
+                                  heading ? 7u : 9u));
+
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetDefaultFontSize(20.0f, UiText::Controller::PIXEL_SIZE);
+  controller->SetStyledText(builder.Build());
+  controller->SetMultiLineEnabled(true);
+  controller->Relayout(layoutSize);
   return controller;
 }
 } // namespace
@@ -877,6 +919,49 @@ int UtcDaliTextRevealTileBoundaryMetadataP(void)
                      0,
                      TEST_LOCATION);
   }
+
+  const Reveal::FadeBlurParameters fadeBlurParameters = Reveal::ResolveFadeBlurParameters(
+    Reveal::ResolveFadeBlurReferencePixelSize(*model, false),
+    UiText::Reveal::AUTO_BLUR_STRENGTH,
+    static_cast<uint32_t>(fullSize.width),
+    static_cast<uint32_t>(fullSize.height));
+  const uint32_t guardBand = Reveal::GetFadeBlurGuardBand(fadeBlurParameters);
+  const uint32_t fadeBlurBoundary = std::max(4u, boundary & ~3u);
+  PixelData fullFadeBlur = typesetter->RenderTextRevealMetadata(
+    fullSize, UiText::Direction::LEFT_TO_RIGHT, finalPlan, fadeDuration,
+    0u, Size::ZERO, false, Size::ZERO,
+    fadeBlurParameters.scale, fadeBlurParameters.targetRadius, false, guardBand);
+  PixelData upperFadeBlur = typesetter->RenderTextRevealMetadata(
+    Vector2(fullSize.width, static_cast<float>(fadeBlurBoundary)),
+    UiText::Direction::LEFT_TO_RIGHT, finalPlan, fadeDuration, 0u, fullSize,
+    false, Size::ZERO, fadeBlurParameters.scale, fadeBlurParameters.targetRadius, false, guardBand);
+  PixelData lowerFadeBlur = typesetter->RenderTextRevealMetadata(
+    Vector2(fullSize.width, fullSize.height - static_cast<float>(fadeBlurBoundary)),
+    UiText::Direction::LEFT_TO_RIGHT, finalPlan, fadeDuration, fadeBlurBoundary, fullSize,
+    false, Size::ZERO, fadeBlurParameters.scale, fadeBlurParameters.targetRadius, false, guardBand);
+  DALI_TEST_CHECK(fullFadeBlur && upperFadeBlur && lowerFadeBlur);
+  const Dali::Integration::PixelDataBuffer fullFadeBlurPixels =
+    Dali::Integration::GetPixelDataBuffer(fullFadeBlur);
+  const Dali::Integration::PixelDataBuffer upperFadeBlurPixels =
+    Dali::Integration::GetPixelDataBuffer(upperFadeBlur);
+  const Dali::Integration::PixelDataBuffer lowerFadeBlurPixels =
+    Dali::Integration::GetPixelDataBuffer(lowerFadeBlur);
+  for(uint32_t y = 0u; y < fadeBlurBoundary; ++y)
+  {
+    DALI_TEST_EQUALS(std::memcmp(fullFadeBlurPixels.buffer + y * fullFadeBlur.GetStrideBytes(),
+                                 upperFadeBlurPixels.buffer + y * upperFadeBlur.GetStrideBytes(),
+                                 rowBytes),
+                     0,
+                     TEST_LOCATION);
+  }
+  for(uint32_t y = fadeBlurBoundary; y < fullFadeBlur.GetHeight(); ++y)
+  {
+    DALI_TEST_EQUALS(std::memcmp(fullFadeBlurPixels.buffer + y * fullFadeBlur.GetStrideBytes(),
+                                 lowerFadeBlurPixels.buffer + (y - fadeBlurBoundary) * lowerFadeBlur.GetStrideBytes(),
+                                 rowBytes),
+                     0,
+                     TEST_LOCATION);
+  }
   END_TEST;
 }
 
@@ -960,5 +1045,820 @@ int UtcDaliTextRevealMetadataOwnershipHaloP(void)
   std::vector<uint8_t> empty(3u * 3u * PIXEL_SIZE, 0u);
   Reveal::ExpandMetadataOwnership(empty.data(), 3u, 3u);
   DALI_TEST_CHECK(std::all_of(empty.begin(), empty.end(), [](uint8_t value) { return value == 0u; }));
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurMetadataP(void)
+{
+  UiTestApplication     application;
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetText("AV");
+  controller->SetDefaultFontSize(80.0f, UiText::Controller::PIXEL_SIZE);
+  controller->SetCharacterSpacing(-20.0f);
+  const Vector2 layoutSize(220.0f, 112.0f);
+  controller->Relayout(layoutSize);
+
+  const UiText::ModelInterface* model = controller->GetRenderTextModel();
+  DALI_TEST_CHECK(model);
+  UiText::TypesetterPtr typesetter = UiText::Typesetter::New(model);
+  const Reveal::Plan sourcePlan = Reveal::BuildCharacterPlan(*model, 0.5f);
+  const Reveal::Plan finalPlan  = typesetter->CreateFinalRevealPlan(sourcePlan, Reveal::Unit::CHARACTER);
+  DALI_TEST_EQUALS(finalPlan.GetUnitCount(), 2u, TEST_LOCATION);
+
+  float ordinaryFadeDuration = 0.0f;
+  PixelData ordinary = typesetter->RenderTextRevealMetadata(layoutSize,
+                                                            UiText::Direction::LEFT_TO_RIGHT,
+                                                            finalPlan,
+                                                            ordinaryFadeDuration);
+  float fadeBlurDuration = 0.0f;
+  PixelData fadeBlur = typesetter->RenderTextRevealMetadata(layoutSize,
+                                                            UiText::Direction::LEFT_TO_RIGHT,
+                                                            finalPlan,
+                                                            fadeBlurDuration,
+                                                            0u,
+                                                            Size::ZERO,
+                                                            false,
+                                                            Size::ZERO,
+                                                            0.25f);
+  DALI_TEST_CHECK(ordinary && fadeBlur);
+  DALI_TEST_EQUALS(fadeBlurDuration, ordinaryFadeDuration, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(fadeBlur.GetPixelFormat(), Pixel::RGBA8888, TEST_LOCATION);
+  DALI_TEST_EQUALS(fadeBlur.GetWidth(), ordinary.GetWidth(), TEST_LOCATION);
+  DALI_TEST_EQUALS(fadeBlur.GetHeight(), ordinary.GetHeight(), TEST_LOCATION);
+
+  const Dali::Integration::PixelDataBuffer ordinaryPixels = Dali::Integration::GetPixelDataBuffer(ordinary);
+  const Dali::Integration::PixelDataBuffer fadeBlurPixels = Dali::Integration::GetPixelDataBuffer(fadeBlur);
+  DALI_TEST_CHECK(ordinaryPixels.buffer && fadeBlurPixels.buffer);
+
+  bool foundBlurCoverage       = false;
+  bool foundBlurHalo           = false;
+  bool foundLaterBlurOwnership = false;
+  for(uint32_t y = 0u; y < fadeBlur.GetHeight(); ++y)
+  {
+    const uint8_t* ordinaryRow = ordinaryPixels.buffer + static_cast<size_t>(y) * ordinary.GetStrideBytes();
+    const uint8_t* fadeBlurRow = fadeBlurPixels.buffer + static_cast<size_t>(y) * fadeBlur.GetStrideBytes();
+    for(uint32_t x = 0u; x < fadeBlur.GetWidth(); ++x)
+    {
+      const uint8_t* ordinaryPixel = ordinaryRow + static_cast<size_t>(x) * 4u;
+      const uint8_t* fadeBlurPixel = fadeBlurRow + static_cast<size_t>(x) * 4u;
+      foundBlurCoverage |= fadeBlurPixel[3u] != 0u;
+      foundBlurHalo |= ordinaryPixel[2u] == 0u && fadeBlurPixel[3u] != 0u;
+
+      if(ordinaryPixel[2u] != 0u)
+      {
+        DALI_TEST_EQUALS(fadeBlurPixel[0u], ordinaryPixel[0u], TEST_LOCATION);
+        DALI_TEST_EQUALS(fadeBlurPixel[1u], ordinaryPixel[1u], TEST_LOCATION);
+        const uint32_t sharpStart = static_cast<uint32_t>(ordinaryPixel[0u]) * 256u + ordinaryPixel[1u];
+        const uint32_t blurStart  = static_cast<uint32_t>(fadeBlurPixel[2u]) * 257u;
+        DALI_TEST_CHECK(blurStart >= sharpStart);
+        foundLaterBlurOwnership |= blurStart > sharpStart + 256u;
+      }
+    }
+  }
+  DALI_TEST_CHECK(foundBlurCoverage);
+  DALI_TEST_CHECK(foundBlurHalo);
+  DALI_TEST_CHECK(foundLaterBlurOwnership);
+
+  TextAbstraction::Segmentation segmentation  = TextAbstraction::Segmentation::New();
+  const Reveal::Plan            wordSourcePlan = Reveal::BuildPlan(*model, Reveal::Unit::WORD, 0.5f, segmentation);
+  const Reveal::Plan            wordFinalPlan  = typesetter->CreateFinalRevealPlan(wordSourcePlan, Reveal::Unit::WORD);
+  DALI_TEST_EQUALS(wordFinalPlan.GetUnitCount(), 1u, TEST_LOCATION);
+  float     wordFadeDuration = 0.0f;
+  PixelData wordFadeBlur     = typesetter->RenderTextRevealMetadata(
+    layoutSize,
+    UiText::Direction::LEFT_TO_RIGHT,
+    wordFinalPlan,
+    wordFadeDuration,
+    0u,
+    Size::ZERO,
+    false,
+    Size::ZERO,
+    0.25f);
+  DALI_TEST_CHECK(wordFadeBlur);
+  const Dali::Integration::PixelDataBuffer wordPixels = Dali::Integration::GetPixelDataBuffer(wordFadeBlur);
+  DALI_TEST_CHECK(wordPixels.buffer);
+  bool foundWordBlurCoverage = false;
+  for(uint32_t y = 0u; y < wordFadeBlur.GetHeight(); ++y)
+  {
+    const uint8_t* wordRow = wordPixels.buffer + static_cast<size_t>(y) * wordFadeBlur.GetStrideBytes();
+    for(uint32_t x = 0u; x < wordFadeBlur.GetWidth(); ++x)
+    {
+      foundWordBlurCoverage |= wordRow[static_cast<size_t>(x) * 4u + 3u] != 0u;
+    }
+  }
+  DALI_TEST_CHECK(foundWordBlurCoverage);
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurProcessorP(void)
+{
+  constexpr uint32_t PIXEL_SIZE = 4u;
+
+  PixelBuffer invalid;
+  DALI_TEST_CHECK(!Reveal::PrepareFadeBlurBuffer(invalid, 0.5f, 4.0f));
+  DALI_TEST_CHECK(!Reveal::CropFadeBlurBuffer(invalid, 0u, 0u, 1u, 1u));
+
+  PixelBuffer cropSource = PixelBuffer::New(4u, 4u, Pixel::L8);
+  DALI_TEST_CHECK(cropSource);
+  DALI_TEST_CHECK(!Reveal::CropFadeBlurBuffer(cropSource, 4u, 0u, 1u, 1u));
+  DALI_TEST_CHECK(!Reveal::CropFadeBlurBuffer(cropSource, 0u, 4u, 1u, 1u));
+  DALI_TEST_CHECK(!Reveal::CropFadeBlurBuffer(cropSource,
+                                              std::numeric_limits<uint32_t>::max(),
+                                              0u,
+                                              2u,
+                                              1u));
+  DALI_TEST_EQUALS(cropSource.GetWidth(), 4u, TEST_LOCATION);
+  DALI_TEST_EQUALS(cropSource.GetHeight(), 4u, TEST_LOCATION);
+
+  // Channel-independent averaging must preserve premultiplied RGBA. A convex
+  // combination cannot make a color channel exceed its alpha channel.
+  PixelBuffer rgba = PixelBuffer::New(8u, 8u, Pixel::RGBA8888);
+  DALI_TEST_CHECK(rgba);
+  for(uint32_t y = 0u; y < rgba.GetHeight(); ++y)
+  {
+    uint8_t* row = rgba.GetBuffer() + static_cast<size_t>(y) * rgba.GetStrideBytes();
+    for(uint32_t x = 0u; x < rgba.GetWidth(); ++x)
+    {
+      uint8_t*      pixel = row + static_cast<size_t>(x) * PIXEL_SIZE;
+      const uint8_t alpha = static_cast<uint8_t>((x + y) * 16u);
+      pixel[0u]           = static_cast<uint8_t>(alpha / 2u);
+      pixel[1u]           = alpha;
+      pixel[2u]           = static_cast<uint8_t>(alpha / 4u);
+      pixel[3u]           = alpha;
+    }
+  }
+  DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(rgba, 0.25f, 8.0f));
+  DALI_TEST_EQUALS(rgba.GetWidth(), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(rgba.GetHeight(), 2u, TEST_LOCATION);
+  for(uint32_t y = 0u; y < rgba.GetHeight(); ++y)
+  {
+    const uint8_t* row = rgba.GetBuffer() + static_cast<size_t>(y) * rgba.GetStrideBytes();
+    for(uint32_t x = 0u; x < rgba.GetWidth(); ++x)
+    {
+      const uint8_t* pixel = row + static_cast<size_t>(x) * PIXEL_SIZE;
+      DALI_TEST_CHECK(pixel[0u] <= pixel[3u]);
+      DALI_TEST_CHECK(pixel[1u] <= pixel[3u]);
+      DALI_TEST_CHECK(pixel[2u] <= pixel[3u]);
+    }
+  }
+
+  PixelBuffer negligibleRgba = PixelBuffer::New(8u, 8u, Pixel::RGBA8888);
+  DALI_TEST_CHECK(negligibleRgba);
+  memset(negligibleRgba.GetBuffer(), 1u,
+         static_cast<size_t>(negligibleRgba.GetStrideBytes()) * negligibleRgba.GetHeight());
+  DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(negligibleRgba, 0.25f, 8.0f));
+  const size_t negligibleRgbaSize = static_cast<size_t>(negligibleRgba.GetStrideBytes()) * negligibleRgba.GetHeight();
+  DALI_TEST_CHECK(std::all_of(negligibleRgba.GetBuffer(),
+                              negligibleRgba.GetBuffer() + negligibleRgbaSize,
+                              [](uint8_t value)
+  { return value == 0u; }));
+
+  // Direct low-resolution projection writes only metadata A and avoids a
+  // full-size PixelBuffer temporary.
+  PixelBuffer coverage = PixelBuffer::New(8u, 8u, Pixel::L8);
+  DALI_TEST_CHECK(coverage);
+  memset(coverage.GetBuffer(), 0u, static_cast<size_t>(coverage.GetStrideBytes()) * coverage.GetHeight());
+  coverage.GetBuffer()[3u * coverage.GetStrideBytes() + 3u] = 255u;
+  DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(coverage, 0.25f, 4.0f));
+  std::vector<uint8_t> projected(8u * 8u * PIXEL_SIZE, 0u);
+  for(size_t index = 0u; index < projected.size(); index += PIXEL_SIZE)
+  {
+    projected[index]      = 1u;
+    projected[index + 1u] = 2u;
+    projected[index + 2u] = 3u;
+  }
+  Reveal::WriteFadeBlurCoverage(coverage, projected.data(), 8u, 8u);
+  bool foundCoverage = false;
+  for(size_t index = 0u; index < projected.size(); index += PIXEL_SIZE)
+  {
+    DALI_TEST_EQUALS(projected[index], 1u, TEST_LOCATION);
+    DALI_TEST_EQUALS(projected[index + 1u], 2u, TEST_LOCATION);
+    DALI_TEST_EQUALS(projected[index + 2u], 3u, TEST_LOCATION);
+    foundCoverage |= projected[index + 3u] != 0u;
+  }
+  DALI_TEST_CHECK(foundCoverage);
+
+  auto setOwnership = [PIXEL_SIZE](std::vector<uint8_t>& metadata,
+                                   uint32_t              width,
+                                   uint32_t              x,
+                                   uint32_t              y,
+                                   uint16_t              encodedStart,
+                                   uint8_t               coverageValue)
+  {
+    uint8_t* pixel = metadata.data() + (static_cast<size_t>(y) * width + x) * PIXEL_SIZE;
+    pixel[0u]      = static_cast<uint8_t>(encodedStart >> 8u);
+    pixel[1u]      = static_cast<uint8_t>(encodedStart & 0xffu);
+    pixel[2u]      = 255u;
+    pixel[3u]      = coverageValue;
+  };
+
+  constexpr uint32_t   WIDTH  = 25u;
+  constexpr uint32_t   HEIGHT = 25u;
+  std::vector<uint8_t> octagon(static_cast<size_t>(WIDTH) * HEIGHT * PIXEL_SIZE, 0u);
+  setOwnership(octagon, WIDTH, 12u, 12u, 0x8000u, 255u);
+  Reveal::MaterializeFadeBlurTiming(octagon.data(), WIDTH, HEIGHT, 1.0f, 4.0f,
+                                    false);
+  const size_t squareCorner = (static_cast<size_t>(17u) * WIDTH + 17u) * PIXEL_SIZE + 2u;
+  DALI_TEST_EQUALS(octagon[squareCorner], 0u, TEST_LOCATION);
+
+  // Overlapping footprints still select the later unit, so a future glyph
+  // cannot borrow an earlier unit's blur timing.
+  std::vector<uint8_t> conflict(static_cast<size_t>(WIDTH) * HEIGHT * PIXEL_SIZE, 0u);
+  setOwnership(conflict, WIDTH, 8u, 12u, 0x2000u, 255u);
+  setOwnership(conflict, WIDTH, 16u, 12u, 0xd000u, 255u);
+  Reveal::MaterializeFadeBlurTiming(conflict.data(), WIDTH, HEIGHT, 1.0f, 4.0f,
+                                    false);
+  const size_t overlap = (static_cast<size_t>(12u) * WIDTH + 12u) * PIXEL_SIZE + 2u;
+  const size_t late    = (static_cast<size_t>(12u) * WIDTH + 16u) * PIXEL_SIZE + 2u;
+  DALI_TEST_CHECK(conflict[late] != 0u);
+  DALI_TEST_EQUALS(conflict[overlap], conflict[late], TEST_LOCATION);
+
+  // Coverage-aware timing discards only negligible normal-glyph halo. The
+  // preserved-color path passes false and therefore never applies this cut.
+  std::vector<uint8_t> negligible(static_cast<size_t>(WIDTH) * HEIGHT * PIXEL_SIZE, 0u);
+  setOwnership(negligible, WIDTH, 12u, 12u, 0x8000u, 1u);
+  Reveal::MaterializeFadeBlurTiming(negligible.data(), WIDTH, HEIGHT, 1.0f, 4.0f,
+                                    true);
+  for(size_t index = 2u; index < negligible.size(); index += PIXEL_SIZE)
+  {
+    DALI_TEST_EQUALS(negligible[index], 0u, TEST_LOCATION);
+  }
+
+  // The optimized footprint must cover every meaningful texel produced by
+  // the selected blur and LINEAR projection at both supported radii/scales.
+  // This guards the spatial safety contract independently of font metrics.
+  for(float scale : {1.0f, 0.5f, 0.25f})
+  {
+    for(float radius : {4.0f, 8.0f})
+    {
+      constexpr uint32_t MASK_SIZE = 64u;
+      PixelBuffer        mask      = PixelBuffer::New(MASK_SIZE, MASK_SIZE, Pixel::L8);
+      DALI_TEST_CHECK(mask);
+      memset(mask.GetBuffer(), 0u, static_cast<size_t>(mask.GetStrideBytes()) * mask.GetHeight());
+
+      std::vector<uint8_t> timing(static_cast<size_t>(MASK_SIZE) * MASK_SIZE * PIXEL_SIZE, 0u);
+      for(uint32_t y = 28u; y < 36u; ++y)
+      {
+        memset(mask.GetBuffer() + static_cast<size_t>(y) * mask.GetStrideBytes() + 28u, 255u, 8u);
+        for(uint32_t x = 28u; x < 36u; ++x)
+        {
+          setOwnership(timing, MASK_SIZE, x, y, 0x8000u, 255u);
+        }
+      }
+
+      Reveal::ExpandMetadataOwnership(timing.data(), MASK_SIZE, MASK_SIZE);
+      DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(mask, scale, radius));
+      Reveal::WriteFadeBlurCoverage(mask, timing.data(), MASK_SIZE, MASK_SIZE);
+      Reveal::MaterializeFadeBlurTiming(timing.data(), MASK_SIZE, MASK_SIZE, scale, radius,
+                                        true);
+      for(size_t index = 0u; index < timing.size(); index += PIXEL_SIZE)
+      {
+        if(timing[index + 3u] >= 2u)
+        {
+          DALI_TEST_CHECK(timing[index + 2u] != 0u);
+        }
+      }
+    }
+  }
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurAdaptivePolicyP(void)
+{
+  UiTestApplication application;
+
+  struct Expected
+  {
+    float    referencePixelSize;
+    float    radius;
+    float    scale;
+    uint32_t supportRadius;
+  };
+  const Expected expected[] = {
+    {12.0f, 4.0f, 0.5f, 2u},
+    {15.0f, 4.0f, 0.5f, 2u},
+    {18.0f, 4.0f, 0.5f, 2u},
+    {24.0f, 4.0f, 0.5f, 2u},
+    {30.0f, 4.0f, 0.5f, 2u},
+    {42.0f, 5.0f, 0.5f, 3u},
+    {63.0f, 8.0f, 0.25f, 2u},
+  };
+  for(const Expected& item : expected)
+  {
+    const Reveal::FadeBlurParameters automatic =
+      Reveal::ResolveFadeBlurParameters(item.referencePixelSize, UiText::Reveal::AUTO_BLUR_STRENGTH);
+    const Reveal::FadeBlurParameters explicitFull =
+      Reveal::ResolveFadeBlurParameters(item.referencePixelSize, 1.0f);
+    DALI_TEST_EQUALS(automatic.referencePixelSize, item.referencePixelSize, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(automatic.targetRadius, item.radius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(automatic.scale, item.scale, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(automatic.supportRadius, item.supportRadius, TEST_LOCATION);
+    DALI_TEST_EQUALS(automatic.firstRadius + automatic.secondRadius,
+                     automatic.supportRadius,
+                     TEST_LOCATION);
+    DALI_TEST_CHECK(automatic.firstRadius > 0u);
+    DALI_TEST_CHECK(automatic.secondRadius > 0u);
+    DALI_TEST_EQUALS(Reveal::GetFadeBlurGuardBand(automatic) % 4u, 0u, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.referencePixelSize, automatic.referencePixelSize, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.targetRadius, automatic.targetRadius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.scale, automatic.scale, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.supportRadius, automatic.supportRadius, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.firstRadius, automatic.firstRadius, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitFull.secondRadius, automatic.secondRadius, TEST_LOCATION);
+    DALI_TEST_EQUALS(Reveal::GetFadeBlurGuardBand(explicitFull),
+                     Reveal::GetFadeBlurGuardBand(automatic),
+                     TEST_LOCATION);
+
+    float previousAdaptiveRadius = 0.0f;
+    for(float strength : {0.25f, 0.5f, 0.75f, 1.0f})
+    {
+      const Reveal::FadeBlurParameters explicitStrength =
+        Reveal::ResolveFadeBlurParameters(item.referencePixelSize, strength);
+      DALI_TEST_CHECK(explicitStrength.targetRadius > previousAdaptiveRadius);
+      DALI_TEST_CHECK(explicitStrength.targetRadius <= automatic.targetRadius);
+      DALI_TEST_EQUALS(explicitStrength.scale, automatic.scale, EPSILON, TEST_LOCATION);
+      previousAdaptiveRadius = explicitStrength.targetRadius;
+    }
+  }
+
+  const Reveal::FadeBlurParameters automatic20 =
+    Reveal::ResolveFadeBlurParameters(20.0f, UiText::Reveal::AUTO_BLUR_STRENGTH, 320u, 96u);
+  float previousRadius = 0.0f;
+  for(float strength : {0.25f, 0.5f, 0.75f, 1.0f})
+  {
+    const Reveal::FadeBlurParameters explicitStrength =
+      Reveal::ResolveFadeBlurParameters(20.0f, strength, 320u, 96u);
+    DALI_TEST_CHECK(explicitStrength.targetRadius > previousRadius);
+    DALI_TEST_EQUALS(explicitStrength.targetRadius,
+                     automatic20.targetRadius * std::sqrt(strength),
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_CHECK(explicitStrength.targetRadius >= automatic20.targetRadius * strength);
+    DALI_TEST_CHECK(explicitStrength.targetRadius <= automatic20.targetRadius);
+    DALI_TEST_EQUALS(explicitStrength.scale, automatic20.scale, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitStrength.lowResolutionWidth, automatic20.lowResolutionWidth, TEST_LOCATION);
+    DALI_TEST_EQUALS(explicitStrength.lowResolutionHeight, automatic20.lowResolutionHeight, TEST_LOCATION);
+    previousRadius = explicitStrength.targetRadius;
+  }
+
+  const Reveal::FadeBlurParameters explicitFull20 =
+    Reveal::ResolveFadeBlurParameters(20.0f, 1.0f, 320u, 96u);
+  DALI_TEST_EQUALS(explicitFull20.targetRadius, automatic20.targetRadius, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(explicitFull20.scale, automatic20.scale, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(explicitFull20.supportRadius, automatic20.supportRadius, TEST_LOCATION);
+  DALI_TEST_EQUALS(explicitFull20.lowResolutionWidth, automatic20.lowResolutionWidth, TEST_LOCATION);
+  DALI_TEST_EQUALS(explicitFull20.lowResolutionHeight, automatic20.lowResolutionHeight, TEST_LOCATION);
+
+  PixelBuffer automaticBuffer = PixelBuffer::New(64u, 32u, Pixel::RGBA8888);
+  PixelBuffer explicitBuffer  = PixelBuffer::New(64u, 32u, Pixel::RGBA8888);
+  DALI_TEST_CHECK(automaticBuffer && explicitBuffer);
+  for(uint32_t y = 0u; y < automaticBuffer.GetHeight(); ++y)
+  {
+    for(uint32_t x = 0u; x < automaticBuffer.GetWidth(); ++x)
+    {
+      const size_t index = static_cast<size_t>(y) * automaticBuffer.GetStrideBytes() + x * 4u;
+      automaticBuffer.GetBuffer()[index]      = static_cast<uint8_t>(x * 3u);
+      automaticBuffer.GetBuffer()[index + 1u] = static_cast<uint8_t>(y * 7u);
+      automaticBuffer.GetBuffer()[index + 2u] = static_cast<uint8_t>(x + y);
+      automaticBuffer.GetBuffer()[index + 3u] = static_cast<uint8_t>((x * 5u + y * 3u) & 0xffu);
+    }
+  }
+  memcpy(explicitBuffer.GetBuffer(),
+         automaticBuffer.GetBuffer(),
+         static_cast<size_t>(automaticBuffer.GetStrideBytes()) * automaticBuffer.GetHeight());
+  DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(automaticBuffer,
+                                                automatic20.scale,
+                                                automatic20.targetRadius));
+  DALI_TEST_CHECK(Reveal::PrepareFadeBlurBuffer(explicitBuffer,
+                                                explicitFull20.scale,
+                                                explicitFull20.targetRadius));
+  DALI_TEST_EQUALS(explicitBuffer.GetWidth(), automaticBuffer.GetWidth(), TEST_LOCATION);
+  DALI_TEST_EQUALS(explicitBuffer.GetHeight(), automaticBuffer.GetHeight(), TEST_LOCATION);
+  DALI_TEST_EQUALS(memcmp(explicitBuffer.GetBuffer(),
+                          automaticBuffer.GetBuffer(),
+                          static_cast<size_t>(automaticBuffer.GetStrideBytes()) * automaticBuffer.GetHeight()),
+                   0,
+                   TEST_LOCATION);
+
+  constexpr uint32_t METADATA_WIDTH  = 32u;
+  constexpr uint32_t METADATA_HEIGHT = 16u;
+  std::vector<uint8_t> automaticMetadata(METADATA_WIDTH * METADATA_HEIGHT * 4u, 0u);
+  for(uint32_t x = 4u; x < 28u; x += 4u)
+  {
+    uint8_t* pixel = automaticMetadata.data() + (8u * METADATA_WIDTH + x) * 4u;
+    pixel[0u]      = static_cast<uint8_t>(x * 7u);
+    pixel[1u]      = static_cast<uint8_t>(x * 3u);
+    pixel[2u]      = 255u;
+    pixel[3u]      = 255u;
+  }
+  std::vector<uint8_t> explicitMetadata = automaticMetadata;
+  Reveal::MaterializeFadeBlurTiming(automaticMetadata.data(),
+                                    METADATA_WIDTH,
+                                    METADATA_HEIGHT,
+                                    automatic20.scale,
+                                    automatic20.targetRadius,
+                                    false);
+  Reveal::MaterializeFadeBlurTiming(explicitMetadata.data(),
+                                    METADATA_WIDTH,
+                                    METADATA_HEIGHT,
+                                    explicitFull20.scale,
+                                    explicitFull20.targetRadius,
+                                    false);
+  DALI_TEST_EQUALS(memcmp(explicitMetadata.data(),
+                          automaticMetadata.data(),
+                          automaticMetadata.size()),
+                   0,
+                   TEST_LOCATION);
+
+  const Reveal::FadeBlurParameters smallRaster =
+    Reveal::ResolveFadeBlurParameters(15.0f, UiText::Reveal::AUTO_BLUR_STRENGTH, 320u, 96u);
+  DALI_TEST_EQUALS(smallRaster.targetRadius, 4.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(smallRaster.scale, 0.5f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(smallRaster.lowResolutionWidth, 160u, TEST_LOCATION);
+  DALI_TEST_EQUALS(smallRaster.lowResolutionHeight, 48u, TEST_LOCATION);
+
+  const Reveal::FadeBlurParameters fhdSmallText =
+    Reveal::ResolveFadeBlurParameters(15.0f, UiText::Reveal::AUTO_BLUR_STRENGTH, 1920u, 1080u);
+  DALI_TEST_EQUALS(fhdSmallText.targetRadius, 4.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(fhdSmallText.scale, 0.25f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(fhdSmallText.supportRadius, 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(fhdSmallText.lowResolutionWidth, 480u, TEST_LOCATION);
+  DALI_TEST_EQUALS(fhdSmallText.lowResolutionHeight, 270u, TEST_LOCATION);
+
+  // The model reference uses final pixel-space line metrics and is therefore
+  // already adjusted for DPI, effective scale, and fitting.
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetText("Adaptive line metric");
+  controller->SetDefaultFontSize(40.0f, UiText::Controller::PIXEL_SIZE);
+  controller->Relayout(Vector2(480.0f, 128.0f));
+  const UiText::ModelInterface* model = controller->GetRenderTextModel();
+  DALI_TEST_CHECK(model && model->GetNumberOfLines() > 0u);
+  float manualReference = 0.0f;
+  for(UiText::Length index = 0u; index < model->GetNumberOfLines(); ++index)
+  {
+    manualReference = std::max(manualReference,
+                               model->GetLines()[index].ascender - model->GetLines()[index].descender);
+  }
+  DALI_TEST_EQUALS(Reveal::ResolveFadeBlurReferencePixelSize(*model, false),
+                   manualReference,
+                   EPSILON,
+                   TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurAdaptiveReferenceMetricP(void)
+{
+  UiTestApplication application;
+
+  constexpr float LINE_HEIGHTS[] = {0.8f, 1.0f, 1.2f, 1.5f, 2.0f};
+  constexpr float FONT_SIZES[]   = {16.0f, 20.0f, 24.0f, 40.0f, 84.0f};
+  for(float fontSize : FONT_SIZES)
+  {
+    float baselineReference = 0.0f;
+    for(float lineHeight : LINE_HEIGHTS)
+    {
+      UiText::ControllerPtr controller = BuildReferenceMetricController(
+        "Hello World Second Line Third Line",
+        fontSize,
+        lineHeight,
+        1.0f,
+        Size(fontSize * 11.0f, std::max(192.0f, fontSize * 8.0f)));
+      const UiText::ModelInterface* model = controller->GetRenderTextModel();
+      DALI_TEST_CHECK(model && model->GetNumberOfLines() >= 2u);
+      const float reference = Reveal::ResolveFadeBlurReferencePixelSize(*model, false);
+      if(lineHeight == LINE_HEIGHTS[0u])
+      {
+        baselineReference = reference;
+      }
+      DALI_TEST_EQUALS(reference, baselineReference, EPSILON, TEST_LOCATION);
+      DALI_TEST_CHECK(std::isfinite(model->GetLines()[0u].lineSpacing));
+    }
+  }
+
+  float previousUiScaleReference = 0.0f;
+  for(float uiScale : {0.8f, 1.0f, 1.2f, 1.4f})
+  {
+    UiText::ControllerPtr controller =
+      BuildReferenceMetricController("UI scale reference", 24.0f, 1.0f, uiScale, Size(640.0f, 192.0f));
+    const float reference = Reveal::ResolveFadeBlurReferencePixelSize(*controller->GetRenderTextModel(), false);
+    DALI_TEST_CHECK(reference > previousUiScaleReference);
+    previousUiScaleReference = reference;
+  }
+
+  UiText::ControllerPtr baseline =
+    BuildReferenceMetricController("small text small", 20.0f, 1.0f, 1.0f, Size(640.0f, 192.0f));
+  const float baselineReference      = Reveal::ResolveFadeBlurReferencePixelSize(*baseline->GetRenderTextModel(), false);
+  float       previousMixedReference = baselineReference;
+  for(float largeSize : {40.0f, 84.0f})
+  {
+    UiText::ControllerPtr mixed =
+      BuildMixedSizeReferenceMetricController(largeSize, false, Size(640.0f, 256.0f));
+    const float mixedReference = Reveal::ResolveFadeBlurReferencePixelSize(*mixed->GetRenderTextModel(), false);
+    DALI_TEST_CHECK(mixedReference > previousMixedReference);
+    previousMixedReference = mixedReference;
+
+    UiText::ControllerPtr heading =
+      BuildMixedSizeReferenceMetricController(largeSize, true, Size(180.0f, 640.0f));
+    const UiText::ModelInterface* headingModel = heading->GetRenderTextModel();
+    DALI_TEST_CHECK(headingModel && headingModel->GetNumberOfLines() >= 3u);
+    const float headingReference = Reveal::ResolveFadeBlurReferencePixelSize(*headingModel, false);
+    DALI_TEST_CHECK(headingReference > baselineReference);
+    DALI_TEST_EQUALS(headingReference, mixedReference, EPSILON, TEST_LOCATION);
+    float smallestHeadingLine = headingReference;
+    for(UiText::Length line = 0u; line < headingModel->GetNumberOfLines(); ++line)
+    {
+      smallestHeadingLine = std::min(smallestHeadingLine,
+                                     headingModel->GetLines()[line].ascender - headingModel->GetLines()[line].descender);
+    }
+    DALI_TEST_CHECK(smallestHeadingLine < headingReference);
+  }
+
+  UiText::ControllerPtr unfitted =
+    BuildReferenceMetricController("A long line that needs substantial fitting", 84.0f, 1.0f, 1.0f,
+                                   Size(640.0f, 192.0f));
+  const float unfittedReference = Reveal::ResolveFadeBlurReferencePixelSize(*unfitted->GetRenderTextModel(), false);
+
+  UiText::ControllerPtr fitted = UiText::Controller::New();
+  fitted->SetText("A long line that needs substantial fitting");
+  fitted->SetDefaultFontSize(84.0f, UiText::Controller::PIXEL_SIZE);
+  fitted->SetMultiLineEnabled(false);
+  fitted->SetTextFitEnabled(true);
+  fitted->SetTextFitMinSize(12.0f, UiText::Controller::PIXEL_SIZE);
+  fitted->SetTextFitMaxSize(84.0f, UiText::Controller::PIXEL_SIZE);
+  fitted->SetTextFitStepSize(1.0f, UiText::Controller::PIXEL_SIZE);
+  fitted->FitPointSizeforLayout(Size(240.0f, 80.0f));
+  fitted->Relayout(Size(240.0f, 80.0f));
+  const float fittedReference = Reveal::ResolveFadeBlurReferencePixelSize(*fitted->GetRenderTextModel(), false);
+  DALI_TEST_CHECK(fittedReference < unfittedReference);
+
+  float minFallbackReference = std::numeric_limits<float>::max();
+  float maxFallbackReference = 0.0f;
+  for(const char* text : {"Hello World", "안녕하세요 DALi UI", "العربية", "עברית", "Hello 🦋 World", "🦜🦚🐙🦀"})
+  {
+    UiText::ControllerPtr controller =
+      BuildReferenceMetricController(text, 24.0f, 1.0f, 1.0f, Size(640.0f, 192.0f));
+    const float reference = Reveal::ResolveFadeBlurReferencePixelSize(*controller->GetRenderTextModel(), false);
+    DALI_TEST_CHECK(std::isfinite(reference) && reference > 0.0f);
+    minFallbackReference = std::min(minFallbackReference, reference);
+    maxFallbackReference = std::max(maxFallbackReference, reference);
+  }
+  DALI_TEST_CHECK(maxFallbackReference < minFallbackReference * 2.0f);
+
+  UiText::ControllerPtr ordinaryText =
+    BuildReferenceMetricController("A B", 20.0f, 1.0f, 1.0f, Size(320.0f, 320.0f));
+  UiText::ControllerPtr withTallReplacement =
+    BuildReplacementController("A B", {{1u, 1u}}, Size(320.0f, 320.0f), false, 240.0f);
+  const UiText::ModelInterface* replacementModel = withTallReplacement->GetRenderTextModel();
+  DALI_TEST_CHECK(replacementModel);
+  DALI_TEST_CHECK(replacementModel->GetLines()[0u].ascender - replacementModel->GetLines()[0u].descender > 200.0f);
+  DALI_TEST_EQUALS(Reveal::ResolveFadeBlurReferencePixelSize(*replacementModel, true),
+                   Reveal::ResolveFadeBlurReferencePixelSize(*ordinaryText->GetRenderTextModel(), false),
+                   EPSILON,
+                   TEST_LOCATION);
+
+  UiText::ControllerPtr replacementOnly =
+    BuildReplacementController("X", {{0u, 1u}}, Size(320.0f, 320.0f), false, 240.0f);
+  DALI_TEST_EQUALS(Reveal::ResolveFadeBlurReferencePixelSize(*replacementOnly->GetRenderTextModel(), true),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+
+  UiText::ControllerPtr ordinaryMultiline =
+    BuildReferenceMetricController("A\nB", 20.0f, 1.0f, 1.0f, Size(320.0f, 320.0f));
+  UiText::ControllerPtr replacementOnlyLine =
+    BuildReplacementController("A\nB", {{2u, 1u}}, Size(320.0f, 320.0f), false, 240.0f);
+  DALI_TEST_EQUALS(Reveal::ResolveFadeBlurReferencePixelSize(*replacementOnlyLine->GetRenderTextModel(), true),
+                   Reveal::ResolveFadeBlurReferencePixelSize(*ordinaryMultiline->GetRenderTextModel(), false),
+                   EPSILON,
+                   TEST_LOCATION);
+
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurMultilineHaloP(void)
+{
+  UiTestApplication application;
+
+  constexpr uint32_t PIXEL_SIZE     = 4u;
+  constexpr float    FONT_SIZES[]   = {16.0f, 20.0f, 24.0f, 40.0f, 84.0f};
+  constexpr float    LINE_HEIGHTS[] = {0.8f, 1.0f, 1.2f, 1.5f, 2.0f};
+  const char* const  corpus[]       = {
+    "Hello World Second Line Third Line Fourth Line Fifth Line",
+    "AVATAR ffi office WWWW IIII AVATAR office WWWW IIII",
+    "안녕하세요 DALi UI 두 번째 줄입니다 세 번째 줄입니다 네 번째 줄입니다",
+    "العربية Hello 123 mixed עברית 123 Hello العربية mixed עברית 456",
+  };
+
+  TextAbstraction::Segmentation segmentation = TextAbstraction::Segmentation::New();
+  for(const char* text : corpus)
+  {
+    for(float fontSize : FONT_SIZES)
+    {
+      for(float lineHeight : LINE_HEIGHTS)
+      {
+        const Size            layoutSize(fontSize * 8.0f, std::max(256.0f, fontSize * 8.0f));
+        UiText::ControllerPtr controller =
+          BuildReferenceMetricController(text, fontSize, lineHeight, 1.0f, layoutSize);
+        const UiText::ModelInterface* model = controller->GetRenderTextModel();
+        DALI_TEST_CHECK(model && model->GetNumberOfLines() >= 3u);
+        UiText::TypesetterPtr            typesetter = UiText::Typesetter::New(model);
+        const Reveal::FadeBlurParameters automatic  = Reveal::ResolveFadeBlurParameters(
+          Reveal::ResolveFadeBlurReferencePixelSize(*model, false), UiText::Reveal::AUTO_BLUR_STRENGTH,
+          static_cast<uint32_t>(layoutSize.width), static_cast<uint32_t>(layoutSize.height));
+        const Reveal::FadeBlurParameters explicitMaximum = Reveal::ResolveFadeBlurParameters(
+          Reveal::ResolveFadeBlurReferencePixelSize(*model, false), 1.0f,
+          static_cast<uint32_t>(layoutSize.width), static_cast<uint32_t>(layoutSize.height));
+
+        for(Reveal::Unit unit : {Reveal::Unit::CHARACTER, Reveal::Unit::WORD})
+        {
+          const Reveal::Plan sourcePlan = unit == Reveal::Unit::CHARACTER
+                                            ? Reveal::BuildCharacterPlan(*model, 0.25f)
+                                            : Reveal::BuildPlan(*model, unit, 0.25f, segmentation);
+          const Reveal::Plan finalPlan  = typesetter->CreateFinalRevealPlan(sourcePlan, unit);
+          DALI_TEST_CHECK(finalPlan.GetUnitCount() > 0u);
+          std::vector<bool> scheduledBlurStarts(256u, false);
+          for(float start : finalPlan.unitStart)
+          {
+            const uint32_t encoded = static_cast<uint32_t>(
+              std::round(std::max(0.0f, std::min(1.0f, start)) * 65535.0f));
+            const uint32_t key             = std::min(encoded, 65534u) + 1u;
+            const uint8_t  quantized       = static_cast<uint8_t>(((key - 1u) * 255u + 65533u) / 65534u);
+            scheduledBlurStarts[quantized] = true;
+          }
+
+          float     ordinaryDuration = 0.0f;
+          PixelData ordinary         = typesetter->RenderTextRevealMetadata(
+            layoutSize, UiText::Direction::LEFT_TO_RIGHT, finalPlan, ordinaryDuration);
+          DALI_TEST_CHECK(ordinary);
+          const Dali::Integration::PixelDataBuffer ordinaryPixels =
+            Dali::Integration::GetPixelDataBuffer(ordinary);
+          DALI_TEST_CHECK(ordinaryPixels.buffer);
+
+          for(const Reveal::FadeBlurParameters parameters : {
+                automatic,
+                explicitMaximum})
+          {
+            float     fadeBlurDuration = 0.0f;
+            PixelData fadeBlur         = typesetter->RenderTextRevealMetadata(
+              layoutSize,
+              UiText::Direction::LEFT_TO_RIGHT,
+              finalPlan,
+              fadeBlurDuration,
+              0u,
+              Size::ZERO,
+              false,
+              Size::ZERO,
+              parameters.scale,
+              parameters.targetRadius,
+              true);
+            DALI_TEST_CHECK(fadeBlur);
+            DALI_TEST_EQUALS(fadeBlurDuration, ordinaryDuration, EPSILON, TEST_LOCATION);
+            const Dali::Integration::PixelDataBuffer fadeBlurPixels =
+              Dali::Integration::GetPixelDataBuffer(fadeBlur);
+            DALI_TEST_CHECK(fadeBlurPixels.buffer);
+
+            bool foundSharpOwnership = false;
+            bool foundBlurCoverage   = false;
+            for(uint32_t y = 0u; y < fadeBlur.GetHeight(); ++y)
+            {
+              const uint8_t* ordinaryRow = ordinaryPixels.buffer + static_cast<size_t>(y) * ordinary.GetStrideBytes();
+              const uint8_t* fadeBlurRow = fadeBlurPixels.buffer + static_cast<size_t>(y) * fadeBlur.GetStrideBytes();
+              for(uint32_t x = 0u; x < fadeBlur.GetWidth(); ++x)
+              {
+                const uint8_t* ordinaryPixel = ordinaryRow + static_cast<size_t>(x) * PIXEL_SIZE;
+                const uint8_t* fadeBlurPixel = fadeBlurRow + static_cast<size_t>(x) * PIXEL_SIZE;
+                if(fadeBlurPixel[3u] >= 2u)
+                {
+                  foundBlurCoverage = true;
+                  DALI_TEST_CHECK(scheduledBlurStarts[fadeBlurPixel[2u]]);
+                }
+                if(ordinaryPixel[2u] != 0u)
+                {
+                  foundSharpOwnership = true;
+                  DALI_TEST_EQUALS(fadeBlurPixel[0u], ordinaryPixel[0u], TEST_LOCATION);
+                  DALI_TEST_EQUALS(fadeBlurPixel[1u], ordinaryPixel[1u], TEST_LOCATION);
+                  const uint32_t sharpStart = static_cast<uint32_t>(ordinaryPixel[0u]) * 256u + ordinaryPixel[1u];
+                  const uint32_t blurStart  = static_cast<uint32_t>(fadeBlurPixel[2u]) * 257u;
+                  DALI_TEST_CHECK(blurStart >= sharpStart);
+                }
+              }
+            }
+            DALI_TEST_CHECK(foundSharpOwnership);
+            DALI_TEST_CHECK(foundBlurCoverage);
+          }
+        }
+      }
+    }
+  }
+
+  END_TEST;
+}
+
+int UtcDaliTextRevealFadeBlurCorpusP(void)
+{
+  UiTestApplication  application;
+  constexpr uint32_t PIXEL_SIZE = 4u;
+
+  struct Case
+  {
+    const char* text;
+    float       spacing;
+  };
+  const Case corpus[] = {
+    {"AB", 0.0f},
+    {"AV", -20.0f},
+    {"VA", -12.0f},
+    {"ffi", -4.0f},
+    {"office", 0.0f},
+    {"Hello", 0.0f},
+    {"IIII", -4.0f},
+    {"WWWW", -8.0f},
+    {"A🦋B", 0.0f},
+    {"🦜🦚🐙🦀", 0.0f},
+    {"🍉🍭🎨🚀", 0.0f},
+    {"DALi 🌈 UI 🔮 Text", 0.0f},
+    {"안녕하세요 DALi UI", 0.0f},
+    {"العربية Hello 123", 0.0f},
+    {"Hello עברית 123", 0.0f},
+  };
+
+  TextAbstraction::Segmentation segmentation = TextAbstraction::Segmentation::New();
+  for(const Case& item : corpus)
+  {
+    for(float fontSize : {16.0f, 20.0f, 24.0f, 32.0f, 40.0f, 56.0f, 84.0f})
+    {
+      UiText::ControllerPtr controller = UiText::Controller::New();
+      controller->SetText(item.text);
+      controller->SetDefaultFontSize(fontSize, UiText::Controller::PIXEL_SIZE);
+      controller->SetCharacterSpacing(item.spacing);
+      controller->SetMultiLineEnabled(true);
+      const Vector2 layoutSize(480.0f, std::max(128.0f, fontSize * 2.0f));
+      controller->Relayout(layoutSize);
+
+      const UiText::ModelInterface* model = controller->GetRenderTextModel();
+      DALI_TEST_CHECK(model);
+      UiText::TypesetterPtr typesetter = UiText::Typesetter::New(model);
+      for(Reveal::Unit unit : {Reveal::Unit::CHARACTER, Reveal::Unit::WORD})
+      {
+        const Reveal::Plan sourcePlan = unit == Reveal::Unit::CHARACTER
+                                          ? Reveal::BuildCharacterPlan(*model, 0.25f)
+                                          : Reveal::BuildPlan(*model, unit, 0.25f, segmentation);
+        const Reveal::Plan finalPlan  = typesetter->CreateFinalRevealPlan(sourcePlan, unit);
+        DALI_TEST_CHECK(finalPlan.GetUnitCount() > 0u);
+        const Reveal::FadeBlurParameters fadeBlurParameters =
+          Reveal::ResolveFadeBlurParameters(Reveal::ResolveFadeBlurReferencePixelSize(*model, false),
+                                            UiText::Reveal::AUTO_BLUR_STRENGTH);
+
+        float     ordinaryFadeDuration = 0.0f;
+        PixelData ordinary             = typesetter->RenderTextRevealMetadata(layoutSize,
+                                                                              UiText::Direction::LEFT_TO_RIGHT,
+                                                                              finalPlan,
+                                                                              ordinaryFadeDuration);
+        float     fadeBlurDuration     = 0.0f;
+        PixelData fadeBlur             = typesetter->RenderTextRevealMetadata(
+          layoutSize,
+          UiText::Direction::LEFT_TO_RIGHT,
+          finalPlan,
+          fadeBlurDuration,
+          0u,
+          Size::ZERO,
+          false,
+          Size::ZERO,
+          fadeBlurParameters.scale,
+          fadeBlurParameters.targetRadius,
+          true);
+        DALI_TEST_CHECK(ordinary && fadeBlur);
+        DALI_TEST_EQUALS(fadeBlurDuration, ordinaryFadeDuration, EPSILON, TEST_LOCATION);
+
+        const Dali::Integration::PixelDataBuffer ordinaryPixels = Dali::Integration::GetPixelDataBuffer(ordinary);
+        const Dali::Integration::PixelDataBuffer fadeBlurPixels = Dali::Integration::GetPixelDataBuffer(fadeBlur);
+        DALI_TEST_CHECK(ordinaryPixels.buffer && fadeBlurPixels.buffer);
+        bool foundSharpOwnership = false;
+        bool foundBlurCoverage   = false;
+        for(uint32_t y = 0u; y < fadeBlur.GetHeight(); ++y)
+        {
+          const uint8_t* ordinaryRow = ordinaryPixels.buffer + static_cast<size_t>(y) * ordinary.GetStrideBytes();
+          const uint8_t* fadeBlurRow = fadeBlurPixels.buffer + static_cast<size_t>(y) * fadeBlur.GetStrideBytes();
+          for(uint32_t x = 0u; x < fadeBlur.GetWidth(); ++x)
+          {
+            const uint8_t* ordinaryPixel = ordinaryRow + static_cast<size_t>(x) * PIXEL_SIZE;
+            const uint8_t* fadeBlurPixel = fadeBlurRow + static_cast<size_t>(x) * PIXEL_SIZE;
+            foundBlurCoverage |= fadeBlurPixel[3u] != 0u;
+            if(ordinaryPixel[2u] != 0u)
+            {
+              foundSharpOwnership = true;
+              DALI_TEST_EQUALS(fadeBlurPixel[0u], ordinaryPixel[0u], TEST_LOCATION);
+              DALI_TEST_EQUALS(fadeBlurPixel[1u], ordinaryPixel[1u], TEST_LOCATION);
+              const uint32_t sharpStart = static_cast<uint32_t>(ordinaryPixel[0u]) * 256u + ordinaryPixel[1u];
+              const uint32_t blurStart  = static_cast<uint32_t>(fadeBlurPixel[2u]) * 257u;
+              DALI_TEST_CHECK(blurStart >= sharpStart);
+            }
+          }
+        }
+        DALI_TEST_CHECK(foundSharpOwnership);
+        DALI_TEST_CHECK(foundBlurCoverage);
+      }
+    }
+  }
   END_TEST;
 }
