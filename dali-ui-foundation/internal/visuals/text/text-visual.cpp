@@ -2113,14 +2113,18 @@ void TextVisual::BindGradientOverlayAnimConstraints(VisualRenderer& renderer,
   }
 }
 
-void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit unit,
-                                     float                        fadeDurationRatio,
-                                     float                        blurStrength,
-                                     Property::Index              progressPropertyIndex,
-                                     uint64_t                     revision)
+void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit     unit,
+                                     float                            fadeDurationRatio,
+                                     float                            blurStrength,
+                                     Property::Index                  progressPropertyIndex,
+                                     uint64_t                         revision,
+                                     Text::Internal::Reveal::Sequence sequence,
+                                     float                            sequenceStartDelayRatio)
 {
-  blurStrength = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : blurStrength;
-  auto* data   = GetTextVisualRevealData(mRevealData);
+  blurStrength            = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : blurStrength;
+  sequence                = unit == Text::Internal::Reveal::Unit::DISABLED ? Text::Internal::Reveal::Sequence::TEXT : sequence;
+  sequenceStartDelayRatio = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : sequenceStartDelayRatio;
+  auto* data              = GetTextVisualRevealData(mRevealData);
   if(!data)
   {
     if(unit == Text::Internal::Reveal::Unit::DISABLED)
@@ -2129,20 +2133,24 @@ void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit unit,
     }
   }
   else if(data->unit == unit &&
+          data->sequence == sequence &&
           Equals(data->fadeDurationRatio, fadeDurationRatio) &&
           Equals(data->blurStrength, blurStrength) &&
+          Equals(data->sequenceStartDelayRatio, sequenceStartDelayRatio) &&
           data->progressPropertyIndex == progressPropertyIndex &&
           data->revision == revision)
   {
     return;
   }
 
-  data                        = &GetOrCreateTextVisualRevealData(mRevealData);
-  data->unit                  = unit;
-  data->fadeDurationRatio     = fadeDurationRatio;
-  data->blurStrength          = blurStrength;
-  data->progressPropertyIndex = progressPropertyIndex;
-  data->revision              = revision;
+  data                          = &GetOrCreateTextVisualRevealData(mRevealData);
+  data->unit                    = unit;
+  data->sequence                = sequence;
+  data->fadeDurationRatio       = fadeDurationRatio;
+  data->blurStrength            = blurStrength;
+  data->sequenceStartDelayRatio = sequenceStartDelayRatio;
+  data->progressPropertyIndex   = progressPropertyIndex;
+  data->revision                = revision;
   if(unit == Text::Internal::Reveal::Unit::DISABLED)
   {
     RemoveTextRevealConstraints();
@@ -2751,7 +2759,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
 
     if(textRevealEnabled)
     {
-      revealPlan = mTypesetter->CreateFinalRevealPlan(revealPlan, revealData->unit);
+      revealPlan = mTypesetter->CreateFinalRevealPlan(revealPlan,
+                                                      revealData->unit,
+                                                      revealData->sequence,
+                                                      revealData->sequenceStartDelayRatio);
     }
 
     Text::Internal::Reveal::FadeBlurParameters fadeBlurParameters;
@@ -3158,7 +3169,10 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     auto* revealData = GetTextVisualRevealData(mRevealData);
     DALI_ASSERT_ALWAYS(revealData);
     const auto sourcePlan      = BuildTextRevealSourcePlan();
-    const auto finalPlan       = mTypesetter->CreateFinalRevealPlan(sourcePlan, revealData->unit);
+    const auto finalPlan       = mTypesetter->CreateFinalRevealPlan(sourcePlan,
+                                                                    revealData->unit,
+                                                                    revealData->sequence,
+                                                                    revealData->sequenceStartDelayRatio);
     auto       disableFadeBlur = [&]()
     {
       if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur())

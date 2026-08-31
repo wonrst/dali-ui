@@ -40,16 +40,20 @@ class Reveal::Impl
 public:
   Impl()
   : mUnit(Unit::CHARACTER),
+    mSequence(Sequence::TEXT),
     mFadeDurationRatio(AUTO_FADE_DURATION_RATIO),
     mBlurStrength(0.0f),
+    mSequenceStartDelayRatio(0.0f),
     mIsNone(false)
   {
   }
 
-  Unit  mUnit;
-  float mFadeDurationRatio;
-  float mBlurStrength;
-  bool  mIsNone;
+  Unit     mUnit;
+  Sequence mSequence;
+  float    mFadeDurationRatio;
+  float    mBlurStrength;
+  float    mSequenceStartDelayRatio;
+  bool     mIsNone;
 };
 
 Reveal::Reveal()
@@ -118,8 +122,10 @@ bool Reveal::operator==(const Reveal& rhs) const
     return mImpl->mIsNone == rhs.mImpl->mIsNone;
   }
   return mImpl->mUnit == rhs.mImpl->mUnit &&
+         mImpl->mSequence == rhs.mImpl->mSequence &&
          Dali::Equals(mImpl->mFadeDurationRatio, rhs.mImpl->mFadeDurationRatio) &&
-         Dali::Equals(mImpl->mBlurStrength, rhs.mImpl->mBlurStrength);
+         Dali::Equals(mImpl->mBlurStrength, rhs.mImpl->mBlurStrength) &&
+         Dali::Equals(mImpl->mSequenceStartDelayRatio, rhs.mImpl->mSequenceStartDelayRatio);
 }
 
 bool Reveal::operator!=(const Reveal& rhs) const
@@ -139,6 +145,34 @@ Reveal::Unit Reveal::GetUnit() const
   DALI_ASSERT_VALID_REVEAL(mImpl);
   DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
   return mImpl->mUnit;
+}
+
+void Reveal::SetSequence(Sequence sequence)
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
+  mImpl->mSequence = sequence;
+}
+
+Reveal::Sequence Reveal::GetSequence() const
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
+  return mImpl->mSequence;
+}
+
+void Reveal::SetSequenceStartDelayRatio(float ratio)
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
+  mImpl->mSequenceStartDelayRatio = std::isnan(ratio) ? 0.0f : std::max(0.0f, std::min(1.0f, ratio));
+}
+
+float Reveal::GetSequenceStartDelayRatio() const
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
+  return mImpl->mSequenceStartDelayRatio;
 }
 
 void Reveal::SetFadeDurationRatio(float ratio)

@@ -675,16 +675,26 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
 }
 
 Internal::Reveal::Plan Typesetter::CreateFinalRevealPlan(const Internal::Reveal::Plan& sourcePlan,
-                                                         Internal::Reveal::Unit        unit)
+                                                         Internal::Reveal::Unit        unit,
+                                                         Internal::Reveal::Sequence    sequence,
+                                                         float                         sequenceStartDelayRatio)
 {
   auto& viewModel = *mImpl->GetViewModel();
   viewModel.EnableFinalGlyphMapping();
   viewModel.ElideGlyphs(mImpl->GetFontClient());
-  return Internal::Reveal::ProjectToFinalGlyphs(sourcePlan,
-                                                viewModel.GetNumberOfGlyphs(),
-                                                viewModel.GetFinalToSourceGlyphIndices(),
-                                                viewModel.GetEllipsisFinalGlyphIndex(),
-                                                unit);
+  Internal::Reveal::Plan finalPlan = Internal::Reveal::ProjectToFinalGlyphs(sourcePlan,
+                                                                            viewModel.GetNumberOfGlyphs(),
+                                                                            viewModel.GetFinalToSourceGlyphIndices(),
+                                                                            viewModel.GetEllipsisFinalGlyphIndex(),
+                                                                            unit);
+  if(sequence == Internal::Reveal::Sequence::LINE)
+  {
+    Internal::Reveal::ApplyLineSequenceSchedule(finalPlan,
+                                                viewModel.GetLines(),
+                                                viewModel.GetNumberOfLines(),
+                                                sequenceStartDelayRatio);
+  }
+  return finalPlan;
 }
 
 PixelData Typesetter::RenderTextRevealMetadata(

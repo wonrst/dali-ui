@@ -93,9 +93,28 @@ public:
     WORD
   };
 
+  /**
+   * @brief Selects how visible reveal units are grouped into sequences.
+   */
+  enum class Sequence : uint8_t
+  {
+    /**
+     * @brief Uses one continuous sequence for all visible reveal units.
+     */
+    TEXT,
+
+    /**
+     * @brief Uses an independent sequence for each final visible layout line.
+     *
+     * Lines created by wrapping are separate sequences. Lines without a text
+     * foreground reveal unit do not consume a sequence.
+     */
+    LINE
+  };
+
 public:
   /**
-   * @brief Creates a CHARACTER reveal with automatic fade duration.
+   * @brief Creates a CHARACTER, TEXT reveal with automatic fade duration.
    */
   Reveal();
 
@@ -171,6 +190,46 @@ public:
    * @return The reveal unit.
    */
   Unit GetUnit() const;
+
+  /**
+   * @brief Sets how visible reveal units are grouped into sequences.
+   *
+   * TEXT uses one continuous sequence. LINE uses each final visible layout
+   * line, including a line created by wrapping, as an independent sequence.
+   *
+   * @param[in] sequence The reveal sequence grouping.
+   */
+  void SetSequence(Sequence sequence);
+
+  /**
+   * @brief Returns how visible reveal units are grouped into sequences.
+   *
+   * @return The reveal sequence grouping.
+   */
+  Sequence GetSequence() const;
+
+  /**
+   * @brief Sets the normalized ratio controlling the spacing between consecutive sequence starts.
+   *
+   * Sequence starts are evenly spaced. Zero starts all active sequences
+   * together. Increasing values space consecutive starts further apart, and
+   * one prevents consecutive active sequences from overlapping. A shorter
+   * sequence may complete before the next sequence starts.
+   *
+   * This value has no visual effect while Sequence is TEXT, but the authored
+   * value is retained. Values outside [0.0, 1.0] are clamped, and NaN is
+   * normalized to 0.0.
+   *
+   * @param[in] ratio The normalized sequence start delay in [0.0, 1.0].
+   */
+  void SetSequenceStartDelayRatio(float ratio);
+
+  /**
+   * @brief Returns the authored normalized sequence start delay.
+   *
+   * @return The authored ratio in [0.0, 1.0].
+   */
+  float GetSequenceStartDelayRatio() const;
 
   /**
    * @brief Sets the fade duration of each reveal unit on the normalized timeline.
