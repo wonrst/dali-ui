@@ -43,7 +43,7 @@ public:
     mSequence(Sequence::TEXT),
     mFadeDurationRatio(AUTO_FADE_DURATION_RATIO),
     mBlurStrength(0.0f),
-    mSequenceStartDelayRatio(0.0f),
+    mSequenceStaggerRatio(0.0f),
     mIsNone(false)
   {
   }
@@ -52,7 +52,7 @@ public:
   Sequence mSequence;
   float    mFadeDurationRatio;
   float    mBlurStrength;
-  float    mSequenceStartDelayRatio;
+  float    mSequenceStaggerRatio;
   bool     mIsNone;
 };
 
@@ -125,7 +125,7 @@ bool Reveal::operator==(const Reveal& rhs) const
          mImpl->mSequence == rhs.mImpl->mSequence &&
          Dali::Equals(mImpl->mFadeDurationRatio, rhs.mImpl->mFadeDurationRatio) &&
          Dali::Equals(mImpl->mBlurStrength, rhs.mImpl->mBlurStrength) &&
-         Dali::Equals(mImpl->mSequenceStartDelayRatio, rhs.mImpl->mSequenceStartDelayRatio);
+         Dali::Equals(mImpl->mSequenceStaggerRatio, rhs.mImpl->mSequenceStaggerRatio);
 }
 
 bool Reveal::operator!=(const Reveal& rhs) const
@@ -161,18 +161,18 @@ Reveal::Sequence Reveal::GetSequence() const
   return mImpl->mSequence;
 }
 
-void Reveal::SetSequenceStartDelayRatio(float ratio)
+void Reveal::SetSequenceStaggerRatio(float ratio)
 {
   DALI_ASSERT_VALID_REVEAL(mImpl);
   DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
-  mImpl->mSequenceStartDelayRatio = std::isnan(ratio) ? 0.0f : std::max(0.0f, std::min(1.0f, ratio));
+  mImpl->mSequenceStaggerRatio = std::isnan(ratio) ? 0.0f : std::max(0.0f, std::min(1.0f, ratio));
 }
 
-float Reveal::GetSequenceStartDelayRatio() const
+float Reveal::GetSequenceStaggerRatio() const
 {
   DALI_ASSERT_VALID_REVEAL(mImpl);
   DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
-  return mImpl->mSequenceStartDelayRatio;
+  return mImpl->mSequenceStaggerRatio;
 }
 
 void Reveal::SetFadeDurationRatio(float ratio)

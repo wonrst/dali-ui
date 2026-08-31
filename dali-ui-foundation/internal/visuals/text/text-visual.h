@@ -135,7 +135,7 @@ public:
    * @param[in] progressPropertyIndex The stable Label scene property used as progress.
    * @param[in] revision The revision used to reject stale asynchronous results.
    * @param[in] sequence The internal reveal sequence grouping.
-   * @param[in] sequenceStartDelayRatio The normalized delay between sequence starts.
+   * @param[in] sequenceStaggerRatio The sequence stagger ratio.
    */
   static void ConfigureTextReveal(
     Ui::Integration::Visual::Base        visual,
@@ -144,8 +144,8 @@ public:
     float                                blurStrength,
     Property::Index                      progressPropertyIndex,
     uint64_t                             revision,
-    Ui::Text::Internal::Reveal::Sequence sequence                = Ui::Text::Internal::Reveal::Sequence::TEXT,
-    float                                sequenceStartDelayRatio = 0.0f)
+    Ui::Text::Internal::Reveal::Sequence sequence             = Ui::Text::Internal::Reveal::Sequence::TEXT,
+    float                                sequenceStaggerRatio = 0.0f)
   {
     GetVisualObject(visual).ConfigureTextReveal(unit,
                                                 fadeDurationRatio,
@@ -153,7 +153,7 @@ public:
                                                 progressPropertyIndex,
                                                 revision,
                                                 sequence,
-                                                sequenceStartDelayRatio);
+                                                sequenceStaggerRatio);
   }
 
   /**
@@ -607,15 +607,15 @@ private:
    * @param[in] progressPropertyIndex The Label scene progress property index.
    * @param[in] revision The current reveal configuration revision.
    * @param[in] sequence The internal reveal sequence grouping.
-   * @param[in] sequenceStartDelayRatio The normalized delay between sequence starts.
+   * @param[in] sequenceStaggerRatio The sequence stagger ratio.
    */
   void ConfigureTextReveal(Ui::Text::Internal::Reveal::Unit     unit,
                            float                                fadeDurationRatio,
                            float                                blurStrength,
                            Property::Index                      progressPropertyIndex,
                            uint64_t                             revision,
-                           Ui::Text::Internal::Reveal::Sequence sequence                = Ui::Text::Internal::Reveal::Sequence::TEXT,
-                           float                                sequenceStartDelayRatio = 0.0f);
+                           Ui::Text::Internal::Reveal::Sequence sequence             = Ui::Text::Internal::Reveal::Sequence::TEXT,
+                           float                                sequenceStaggerRatio = 0.0f);
 
   /**
    * @brief Removes Reveal-only renderer resources while retaining valid sharp text resources.

@@ -142,17 +142,17 @@ UiText::AsyncTextParameters MakeRevealParameters(
   float                                    fadeDurationRatio,
   float                                    blurStrength = 0.0f,
   UiText::Internal::Reveal::Sequence       sequence = UiText::Internal::Reveal::Sequence::TEXT,
-  float                                    sequenceStartDelayRatio = 0.0f)
+  float                                    sequenceStaggerRatio = 0.0f)
 {
   UiText::AsyncTextParameters parameters = MakeParameters(text);
-  parameters.isMarqueeEnabled                  = false;
-  parameters.isTextRevealEnabled               = true;
-  parameters.textRevealUnit                    = unit;
-  parameters.textRevealFadeDurationRatio       = fadeDurationRatio;
-  parameters.textRevealBlurStrength            = blurStrength;
-  parameters.textRevealSequence                = sequence;
-  parameters.textRevealSequenceStartDelayRatio = sequenceStartDelayRatio;
-  parameters.textRevealRevision                = revision;
+  parameters.isMarqueeEnabled                    = false;
+  parameters.isTextRevealEnabled                 = true;
+  parameters.textRevealUnit                      = unit;
+  parameters.textRevealFadeDurationRatio         = fadeDurationRatio;
+  parameters.textRevealBlurStrength              = blurStrength;
+  parameters.textRevealSequence                  = sequence;
+  parameters.textRevealSequenceStaggerRatio      = sequenceStaggerRatio;
+  parameters.textRevealRevision                  = revision;
   return parameters;
 }
 
@@ -175,7 +175,7 @@ void ConfigureReveal(
   uint64_t                                 revision,
   float                                    blurStrength = 0.0f,
   UiText::Internal::Reveal::Sequence       sequence = UiText::Internal::Reveal::Sequence::TEXT,
-  float                                    sequenceStartDelayRatio = 0.0f)
+  float                                    sequenceStaggerRatio = 0.0f)
 {
   Property::Index progress = rendered.view.GetPropertyIndex("testRevealProgress");
   if(progress == Property::INVALID_INDEX)
@@ -189,7 +189,7 @@ void ConfigureReveal(
                                               progress,
                                               revision,
                                               sequence,
-                                              sequenceStartDelayRatio);
+                                              sequenceStaggerRatio);
 }
 
 void PublishDirect(RenderedTextVisual&                   rendered,
@@ -719,13 +719,13 @@ int UtcDaliTextVisualRevealSequenceRejectsOlderCompletionP(void)
                   0.0f,
                   UiText::Internal::Reveal::Sequence::LINE,
                   0.25f);
-  const auto staleDelay = MakeRevealParameters("stale LINE delay",
-                                               4u,
-                                               UiText::Internal::Reveal::Unit::CHARACTER,
-                                               0.25f,
-                                               0.0f,
-                                               UiText::Internal::Reveal::Sequence::LINE,
-                                               0.25f);
+  const auto staleStagger = MakeRevealParameters("stale LINE stagger",
+                                                  4u,
+                                                  UiText::Internal::Reveal::Unit::CHARACTER,
+                                                  0.25f,
+                                                  0.0f,
+                                                  UiText::Internal::Reveal::Sequence::LINE,
+                                                  0.25f);
   ConfigureReveal(rendered,
                   UiText::Internal::Reveal::Unit::CHARACTER,
                   0.25f,
@@ -733,11 +733,11 @@ int UtcDaliTextVisualRevealSequenceRejectsOlderCompletionP(void)
                   0.0f,
                   UiText::Internal::Reveal::Sequence::LINE,
                   0.5f);
-  PublishDirect(rendered, staleDelay, MakeRevealRenderInfo(32u, 16u));
+  PublishDirect(rendered, staleStagger, MakeRevealRenderInfo(32u, 16u));
   DALI_TEST_EQUALS(observer.mCompletionCount, 0u, TEST_LOCATION);
 
   PublishDirect(rendered,
-                MakeRevealParameters("current LINE delay",
+                MakeRevealParameters("current LINE stagger",
                                      5u,
                                      UiText::Internal::Reveal::Unit::CHARACTER,
                                      0.25f,

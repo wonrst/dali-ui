@@ -774,48 +774,48 @@ Dali::Property::Index LabelImpl::EnsureGradientOverlayAnimOffset()
 
 void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
 {
-  const bool                       enabled                         = reveal != Ui::Text::Reveal::None();
-  const Ui::Text::Reveal::Unit     authoredUnit                    = enabled ? reveal.GetUnit() : Ui::Text::Reveal::Unit::CHARACTER;
-  const Ui::Text::Reveal::Sequence authoredSequence                = enabled ? reveal.GetSequence() : Ui::Text::Reveal::Sequence::TEXT;
-  const float                      authoredFadeDurationRatio       = enabled ? reveal.GetFadeDurationRatio()
-                                                                             : Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
-  const float                      authoredBlurStrength            = enabled ? reveal.GetBlurStrength() : 0.0f;
-  const float                      authoredSequenceStartDelayRatio = enabled ? reveal.GetSequenceStartDelayRatio() : 0.0f;
-  auto*                            data                            = Internal::Text::GetTextRevealData(mTextRevealData);
+  const bool                       enabled                      = reveal != Ui::Text::Reveal::None();
+  const Ui::Text::Reveal::Unit     authoredUnit                 = enabled ? reveal.GetUnit() : Ui::Text::Reveal::Unit::CHARACTER;
+  const Ui::Text::Reveal::Sequence authoredSequence             = enabled ? reveal.GetSequence() : Ui::Text::Reveal::Sequence::TEXT;
+  const float                      authoredFadeDurationRatio    = enabled ? reveal.GetFadeDurationRatio()
+                                                                          : Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
+  const float                      authoredBlurStrength         = enabled ? reveal.GetBlurStrength() : 0.0f;
+  const float                      authoredSequenceStaggerRatio = enabled ? reveal.GetSequenceStaggerRatio() : 0.0f;
+  auto*                            data                         = Internal::Text::GetTextRevealData(mTextRevealData);
   if((!data && !enabled) ||
      (data && data->enabled == enabled &&
       (!enabled || (data->unit == authoredUnit &&
                     data->sequence == authoredSequence &&
                     Dali::Equals(data->fadeDurationRatio, authoredFadeDurationRatio) &&
                     Dali::Equals(data->blurStrength, authoredBlurStrength) &&
-                    Dali::Equals(data->sequenceStartDelayRatio, authoredSequenceStartDelayRatio)))))
+                    Dali::Equals(data->sequenceStaggerRatio, authoredSequenceStaggerRatio)))))
   {
     return;
   }
 
-  data                          = &Internal::Text::GetOrCreateTextRevealData(mTextRevealData);
-  data->enabled                 = enabled;
-  data->unit                    = authoredUnit;
-  data->sequence                = authoredSequence;
-  data->fadeDurationRatio       = authoredFadeDurationRatio;
-  data->blurStrength            = authoredBlurStrength;
-  data->sequenceStartDelayRatio = authoredSequenceStartDelayRatio;
+  data                       = &Internal::Text::GetOrCreateTextRevealData(mTextRevealData);
+  data->enabled              = enabled;
+  data->unit                 = authoredUnit;
+  data->sequence             = authoredSequence;
+  data->fadeDurationRatio    = authoredFadeDurationRatio;
+  data->blurStrength         = authoredBlurStrength;
+  data->sequenceStaggerRatio = authoredSequenceStaggerRatio;
   ++data->revision;
 
-  Ui::Text::Internal::Reveal::Unit     unit                    = Ui::Text::Internal::Reveal::Unit::DISABLED;
-  Ui::Text::Internal::Reveal::Sequence sequence                = Ui::Text::Internal::Reveal::Sequence::TEXT;
-  float                                fadeDurationRatio       = Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
-  float                                blurStrength            = 0.0f;
-  float                                sequenceStartDelayRatio = 0.0f;
-  Property::Index                      progressIndex           = Property::INVALID_INDEX;
+  Ui::Text::Internal::Reveal::Unit     unit                 = Ui::Text::Internal::Reveal::Unit::DISABLED;
+  Ui::Text::Internal::Reveal::Sequence sequence             = Ui::Text::Internal::Reveal::Sequence::TEXT;
+  float                                fadeDurationRatio    = Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO;
+  float                                blurStrength         = 0.0f;
+  float                                sequenceStaggerRatio = 0.0f;
+  Property::Index                      progressIndex        = Property::INVALID_INDEX;
   if(data->enabled)
   {
-    unit                    = Ui::Text::Internal::Reveal::ToInternalUnit(data->unit);
-    sequence                = Ui::Text::Internal::Reveal::ToInternalSequence(data->sequence);
-    fadeDurationRatio       = data->fadeDurationRatio;
-    blurStrength            = data->blurStrength;
-    sequenceStartDelayRatio = data->sequenceStartDelayRatio;
-    progressIndex           = EnsureTextRevealProgress();
+    unit                 = Ui::Text::Internal::Reveal::ToInternalUnit(data->unit);
+    sequence             = Ui::Text::Internal::Reveal::ToInternalSequence(data->sequence);
+    fadeDurationRatio    = data->fadeDurationRatio;
+    blurStrength         = data->blurStrength;
+    sequenceStaggerRatio = data->sequenceStaggerRatio;
+    progressIndex        = EnsureTextRevealProgress();
   }
 
   if(mVisual)
@@ -827,7 +827,7 @@ void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
                                               progressIndex,
                                               data->revision,
                                               sequence,
-                                              sequenceStartDelayRatio);
+                                              sequenceStaggerRatio);
   }
 
   if(mController && mController->IsAsyncRendering())
@@ -850,7 +850,7 @@ Ui::Text::Reveal LabelImpl::GetTextReveal() const
   reveal.SetSequence(data->sequence);
   reveal.SetFadeDurationRatio(data->fadeDurationRatio);
   reveal.SetBlurStrength(data->blurStrength);
-  reveal.SetSequenceStartDelayRatio(data->sequenceStartDelayRatio);
+  reveal.SetSequenceStaggerRatio(data->sequenceStaggerRatio);
   return reveal;
 }
 
@@ -1726,7 +1726,7 @@ void LabelImpl::SetAsyncRendering(bool asyncRendering)
                                                 EnsureTextRevealProgress(),
                                                 revealData->revision,
                                                 Ui::Text::Internal::Reveal::ToInternalSequence(revealData->sequence),
-                                                revealData->sequenceStartDelayRatio);
+                                                revealData->sequenceStaggerRatio);
     }
   }
   if(!asyncRendering)
@@ -4226,11 +4226,11 @@ Ui::Text::AsyncTextParameters LabelImpl::GetAsyncTextParameters(const Text::Asyn
                                    !parameters.isCutoutEnabled;
   if(parameters.isTextRevealEnabled)
   {
-    parameters.textRevealUnit                    = Ui::Text::Internal::Reveal::ToInternalUnit(revealData->unit);
-    parameters.textRevealSequence                = Ui::Text::Internal::Reveal::ToInternalSequence(revealData->sequence);
-    parameters.textRevealFadeDurationRatio       = revealData->fadeDurationRatio;
-    parameters.textRevealBlurStrength            = revealData->blurStrength;
-    parameters.textRevealSequenceStartDelayRatio = revealData->sequenceStartDelayRatio;
+    parameters.textRevealUnit                 = Ui::Text::Internal::Reveal::ToInternalUnit(revealData->unit);
+    parameters.textRevealSequence             = Ui::Text::Internal::Reveal::ToInternalSequence(revealData->sequence);
+    parameters.textRevealFadeDurationRatio    = revealData->fadeDurationRatio;
+    parameters.textRevealBlurStrength         = revealData->blurStrength;
+    parameters.textRevealSequenceStaggerRatio = revealData->sequenceStaggerRatio;
   }
   Property::Map variationsMap;
   mController->GetVariationsMap(variationsMap);
