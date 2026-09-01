@@ -22,6 +22,11 @@
 
 #include <cstdint>
 
+namespace Dali::TextAbstraction
+{
+class FontClient;
+}
+
 namespace Dali
 {
 namespace Ui
@@ -63,10 +68,13 @@ struct FadeBlurParameters
  *
  * @param[in] model The final render model
  * @param[in] hasInlineReplacement Whether the model contains projected replacements
+ * @param[in] fontClient The caller-owned font client used by the current text pipeline
  * @return The representative text height in final pixels, or zero when a
  *         replacement model has no ordinary text glyph
  */
-float ResolveFadeBlurReferencePixelSize(const ModelInterface& model, bool hasInlineReplacement);
+float ResolveFadeBlurReferencePixelSize(const ModelInterface&       model,
+                                        bool                        hasInlineReplacement,
+                                        TextAbstraction::FontClient fontClient);
 
 /**
  * @brief Resolves the authored strength into radius, scale, and box kernels.

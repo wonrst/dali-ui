@@ -32,6 +32,7 @@
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/color-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/rendering/text-reveal-fade-blur-processor.h>
+#include <dali-ui-foundation/internal/text/replacement/inline-replacement-reveal-bridge.h>
 #include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/text-effects-style.h>
 #include <dali-ui-foundation/internal/text/text-enumerations-impl.h>
@@ -1697,6 +1698,25 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       mAsyncTextInterface->AsyncTextFitChanged(parameters.fontSize);
     }
 
+    Ui::View owner = Ui::View::DownCast(control);
+    if(IsCurrentInlineReplacementRender(owner, renderInfo.replacementLayoutGeneration))
+    {
+      const Text::ReplacementSourceSnapshot& currentSource = mController->GetReplacementSourceSnapshot();
+      if(renderInfo.replacementSourceRevision == currentSource.sourceRevision &&
+         renderInfo.replacementLayoutGeneration != 0u)
+      {
+        if(textRevealEnabled)
+        {
+          PublishReplacementRevealTimings(renderInfo.replacementRevealTimings,
+                                          renderInfo.replacementSourceRevision);
+        }
+        else
+        {
+          ClearInlineReplacementReveal(owner);
+        }
+      }
+    }
+
     if(mAsyncTextInterface)
     {
       mAsyncTextInterface->AsyncRenderFinished(std::move(renderInfo));
@@ -2276,12 +2296,16 @@ void TextVisual::BindTextRevealConstraint(VisualRenderer& renderer)
   data->constraints.push_back(constraint);
 }
 
-Text::Internal::Reveal::Plan TextVisual::BuildTextRevealSourcePlan()
+Text::Internal::Reveal::Plan TextVisual::BuildTextRevealSourcePlan(bool includeImageReplacements)
 {
   auto* data = GetTextVisualRevealData(mRevealData);
   DALI_ASSERT_ALWAYS(data && data->unit != Text::Internal::Reveal::Unit::DISABLED);
 
-  const Text::ModelInterface& model = *mController->GetRenderTextModel();
+  const Text::ModelInterface&            model             = *mController->GetRenderTextModel();
+  const Text::ReplacementRenderState&    replacementState  = mController->GetReplacementRenderState();
+  const Text::ReplacementSourceSnapshot& replacementSource = mController->GetReplacementSourceSnapshot();
+  const bool                             canIncludeImages  = includeImageReplacements && replacementSource.hasValidReplacementSource &&
+                                replacementState.processingModel && replacementState.projection.HasReplacements();
   if(data->unit == Text::Internal::Reveal::Unit::WORD)
   {
     if(!data->segmentation)
@@ -2290,13 +2314,90 @@ Text::Internal::Reveal::Plan TextVisual::BuildTextRevealSourcePlan()
       // invalid on adaptor worker threads. Own an explicit instance instead.
       data->segmentation = TextAbstraction::Segmentation::New();
     }
+    if(canIncludeImages)
+    {
+      return Text::Internal::Reveal::BuildPlanWithImageReplacements(model,
+                                                                    data->unit,
+                                                                    data->fadeDurationRatio,
+                                                                    data->segmentation,
+                                                                    replacementSource,
+                                                                    replacementState.placements);
+    }
     return Text::Internal::Reveal::BuildPlan(model, data->unit, data->fadeDurationRatio, data->segmentation);
+  }
+  if(canIncludeImages)
+  {
+    return Text::Internal::Reveal::BuildPlanWithImageReplacements(model,
+                                                                  data->unit,
+                                                                  data->fadeDurationRatio,
+                                                                  data->segmentation,
+                                                                  replacementSource,
+                                                                  replacementState.placements);
   }
   if(data->unit == Text::Internal::Reveal::Unit::PIXEL)
   {
     return Text::Internal::Reveal::BuildPixelPlan(model, data->fadeDurationRatio);
   }
   return Text::Internal::Reveal::BuildCharacterPlan(model, data->fadeDurationRatio);
+}
+
+Text::Internal::Reveal::Plan TextVisual::BuildFinalTextRevealPlan(
+  Vector<Text::ReplacementRevealTiming>& replacementTimings,
+  uint64_t&                              replacementSourceRevision)
+{
+  auto* data = GetTextVisualRevealData(mRevealData);
+  DALI_ASSERT_ALWAYS(data && data->unit != Text::Internal::Reveal::Unit::DISABLED);
+
+  replacementTimings.Clear();
+  replacementSourceRevision                                       = 0u;
+  const Text::ReplacementRenderState&    replacementState         = mController->GetReplacementRenderState();
+  const Text::ReplacementSourceSnapshot& replacementSource        = mController->GetReplacementSourceSnapshot();
+  const bool                             hasReplacementProjection = replacementSource.hasValidReplacementSource &&
+                                        replacementState.processingModel &&
+                                        replacementState.projection.HasReplacements();
+  auto sourcePlan = BuildTextRevealSourcePlan(hasReplacementProjection);
+  auto finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
+                                                       data->unit,
+                                                       data->sequence,
+                                                       data->sequenceStaggerRatio);
+  if(hasReplacementProjection)
+  {
+    replacementSourceRevision = replacementSource.sourceRevision;
+    if(!mTypesetter->ExtractReplacementRevealTimings(finalPlan,
+                                                     replacementSource,
+                                                     replacementState.placements,
+                                                     replacementTimings))
+    {
+      replacementTimings.Clear();
+      sourcePlan = BuildTextRevealSourcePlan(false);
+      finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
+                                                      data->unit,
+                                                      data->sequence,
+                                                      data->sequenceStaggerRatio);
+    }
+  }
+  return finalPlan;
+}
+
+void TextVisual::PublishReplacementRevealTimings(
+  const Vector<Text::ReplacementRevealTiming>& timings,
+  uint64_t                                     sourceRevision)
+{
+  Actor    control = mControl.GetHandle();
+  auto*    data    = GetTextVisualRevealData(mRevealData);
+  Ui::View owner   = Ui::View::DownCast(control);
+
+  const Text::ReplacementSourceSnapshot& currentSource = mController->GetReplacementSourceSnapshot();
+  if(!data || data->unit == Text::Internal::Reveal::Unit::DISABLED ||
+     sourceRevision == 0u || sourceRevision != currentSource.sourceRevision || timings.Empty())
+  {
+    ClearInlineReplacementReveal(owner);
+    return;
+  }
+  PublishInlineReplacementRevealTimings(owner,
+                                        timings,
+                                        sourceRevision,
+                                        data->progressPropertyIndex);
 }
 
 void TextVisual::RequestAsyncSizeComputation(Text::AsyncTextParameters& parameters)
@@ -2673,7 +2774,9 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     hasInlineReplacement                                 = replacementState.processingModel &&
                            replacementState.projection.HasReplacements();
     if(hasInlineReplacement &&
-       Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(*mController->GetRenderTextModel(), true) <= 0.0f)
+       Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(*mController->GetRenderTextModel(),
+                                                                 true,
+                                                                 mTypesetter->GetFontClient()) <= 0.0f)
     {
       // A replacement-only model has no text foreground to blur.
       textRevealFadeBlurEnabled = false;
@@ -2684,6 +2787,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     DALI_LOG_DEBUG_INFO("Text::Reveal foreground rendering is disabled while marquee or cutout is active\n");
   }
   RemoveTextRevealConstraints();
+  if(!textRevealEnabled)
+  {
+    PublishReplacementRevealTimings({}, 0u);
+  }
 
   TextVisualShaderFeature::FeatureBuilder featureBuilder;
   featureBuilder.EnableMultiColor(hasMultipleTextColors)
@@ -2750,12 +2857,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     Pixel::Format textPixelFormat = (containsColorGlyph || hasMultipleTextColors) ? Pixel::RGBA8888 : Pixel::L8;
 
     // Check the text direction
-    Text::Direction              textDirection = mController->GetTextDirection();
-    Text::Internal::Reveal::Plan revealPlan;
-    if(textRevealEnabled)
-    {
-      revealPlan = BuildTextRevealSourcePlan();
-    }
+    Text::Direction                       textDirection = mController->GetTextDirection();
+    Text::Internal::Reveal::Plan          revealPlan;
+    Vector<Text::ReplacementRevealTiming> replacementTimings;
+    uint64_t                              replacementSourceRevision = 0u;
 
     // Create a texture for the text without any styles
     PixelData data =
@@ -2763,10 +2868,7 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
 
     if(textRevealEnabled)
     {
-      revealPlan = mTypesetter->CreateFinalRevealPlan(revealPlan,
-                                                      revealData->unit,
-                                                      revealData->sequence,
-                                                      revealData->sequenceStaggerRatio);
+      revealPlan = BuildFinalTextRevealPlan(replacementTimings, replacementSourceRevision);
     }
 
     Text::Internal::Reveal::FadeBlurParameters fadeBlurParameters;
@@ -2776,7 +2878,8 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       fadeBlurParameters = Text::Internal::Reveal::ResolveFadeBlurParameters(
         Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(
           *mController->GetRenderTextModel(),
-          hasInlineReplacement),
+          hasInlineReplacement,
+          mTypesetter->GetFontClient()),
         revealData->blurStrength,
         static_cast<uint32_t>(std::max(1.0f, size.width)),
         static_cast<uint32_t>(std::max(1.0f, size.height)));
@@ -2982,6 +3085,14 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
 
       verifiedHeight -= maxTextureSize;
     }
+    if(mTextShaderFeatureCache.IsEnabledTextReveal())
+    {
+      PublishReplacementRevealTimings(replacementTimings, replacementSourceRevision);
+    }
+    else
+    {
+      PublishReplacementRevealTimings({}, 0u);
+    }
   }
 
   const Vector4& defaultColor = mController->GetRenderTextModel()->GetDefaultColor();
@@ -3172,12 +3283,10 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
   {
     auto* revealData = GetTextVisualRevealData(mRevealData);
     DALI_ASSERT_ALWAYS(revealData);
-    const auto sourcePlan      = BuildTextRevealSourcePlan();
-    const auto finalPlan       = mTypesetter->CreateFinalRevealPlan(sourcePlan,
-                                                                    revealData->unit,
-                                                                    revealData->sequence,
-                                                                    revealData->sequenceStaggerRatio);
-    auto       disableFadeBlur = [&]()
+    Vector<Text::ReplacementRevealTiming> replacementTimings;
+    uint64_t                              replacementSourceRevision = 0u;
+    const auto                            finalPlan                 = BuildFinalTextRevealPlan(replacementTimings, replacementSourceRevision);
+    auto                                  disableFadeBlur           = [&]()
     {
       if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur())
       {
@@ -3204,7 +3313,9 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
       const bool                          hasInlineReplacement = replacementState.processingModel &&
                                         replacementState.projection.HasReplacements();
       const float referencePixelSize =
-        Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(model, hasInlineReplacement);
+        Text::Internal::Reveal::ResolveFadeBlurReferencePixelSize(model,
+                                                                  hasInlineReplacement,
+                                                                  mTypesetter->GetFontClient());
       if(referencePixelSize > 0.0f)
       {
         fadeBlurParameters = Text::Internal::Reveal::ResolveFadeBlurParameters(
@@ -3275,10 +3386,12 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
       Sampler nearestSampler = Sampler::New();
       nearestSampler.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
       AddTexture(textureSet, metadata, nearestSampler, textureSetIndex);
+      PublishReplacementRevealTimings(replacementTimings, replacementSourceRevision);
     }
     else
     {
       disableReveal();
+      PublishReplacementRevealTimings({}, 0u);
     }
   }
 

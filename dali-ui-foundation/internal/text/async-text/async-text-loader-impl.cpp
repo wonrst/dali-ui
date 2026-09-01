@@ -1455,25 +1455,57 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
                                            !embossEnabled;
   if(renderInfo.isTextRevealEnabled && renderInfo.textPixelData)
   {
-    const auto     sourceRevealPlan = parameters.textRevealUnit == Internal::Reveal::Unit::WORD
-                                        ? Internal::Reveal::BuildPlan(*renderModel,
-                                                                      parameters.textRevealUnit,
-                                                                      parameters.textRevealFadeDurationRatio,
-                                                                      mModule.GetSegmentation())
-                                      : parameters.textRevealUnit == Internal::Reveal::Unit::PIXEL
-                                        ? Internal::Reveal::BuildPixelPlan(*renderModel,
-                                                                           parameters.textRevealFadeDurationRatio)
-                                        : Internal::Reveal::BuildCharacterPlan(*renderModel,
-                                                                               parameters.textRevealFadeDurationRatio);
-    const auto     revealPlan       = mTypesetter->CreateFinalRevealPlan(sourceRevealPlan,
-                                                                         parameters.textRevealUnit,
-                                                                         parameters.textRevealSequence,
-                                                                         parameters.textRevealSequenceStaggerRatio);
-    const uint32_t metadataWidth    = renderInfo.textPixelData.GetWidth();
-    const uint32_t metadataHeight   = renderInfo.textPixelData.GetHeight();
-    const uint32_t tileLimit        = parameters.maxTextureSize > 0
-                                        ? static_cast<uint32_t>(parameters.maxTextureSize)
-                                        : metadataHeight;
+    const bool hasReplacementProjection = replacementState && replacementState->processingModel &&
+                                          replacementState->projection.HasReplacements() &&
+                                          parameters.replacementSourceSnapshot.hasValidReplacementSource;
+    auto buildSourcePlan = [&](bool includeImageReplacements)
+    {
+      if(includeImageReplacements && hasReplacementProjection)
+      {
+        return Internal::Reveal::BuildPlanWithImageReplacements(*renderModel,
+                                                                parameters.textRevealUnit,
+                                                                parameters.textRevealFadeDurationRatio,
+                                                                mModule.GetSegmentation(),
+                                                                parameters.replacementSourceSnapshot,
+                                                                replacementState->placements);
+      }
+      return parameters.textRevealUnit == Internal::Reveal::Unit::WORD
+               ? Internal::Reveal::BuildPlan(*renderModel,
+                                             parameters.textRevealUnit,
+                                             parameters.textRevealFadeDurationRatio,
+                                             mModule.GetSegmentation())
+             : parameters.textRevealUnit == Internal::Reveal::Unit::PIXEL
+               ? Internal::Reveal::BuildPixelPlan(*renderModel,
+                                                  parameters.textRevealFadeDurationRatio)
+               : Internal::Reveal::BuildCharacterPlan(*renderModel,
+                                                      parameters.textRevealFadeDurationRatio);
+    };
+    auto sourceRevealPlan = buildSourcePlan(hasReplacementProjection);
+    auto revealPlan       = mTypesetter->CreateFinalRevealPlan(sourceRevealPlan,
+                                                               parameters.textRevealUnit,
+                                                               parameters.textRevealSequence,
+                                                               parameters.textRevealSequenceStaggerRatio);
+    if(hasReplacementProjection &&
+       !mTypesetter->ExtractReplacementRevealTimings(revealPlan,
+                                                     parameters.replacementSourceSnapshot,
+                                                     replacementState->placements,
+                                                     renderInfo.replacementRevealTimings))
+    {
+      // Keep text metadata and ImageSpan publication atomic. If the final
+      // replacement mapping is incomplete, rebuild the established compact
+      // text-only schedule rather than rasterizing an unbound timing gap.
+      renderInfo.replacementRevealTimings.Clear();
+      sourceRevealPlan = buildSourcePlan(false);
+      revealPlan       = mTypesetter->CreateFinalRevealPlan(sourceRevealPlan,
+                                                            parameters.textRevealUnit,
+                                                            parameters.textRevealSequence,
+                                                            parameters.textRevealSequenceStaggerRatio);
+    }
+    const uint32_t metadataWidth  = renderInfo.textPixelData.GetWidth();
+    const uint32_t metadataHeight = renderInfo.textPixelData.GetHeight();
+    const uint32_t tileLimit      = parameters.maxTextureSize > 0
+                                      ? static_cast<uint32_t>(parameters.maxTextureSize)
+                                      : metadataHeight;
     const Vector2  fullMetadataSize(static_cast<float>(metadataWidth), static_cast<float>(metadataHeight));
     const bool     isRendererTiled = parameters.maxTextureSize > 0 &&
                                  renderInfo.size.height > static_cast<float>(parameters.maxTextureSize);
@@ -1493,7 +1525,9 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
       const bool hasInlineReplacement = replacementState && replacementState->processingModel &&
                                         replacementState->projection.HasReplacements();
       const float referencePixelSize =
-        Internal::Reveal::ResolveFadeBlurReferencePixelSize(*renderModel, hasInlineReplacement);
+        Internal::Reveal::ResolveFadeBlurReferencePixelSize(*renderModel,
+                                                            hasInlineReplacement,
+                                                            mModule.GetFontClient());
       if(referencePixelSize > 0.0f)
       {
         fadeBlurParameters                 = Internal::Reveal::ResolveFadeBlurParameters(referencePixelSize,

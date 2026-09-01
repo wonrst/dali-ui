@@ -353,9 +353,11 @@ uint8_t QuantizeOwnershipKey(uint16_t key)
 }
 } // unnamed namespace
 
-float ResolveFadeBlurReferencePixelSize(const ModelInterface& model, bool hasInlineReplacement)
+float ResolveFadeBlurReferencePixelSize(const ModelInterface&       model,
+                                        bool                        hasInlineReplacement,
+                                        TextAbstraction::FontClient fontClient)
 {
-  return ResolveTextForegroundReferencePixelSize(model, hasInlineReplacement);
+  return ResolveTextForegroundReferencePixelSize(model, hasInlineReplacement, fontClient);
 }
 
 FadeBlurParameters ResolveFadeBlurParameters(float    referencePixelSize,

@@ -29,22 +29,21 @@ namespace Text
 {
 
 /**
- * @brief Describes how the text foreground is revealed over a normalized timeline.
+ * @brief Describes how text foreground and inline ImageSpan content are revealed.
  *
- * Reveal distributes progression across visible text and controls its
- * transition as TextRevealProgress advances from 0.0 to 1.0. Applications
- * control the playback duration by animating TextRevealProgress.
+ * Reveal distributes progression across visible text and ImageSpan content
+ * and controls its transition as TextRevealProgress advances from 0.0 to 1.0.
+ * Applications control the playback duration by animating TextRevealProgress.
  *
  * By default, text is revealed by character using one sequence, no stagger,
  * an automatically selected fade duration, and no blur. These options can be
  * configured explicitly.
  *
- * Reveal affects only the text foreground. Text decorations and other style
- * layers such as shadow, outline, underline, strikethrough, and background are
- * not affected.
- *
- * Inline replacements such as ImageSpan content are not affected by Reveal
- * and do not consume reveal units. When text is elided, hidden source text
+ * Reveal affects the text foreground and inline ImageSpan content. An
+ * ImageSpan participates as one atomic reveal item and fades as a whole.
+ * Reveal blur applies only to the text foreground. Text decorations and other
+ * style layers such as shadow, outline, underline, strikethrough, and
+ * background are not affected. When content is elided, hidden source content
  * does not consume reveal units and the ellipsis participates in the visible
  * reveal progression.
  */
@@ -73,7 +72,9 @@ public:
   static constexpr float AUTO_BLUR_STRENGTH = -1.0f;
 
   /**
-   * @brief Selects how reveal progression is distributed across visible text.
+   * @brief Selects how reveal progression is distributed across visible text and ImageSpan content.
+   *
+   * ImageSpan content participates as one atomic item in every mode.
    */
   enum class Unit : uint8_t
   {
@@ -97,6 +98,8 @@ public:
      *
      * PIXEL follows the same logical text order and shaping boundaries as
      * CHARACTER while distributing reveal timing continuously in pixel space.
+     * Inline ImageSpan content contributes its reserved width to the
+     * progression and fades as an atomic item.
      * The progression is normalized and does not correspond one-to-one with
      * physical framebuffer pixels.
      */
@@ -109,7 +112,7 @@ public:
   enum class Sequence : uint8_t
   {
     /**
-     * @brief Uses one continuous sequence for all visible text.
+     * @brief Uses one continuous sequence for visible text and ImageSpan content.
      */
     TEXT,
 
@@ -117,7 +120,7 @@ public:
      * @brief Uses an independent sequence for each final visible layout line.
      *
      * Lines created by wrapping are separate sequences. Lines without
-     * revealable text do not consume a sequence.
+     * revealable text or ImageSpan content do not consume a sequence.
      */
     LINE
   };
@@ -188,14 +191,14 @@ public:
 
 public:
   /**
-   * @brief Sets how reveal progression is distributed across visible text.
+   * @brief Sets how reveal progression is distributed across visible text and ImageSpan content.
    *
    * @param[in] unit The reveal unit.
    */
   void SetUnit(Unit unit);
 
   /**
-   * @brief Returns how reveal progression is distributed across visible text.
+   * @brief Returns how reveal progression is distributed across visible text and ImageSpan content.
    *
    * @return The reveal unit.
    */
@@ -245,7 +248,7 @@ public:
    *
    * AUTO_FADE_DURATION_RATIO selects an appropriate duration automatically.
    * Values from 0.0 to 1.0 specify the transition duration. Zero removes the
-   * transition fade, while one fades the foreground over the full timeline.
+   * transition fade, while one fades revealable content over the full timeline.
    *
    * Values outside [0.0, 1.0] are clamped, except AUTO_FADE_DURATION_RATIO.
    * NaN is normalized to 0.0.
@@ -271,6 +274,8 @@ public:
    * Zero disables blur and preserves Fade-only Reveal behavior.
    * AUTO_BLUR_STRENGTH selects a blur suitable for the final rendered text.
    * Values from 0.0 to 1.0 specify increasing visual blur strength.
+   * Blur applies only to the text foreground. ImageSpan content participates
+   * in Reveal fade but is not blurred.
    *
    * Values outside [0.0, 1.0] are clamped, except AUTO_BLUR_STRENGTH. NaN is
    * normalized to 0.0.
