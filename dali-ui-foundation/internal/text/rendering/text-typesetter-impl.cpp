@@ -55,6 +55,7 @@ namespace Text
 struct RevealRasterContext
 {
   PixelBuffer                   metadata;
+  PixelBuffer                   sequenceBlurTimingPrototype;
   const Internal::Reveal::Plan* plan{nullptr};
   GlyphIndex                    currentGlyph{0u};
 };
@@ -65,6 +66,34 @@ DALI_INIT_TRACE_FILTER(gTraceFilter, DALI_TRACE_TEXT_PERFORMANCE_MARKER, false);
 
 const float HALF(0.5f);
 const float ONE_AND_A_HALF(1.5f);
+
+bool WriteSequenceBlurTimingPrototype(RevealRasterContext* context,
+                                      uint32_t             pixelIndex,
+                                      uint32_t             unit)
+{
+  if(!context->sequenceBlurTimingPrototype || !context->plan->sequenceBlurTimingPrototype ||
+     unit >= context->plan->sequenceBlurTimingPrototype->unitToSequence.size())
+  {
+    return false;
+  }
+  const auto&    timingMap = *context->plan->sequenceBlurTimingPrototype;
+  const uint32_t sequence  = timingMap.unitToSequence[unit];
+  if(sequence >= timingMap.sequences.size())
+  {
+    return false;
+  }
+  const auto quantize = [](float value)
+  {
+    return static_cast<uint8_t>(std::round(std::max(0.0f, std::min(1.0f, value)) * 255.0f));
+  };
+  const auto& timing = timingMap.sequences[sequence];
+  uint8_t*    pixel  = context->sequenceBlurTimingPrototype.GetBuffer() + pixelIndex * 4u;
+  pixel[0u]          = quantize(timing.start);
+  pixel[1u]          = quantize(timing.end);
+  pixel[2u]          = pixel[0u];
+  pixel[3u]          = pixel[1u];
+  return true;
+}
 
 void RecordRevealPixel(RevealRasterContext* context,
                        uint32_t             pixelIndex,
@@ -92,6 +121,7 @@ void RecordRevealPixel(RevealRasterContext* context,
     pixel[1] = static_cast<uint8_t>(encoded & 0xffu);
     pixel[2] = 255u;
     pixel[3] = coverage;
+    WriteSequenceBlurTimingPrototype(context, pixelIndex, unit);
   }
 }
 
@@ -130,6 +160,7 @@ void RecordPixelRevealPixel(RevealRasterContext* context,
     pixel[1] = static_cast<uint8_t>(encoded & 0xffu);
     pixel[2] = 255u;
     pixel[3] = coverage;
+    WriteSequenceBlurTimingPrototype(context, pixelIndex, unit);
   }
 }
 
@@ -1465,7 +1496,10 @@ TextAbstraction::FontClient& Typesetter::Impl::GetFontClient()
   return mFontClient;
 }
 
-void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width, uint32_t height)
+void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata,
+                                               uint32_t width,
+                                               uint32_t height,
+                                               uint8_t* sequenceBlurTimingPrototype)
 {
   if(!metadata || width == 0u || height == 0u)
   {
@@ -1480,9 +1514,10 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
     uint32_t x;
     uint16_t start;
     uint8_t  coverage;
+    uint32_t sequenceTiming;
   };
 
-  auto collectSources = [metadata, width, rowBytes, PIXEL_SIZE](uint32_t y, std::vector<OwnershipSource>& sources)
+  auto collectSources = [metadata, sequenceBlurTimingPrototype, width, rowBytes, PIXEL_SIZE](uint32_t y, std::vector<OwnershipSource>& sources)
   {
     sources.clear();
     const uint8_t* row = metadata + static_cast<size_t>(y) * rowBytes;
@@ -1491,9 +1526,19 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
       const uint8_t* pixel = row + static_cast<size_t>(x) * PIXEL_SIZE;
       if(pixel[2u] != 0u)
       {
+        const uint8_t* sequence = sequenceBlurTimingPrototype
+                                    ? sequenceBlurTimingPrototype +
+                                        (static_cast<size_t>(y) * width + x) * PIXEL_SIZE
+                                    : nullptr;
         sources.push_back({x,
                            static_cast<uint16_t>(static_cast<uint16_t>(pixel[0u]) * 256u + pixel[1u]),
-                           pixel[3u]});
+                           pixel[3u],
+                           sequence
+                             ? (static_cast<uint32_t>(sequence[0u]) << 24u) |
+                                 (static_cast<uint32_t>(sequence[1u]) << 16u) |
+                                 (static_cast<uint32_t>(sequence[2u]) << 8u) |
+                                 sequence[3u]
+                             : 0u});
       }
     }
   };
@@ -1557,6 +1602,15 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
             // Source coverage is retained only while resolving conflicts in
             // this destination row and cleared once all candidates are known.
             destinationPixel[3u] = source.coverage;
+            if(sequenceBlurTimingPrototype)
+            {
+              uint8_t* sequence = sequenceBlurTimingPrototype +
+                                  (static_cast<size_t>(y) * width + destinationX) * PIXEL_SIZE;
+              sequence[0u] = static_cast<uint8_t>((source.sequenceTiming >> 24u) & 0xffu);
+              sequence[1u] = static_cast<uint8_t>((source.sequenceTiming >> 16u) & 0xffu);
+              sequence[2u] = static_cast<uint8_t>((source.sequenceTiming >> 8u) & 0xffu);
+              sequence[3u] = static_cast<uint8_t>(source.sequenceTiming & 0xffu);
+            }
           }
         }
       }
@@ -1584,18 +1638,32 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
   }
 }
 
-bool Typesetter::Impl::BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan)
+bool Typesetter::Impl::BeginRevealMetadata(uint32_t                      width,
+                                           uint32_t                      height,
+                                           const Internal::Reveal::Plan& plan,
+                                           bool                          sequenceBlurTimingPrototype)
 {
   DALI_ASSERT_ALWAYS(!mRevealRasterContext && "Nested reveal metadata raster is not supported");
   mRevealRasterContext           = std::make_unique<RevealRasterContext>();
   mRevealRasterContext->metadata = PixelBuffer::New(width, height, Pixel::RGBA8888);
-  if(!mRevealRasterContext->metadata)
+  if(sequenceBlurTimingPrototype)
+  {
+    mRevealRasterContext->sequenceBlurTimingPrototype = PixelBuffer::New(width, height, Pixel::RGBA8888);
+  }
+  if(!mRevealRasterContext->metadata ||
+     (sequenceBlurTimingPrototype && !mRevealRasterContext->sequenceBlurTimingPrototype))
   {
     mRevealRasterContext.reset();
     return false;
   }
   mRevealRasterContext->plan = &plan;
   memset(mRevealRasterContext->metadata.GetBuffer(), 0u, static_cast<size_t>(width) * height * 4u);
+  if(mRevealRasterContext->sequenceBlurTimingPrototype)
+  {
+    memset(mRevealRasterContext->sequenceBlurTimingPrototype.GetBuffer(),
+           0u,
+           static_cast<size_t>(width) * height * 4u);
+  }
   return true;
 }
 
@@ -1619,7 +1687,8 @@ PixelData Typesetter::Impl::EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMa
                                                       bool         coverageAware,
                                                       uint32_t     cropOffsetY,
                                                       uint32_t     cropHeight,
-                                                      bool&        fadeBlurSucceeded)
+                                                      bool&        fadeBlurSucceeded,
+                                                      PixelData*   sequenceBlurTimingPrototype)
 {
   fadeBlurSucceeded = false;
   if(!mRevealRasterContext)
@@ -1640,7 +1709,13 @@ PixelData Typesetter::Impl::EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMa
     return EndRevealMetadata();
   }
 
-  Internal::Reveal::ExpandMetadataOwnership(mRevealRasterContext->metadata.GetBuffer(), width, height);
+  uint8_t* sequenceTiming = mRevealRasterContext->sequenceBlurTimingPrototype
+                              ? mRevealRasterContext->sequenceBlurTimingPrototype.GetBuffer()
+                              : nullptr;
+  Internal::Reveal::ExpandMetadataOwnership(mRevealRasterContext->metadata.GetBuffer(),
+                                            width,
+                                            height,
+                                            sequenceTiming);
 
   uint8_t* metadata = mRevealRasterContext->metadata.GetBuffer();
   Internal::Reveal::WriteFadeBlurCoverage(normalGlyphMask, metadata, width, height);
@@ -1649,7 +1724,8 @@ PixelData Typesetter::Impl::EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMa
                                               height,
                                               fadeBlurScale,
                                               targetBlurRadius,
-                                              coverageAware);
+                                              coverageAware,
+                                              sequenceTiming);
 
   if(cropHeight > 0u)
   {
@@ -1662,11 +1738,30 @@ PixelData Typesetter::Impl::EndRevealFadeBlurMetadata(PixelBuffer& normalGlyphMa
       mRevealRasterContext.reset();
       return {};
     }
+    if(mRevealRasterContext->sequenceBlurTimingPrototype &&
+       !Internal::Reveal::CropFadeBlurBuffer(mRevealRasterContext->sequenceBlurTimingPrototype,
+                                             0u,
+                                             cropOffsetY,
+                                             width,
+                                             cropHeight))
+    {
+      mRevealRasterContext.reset();
+      return {};
+    }
   }
 
   fadeBlurSucceeded = true;
-  PixelData result  = PixelBuffer::Convert(mRevealRasterContext->metadata);
+  PixelData sequenceResult;
+  if(sequenceBlurTimingPrototype && mRevealRasterContext->sequenceBlurTimingPrototype)
+  {
+    sequenceResult = PixelBuffer::Convert(mRevealRasterContext->sequenceBlurTimingPrototype);
+  }
+  PixelData result = PixelBuffer::Convert(mRevealRasterContext->metadata);
   mRevealRasterContext.reset();
+  if(sequenceBlurTimingPrototype)
+  {
+    *sequenceBlurTimingPrototype = sequenceResult;
+  }
   return result;
 }
 

@@ -126,7 +126,8 @@ FeatureBuilder::FeatureBuilder()
   mTextGradientOverlay(TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY),
   mTextReveal(TextReveal::NO_TEXT_REVEAL),
   mTextRevealFadeBlur(TextRevealFadeBlur::NO_TEXT_REVEAL_FADE_BLUR),
-  mTextRevealFadeBlurPreserved(TextRevealFadeBlurPreserved::NO_TEXT_REVEAL_FADE_BLUR_PRESERVED)
+  mTextRevealFadeBlurPreserved(TextRevealFadeBlurPreserved::NO_TEXT_REVEAL_FADE_BLUR_PRESERVED),
+  mTextRevealSequenceBlurPrototype(TextRevealSequenceBlurPrototype::NO_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE)
 {
 }
 
@@ -200,6 +201,14 @@ FeatureBuilder& FeatureBuilder::EnableTextRevealFadeBlur(bool enableTextRevealFa
   mTextRevealFadeBlurPreserved = enableTextRevealFadeBlur && enablePreservedColorBlur
                                    ? TextRevealFadeBlurPreserved::HAS_TEXT_REVEAL_FADE_BLUR_PRESERVED
                                    : TextRevealFadeBlurPreserved::NO_TEXT_REVEAL_FADE_BLUR_PRESERVED;
+  return *this;
+}
+
+FeatureBuilder& FeatureBuilder::EnableTextRevealSequenceBlurPrototype(bool enableTextRevealSequenceBlurPrototype)
+{
+  mTextRevealSequenceBlurPrototype = enableTextRevealSequenceBlurPrototype
+                                       ? TextRevealSequenceBlurPrototype::HAS_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+                                       : TextRevealSequenceBlurPrototype::NO_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE;
   return *this;
 }
 
@@ -325,6 +334,10 @@ void FeatureBuilder::GetFragmentShaderPrefixList(std::string& fragmentShaderPref
   {
     fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_REVEAL_FADE_BLUR_PRESERVED\n";
   }
+  if(IsEnabledTextRevealSequenceBlurPrototype())
+  {
+    fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE\n";
+  }
   if(IsEnabledAnyTextGradient())
   {
     fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_GRADIENT\n";
@@ -378,13 +391,14 @@ Shader TextVisualShaderFactory::GetShader(VisualFactoryCache&                   
   VisualFactoryCache::ShaderType shaderType = featureBuilder.GetShaderType();
   if(featureBuilder.IsEnabledTextReveal())
   {
-    static_assert(static_cast<uint32_t>(VisualFactoryCache::SHADER_TYPE_MAX) < (1u << 30u),
+    static_assert(static_cast<uint32_t>(VisualFactoryCache::SHADER_TYPE_MAX) < (1u << 29u),
                   "Reveal shader cache key exceeds its base-type field");
-    // This Reveal-only map reserves two low bits for each base shader, so enum
+    // This Reveal-only map reserves three low bits for each base shader, so enum
     // growth cannot alias a feature variant of another base shader.
-    const uint32_t cacheKey = static_cast<uint32_t>(shaderType) * 4u |
+    const uint32_t cacheKey = static_cast<uint32_t>(shaderType) * 8u |
                               (featureBuilder.IsEnabledTextRevealFadeBlur() ? 1u : 0u) |
-                              (featureBuilder.IsEnabledTextRevealFadeBlurPreserved() ? 2u : 0u);
+                              (featureBuilder.IsEnabledTextRevealFadeBlurPreserved() ? 2u : 0u) |
+                              (featureBuilder.IsEnabledTextRevealSequenceBlurPrototype() ? 4u : 0u);
     const auto found = mRevealShaderIds.find(cacheKey);
     if(found != mRevealShaderIds.end())
     {

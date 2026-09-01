@@ -28,7 +28,7 @@ using namespace Dali::Ui;
 
 namespace
 {
-constexpr float       CONTROLS_PANEL_HEIGHT       = 448.0f;
+constexpr float       CONTROLS_PANEL_HEIGHT       = 528.0f;
 constexpr float       CONTROL_HEIGHT              = 34.0f;
 constexpr float       CONTROL_SPACING             = 6.0f;
 constexpr float       MENU_TITLE_WIDTH            = 86.0f;
@@ -36,13 +36,15 @@ constexpr float       STATUS_HEIGHT               = 104.0f;
 constexpr std::size_t FADE_CASE_COUNT             = 7u;
 constexpr std::size_t BLUR_CASE_COUNT             = 6u;
 constexpr std::size_t DURATION_CASE_COUNT         = 5u;
-constexpr std::size_t TEXT_CASE_COUNT             = 7u;
+constexpr std::size_t TEXT_CASE_COUNT             = 9u;
 constexpr std::size_t SEQUENCE_CASE_COUNT         = 2u;
 constexpr std::size_t STAGGER_CASE_COUNT          = 8u;
+constexpr std::size_t BLUR_MODEL_CASE_COUNT       = 2u;
+constexpr std::size_t BLUR_DURATION_CASE_COUNT    = 4u;
 constexpr std::size_t DEFAULT_DURATION_CASE_INDEX = 3u;
 constexpr std::size_t DEFAULT_TEXT_CASE_INDEX     = 1u;
-constexpr std::size_t LOCAL_IMAGE_CASE_INDEX      = 5u;
-constexpr std::size_t REMOTE_IMAGE_CASE_INDEX     = 6u;
+constexpr std::size_t LOCAL_IMAGE_CASE_INDEX      = 7u;
+constexpr std::size_t REMOTE_IMAGE_CASE_INDEX     = 8u;
 constexpr uint32_t    PANEL_COLOR                 = 0x111827;
 constexpr uint32_t    BUTTON_COLOR                = 0x1E293B;
 constexpr uint32_t    BUTTON_BORDER_COLOR         = 0x475569;
@@ -127,11 +129,13 @@ const char* const DURATION_BUTTON_LABELS[DURATION_CASE_COUNT] = {
   "8 s"};
 
 const char* const TEXT_BUTTON_LABELS[TEXT_CASE_COUNT] = {
-  "English",
+  "Single",
   "Korean",
   "Bidi",
   "Emoji",
   "Long",
+  "Lines",
+  "Wrap",
   "Image Local",
   "Image Remote"};
 
@@ -163,10 +167,25 @@ const char* const STAGGER_BUTTON_LABELS[STAGGER_CASE_COUNT] = {
   "0.75",
   "1.00"};
 
+const char* const BLUR_MODEL_BUTTON_LABELS[BLUR_MODEL_CASE_COUNT] = {
+  "Old: Unit",
+  "New: Sequence"};
+
+const float BLUR_DURATION_RATIOS[BLUR_DURATION_CASE_COUNT] = {
+  0.25f,
+  0.35f,
+  0.45f,
+  1.0f};
+
+const char* const BLUR_DURATION_BUTTON_LABELS[BLUR_DURATION_CASE_COUNT] = {
+  "25%",
+  "35%",
+  "45%",
+  "55%"};
+
 const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
-  "Your office pass is ready. Pick up your badge at the front desk and connect to the cafe\u0301 Wi-Fi when you arrive.",
-  "오늘 오후 3시 회의가 10층 Atlas 룸으로 변경되었습니다.\n"
-  "자료를 확인하고 시작 10분 전에 알림을 받아보세요.",
+  "Generating your personalized travel plan...",
+  "요청하신 내용을 분석하고 있습니다...",
   "A-1024 confirmed — تم الحجز 18:30.\n"
   "B-2048 ready — ההזמנה מוכנה 19:10.",
   "Design review with Maya 👩‍💻 at 14:00 👍🏽\n"
@@ -175,6 +194,10 @@ const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
   "and save the riverside walk for sunset. If plans change, the schedule will update automatically.\n"
   "주말 일정이 준비되었습니다. 오전 11시 30분 브런치 후 오후 2시 전시를 관람하고, "
   "해 질 무렵에는 강변 산책을 즐겨보세요.",
+  "Preparing your results now.\n"
+  "Almost everything is ready.\n"
+  "Finishing the last details.",
+  "We are preparing a detailed personalized summary of your upcoming trip, including reservations, suggested routes, weather notes, and useful reminders for every stop along the way.",
   "We're searching for the image you requested. Please wait a moment while we prepare it...",
   "We're downloading the remote image you requested. It will appear here as soon as the network request is complete..."};
 
@@ -351,6 +374,34 @@ private:
       });
     }
 
+    StackLayout blurModelControls = NewMenuRow("BLUR MODEL");
+    for(std::size_t modelIndex = 0u; modelIndex < BLUR_MODEL_CASE_COUNT; ++modelIndex)
+    {
+      mBlurModelButtons[modelIndex] = NewButton(BLUR_MODEL_BUTTON_LABELS[modelIndex]);
+      blurModelControls.Add(mBlurModelButtons[modelIndex]);
+      mBlurModelButtons[modelIndex].AsInteractive().ClickedSignal().Connect(this, [this, modelIndex](View, InputEvent)
+      {
+        mBlurModelIndex = modelIndex;
+        UpdateBlurModelButtons();
+        QueuePrototypeUniformUpdate();
+        UpdateStatus();
+      });
+    }
+
+    StackLayout blurDurationControls = NewMenuRow("BLUR TIME");
+    for(std::size_t durationIndex = 0u; durationIndex < BLUR_DURATION_CASE_COUNT; ++durationIndex)
+    {
+      mBlurDurationButtons[durationIndex] = NewButton(BLUR_DURATION_BUTTON_LABELS[durationIndex]);
+      blurDurationControls.Add(mBlurDurationButtons[durationIndex]);
+      mBlurDurationButtons[durationIndex].AsInteractive().ClickedSignal().Connect(this, [this, durationIndex](View, InputEvent)
+      {
+        mBlurDurationIndex = durationIndex;
+        UpdateBlurDurationButtons();
+        QueuePrototypeUniformUpdate();
+        UpdateStatus();
+      });
+    }
+
     StackLayout durationControls = NewMenuRow("DURATION");
     for(std::size_t durationIndex = 0u; durationIndex < DURATION_CASE_COUNT; ++durationIndex)
     {
@@ -393,6 +444,8 @@ private:
     controlsPanel.Add(staggerControls);
     controlsPanel.Add(fadeControls);
     controlsPanel.Add(blurControls);
+    controlsPanel.Add(blurModelControls);
+    controlsPanel.Add(blurDurationControls);
     controlsPanel.Add(durationControls);
     controlsPanel.Add(playbackControls);
     controlsPanel.Add(mStatus);
@@ -469,8 +522,11 @@ private:
     UpdateStaggerButtons();
     UpdateFadeButtons();
     UpdateBlurButtons();
+    UpdateBlurModelButtons();
+    UpdateBlurDurationButtons();
     UpdateDurationButtons();
     Replay();
+    QueuePrototypeUniformUpdate();
   }
 
   void SetTextCase(std::size_t textIndex)
@@ -586,6 +642,60 @@ private:
     {
       SetButtonSelected(mBlurButtons[blurIndex], blurIndex == mBlurStrengthIndex);
     }
+  }
+
+  void UpdateBlurModelButtons()
+  {
+    for(std::size_t modelIndex = 0u; modelIndex < BLUR_MODEL_CASE_COUNT; ++modelIndex)
+    {
+      SetButtonSelected(mBlurModelButtons[modelIndex], modelIndex == mBlurModelIndex);
+    }
+  }
+
+  void UpdateBlurDurationButtons()
+  {
+    for(std::size_t durationIndex = 0u; durationIndex < BLUR_DURATION_CASE_COUNT; ++durationIndex)
+    {
+      SetButtonSelected(mBlurDurationButtons[durationIndex], durationIndex == mBlurDurationIndex);
+    }
+  }
+
+  void ApplyPrototypeUniforms()
+  {
+    constexpr const char* ENABLED_UNIFORM  = "uTextRevealSequenceBlurEnabled";
+    constexpr const char* DURATION_UNIFORM = "uTextRevealSequenceBlurDurationRatio";
+    for(uint32_t rendererIndex = 0u; rendererIndex < mPreview.GetRendererCount(); ++rendererIndex)
+    {
+      Renderer renderer = mPreview.GetRendererAt(rendererIndex);
+      const Property::Index enabledIndex = renderer.GetPropertyIndex(ENABLED_UNIFORM);
+      const Property::Index durationIndex = renderer.GetPropertyIndex(DURATION_UNIFORM);
+      if(enabledIndex != Property::INVALID_INDEX)
+      {
+        renderer.SetProperty(enabledIndex, mBlurModelIndex == 0u ? 0.0f : 1.0f);
+      }
+      if(durationIndex != Property::INVALID_INDEX)
+      {
+        renderer.SetProperty(durationIndex, BLUR_DURATION_RATIOS[mBlurDurationIndex]);
+      }
+    }
+  }
+
+  void QueuePrototypeUniformUpdate()
+  {
+    ApplyPrototypeUniforms();
+    mPrototypeUniformUpdateTicks = 20u;
+    if(!mPrototypeUniformTimer)
+    {
+      mPrototypeUniformTimer = Timer::New(50u);
+      mPrototypeUniformTimer.TickSignal().Connect(this, &TextRevealController::OnPrototypeUniformTimer);
+    }
+    mPrototypeUniformTimer.Start();
+  }
+
+  bool OnPrototypeUniformTimer()
+  {
+    ApplyPrototypeUniforms();
+    return --mPrototypeUniformUpdateTicks > 0u;
   }
 
   void UpdateTextButtons()
@@ -764,6 +874,8 @@ private:
            << " | STAGGER " << STAGGER_BUTTON_LABELS[mStaggerIndex]
            << " | Fade: " << FADE_STATUS_LABELS[mFadeDurationRatioIndex]
            << " | BLUR " << BLUR_BUTTON_LABELS[mBlurStrengthIndex]
+           << " | BLUR MODEL " << BLUR_MODEL_BUTTON_LABELS[mBlurModelIndex]
+           << " " << BLUR_DURATION_BUTTON_LABELS[mBlurDurationIndex]
            << " | DURATION " << std::fixed << std::setprecision(1) << GetAnimationDuration() << " s"
            << "\nPATH " << (mAsync ? "Async" : "Sync")
            << " | FILL " << (mGradientEnabled ? "Gradient" : "Solid")
@@ -819,35 +931,41 @@ private:
   }
 
 private:
-  Application&                            mApplication;
-  Label                                   mPreview;
-  Label                                   mUnitButton;
-  std::array<Label, TEXT_CASE_COUNT>       mTextButtons;
-  std::array<Label, SEQUENCE_CASE_COUNT>   mSequenceButtons;
-  std::array<Label, STAGGER_CASE_COUNT>    mStaggerButtons;
-  std::array<Label, FADE_CASE_COUNT>       mFadeButtons;
-  std::array<Label, BLUR_CASE_COUNT>       mBlurButtons;
-  std::array<Label, DURATION_CASE_COUNT>   mDurationButtons;
-  Label                                   mAsyncButton;
-  Label                                   mFillButton;
-  Label                                   mRevealButton;
-  Label                                   mStopPlayButton;
-  Label                                   mStatus;
-  Animation                               mAnimation;
-  std::string                             mPlaybackStatus;
-  Text::Reveal::Unit                      mUnit{Text::Reveal::Unit::CHARACTER};
-  std::size_t                             mSequenceIndex{0u};
-  std::size_t                             mStaggerIndex{0u};
-  std::size_t                             mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
-  std::size_t                             mFadeDurationRatioIndex{0u};
-  std::size_t                             mBlurStrengthIndex{0u};
-  std::size_t                             mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
-  bool                                    mAsync{false};
-  bool                                    mGradientEnabled{true};
-  bool                                    mRevealEnabled{true};
-  bool                                    mAnimationRunning{false};
-  float                                   mAnimationTarget{1.0f};
-  float                                   mUiScale{1.0f};
+  Application&                               mApplication;
+  Label                                      mPreview;
+  Label                                      mUnitButton;
+  std::array<Label, TEXT_CASE_COUNT>          mTextButtons;
+  std::array<Label, SEQUENCE_CASE_COUNT>      mSequenceButtons;
+  std::array<Label, STAGGER_CASE_COUNT>       mStaggerButtons;
+  std::array<Label, FADE_CASE_COUNT>          mFadeButtons;
+  std::array<Label, BLUR_CASE_COUNT>          mBlurButtons;
+  std::array<Label, BLUR_MODEL_CASE_COUNT>    mBlurModelButtons;
+  std::array<Label, BLUR_DURATION_CASE_COUNT> mBlurDurationButtons;
+  std::array<Label, DURATION_CASE_COUNT>      mDurationButtons;
+  Label                                      mAsyncButton;
+  Label                                      mFillButton;
+  Label                                      mRevealButton;
+  Label                                      mStopPlayButton;
+  Label                                      mStatus;
+  Animation                                  mAnimation;
+  Timer                                      mPrototypeUniformTimer;
+  std::string                                mPlaybackStatus;
+  Text::Reveal::Unit                         mUnit{Text::Reveal::Unit::CHARACTER};
+  std::size_t                                mSequenceIndex{1u};
+  std::size_t                                mStaggerIndex{0u};
+  std::size_t                                mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
+  std::size_t                                mFadeDurationRatioIndex{0u};
+  std::size_t                                mBlurStrengthIndex{1u};
+  std::size_t                                mBlurModelIndex{1u};
+  std::size_t                                mBlurDurationIndex{1u};
+  std::size_t                                mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
+  uint32_t                                   mPrototypeUniformUpdateTicks{0u};
+  bool                                       mAsync{false};
+  bool                                       mGradientEnabled{true};
+  bool                                       mRevealEnabled{true};
+  bool                                       mAnimationRunning{false};
+  float                                      mAnimationTarget{1.0f};
+  float                                      mUiScale{1.0f};
 };
 
 int DALI_EXPORT_API main(int argc, char** argv)

@@ -57,8 +57,13 @@ namespace Reveal
  * @param[in,out] metadata A tightly packed RGBA8888 Reveal metadata buffer.
  * @param[in] width The buffer width in pixels.
  * @param[in] height The buffer height in pixels.
+ * @param[in,out] sequenceBlurTimingPrototype Optional RGBA8888 sidecar whose
+ *                source sequence timing follows ownership expansion.
  */
-void ExpandMetadataOwnership(uint8_t* metadata, uint32_t width, uint32_t height);
+void ExpandMetadataOwnership(uint8_t* metadata,
+                             uint32_t width,
+                             uint32_t height,
+                             uint8_t* sequenceBlurTimingPrototype = nullptr);
 } // namespace Reveal
 } // namespace Internal
 
@@ -130,7 +135,10 @@ public:
    */
   TextAbstraction::FontClient& GetFontClient();
 
-  bool BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan);
+  bool BeginRevealMetadata(uint32_t                      width,
+                           uint32_t                      height,
+                           const Internal::Reveal::Plan& plan,
+                           bool                          sequenceBlurTimingPrototype);
 
   PixelData EndRevealMetadata();
 
@@ -147,7 +155,8 @@ public:
                                       bool         coverageAware,
                                       uint32_t     cropOffsetY,
                                       uint32_t     cropHeight,
-                                      bool&        fadeBlurSucceeded);
+                                      bool&        fadeBlurSucceeded,
+                                      PixelData*   sequenceBlurTimingPrototype);
 
 public: // Image buffer creation
   void DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth, const uint32_t bufferHeight,

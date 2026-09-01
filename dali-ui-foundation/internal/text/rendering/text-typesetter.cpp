@@ -22,8 +22,10 @@
 #include <dali/public-api/common/constants.h>
 #include <dali/public-api/math/math-utils.h>
 #include <memory.h>
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <vector>
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/glyph-metrics-helper.h>
@@ -683,7 +685,8 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
 Internal::Reveal::Plan Typesetter::CreateFinalRevealPlan(const Internal::Reveal::Plan& sourcePlan,
                                                          Internal::Reveal::Unit        unit,
                                                          Internal::Reveal::Sequence    sequence,
-                                                         float                         sequenceStaggerRatio)
+                                                         float                         sequenceStaggerRatio,
+                                                         bool                          includeSequenceBlurTimingPrototype)
 {
   auto& viewModel = *mImpl->GetViewModel();
   viewModel.EnableFinalGlyphMapping();
@@ -718,6 +721,77 @@ Internal::Reveal::Plan Typesetter::CreateFinalRevealPlan(const Internal::Reveal:
                                                 viewModel.GetLines(),
                                                 viewModel.GetNumberOfLines(),
                                                 sequenceStaggerRatio);
+  }
+
+  if(includeSequenceBlurTimingPrototype &&
+     sequence == Internal::Reveal::Sequence::LINE &&
+     finalPlan.GetUnitCount() > 0u)
+  {
+    const uint32_t        unitCount = finalPlan.GetUnitCount();
+    const LineRun*        lines     = viewModel.GetLines();
+    const Length          lineCount = viewModel.GetNumberOfLines();
+    std::vector<uint32_t> unitLine(unitCount, Internal::Reveal::NO_UNIT);
+    auto                  mapRun = [&](uint32_t line, const GlyphRun& run)
+    {
+      if(run.glyphIndex > finalPlan.glyphToUnit.size() ||
+         run.numberOfGlyphs > finalPlan.glyphToUnit.size() - run.glyphIndex)
+      {
+        return false;
+      }
+      const uint32_t end = run.glyphIndex + run.numberOfGlyphs;
+      for(uint32_t glyph = run.glyphIndex; glyph < end; ++glyph)
+      {
+        const uint32_t mappedUnit = finalPlan.glyphToUnit[glyph];
+        if(mappedUnit == Internal::Reveal::NO_UNIT)
+        {
+          continue;
+        }
+        if(mappedUnit >= unitCount ||
+           (unitLine[mappedUnit] != Internal::Reveal::NO_UNIT && unitLine[mappedUnit] != line))
+        {
+          return false;
+        }
+        unitLine[mappedUnit] = line;
+      }
+      return true;
+    };
+
+    bool valid = lines && lineCount > 0u;
+    for(uint32_t line = 0u; valid && line < lineCount; ++line)
+    {
+      valid = mapRun(line, lines[line].glyphRun) &&
+              (!lines[line].isSplitToTwoHalves || mapRun(line, lines[line].glyphRunSecondHalf));
+    }
+    valid = valid && std::all_of(unitLine.begin(), unitLine.end(), [](uint32_t line)
+    {
+      return line != Internal::Reveal::NO_UNIT;
+    });
+
+    if(valid)
+    {
+      auto timing = std::make_shared<Internal::Reveal::SequenceBlurTimingMap>();
+      timing->unitToSequence.resize(unitCount, Internal::Reveal::NO_UNIT);
+      std::vector<uint32_t> lineToSequence(lineCount, Internal::Reveal::NO_UNIT);
+      for(uint32_t unitIndex = 0u; unitIndex < unitCount; ++unitIndex)
+      {
+        const uint32_t line = unitLine[unitIndex];
+        if(lineToSequence[line] == Internal::Reveal::NO_UNIT)
+        {
+          lineToSequence[line] = static_cast<uint32_t>(timing->sequences.size());
+          timing->sequences.push_back({1.0f, 0.0f});
+        }
+        const uint32_t sequenceIndex      = lineToSequence[line];
+        timing->unitToSequence[unitIndex] = sequenceIndex;
+        auto&       sequenceTiming        = timing->sequences[sequenceIndex];
+        const float spatialSpan           = unitIndex < finalPlan.pixelUnitTiming.size()
+                                              ? finalPlan.pixelUnitTiming[unitIndex].progressionSpan
+                                              : 0.0f;
+        sequenceTiming.start              = std::min(sequenceTiming.start, finalPlan.unitStart[unitIndex]);
+        sequenceTiming.end                = std::max(sequenceTiming.end,
+                                                     finalPlan.unitStart[unitIndex] + spatialSpan + finalPlan.fadeDuration);
+      }
+      finalPlan.sequenceBlurTimingPrototype = std::move(timing);
+    }
   }
   return finalPlan;
 }
@@ -801,8 +875,13 @@ PixelData Typesetter::RenderTextRevealMetadata(
   float                         targetBlurRadius,
   bool                          fadeBlurHasPreservedColor,
   uint32_t                      fadeBlurGuardBand,
-  bool*                         fadeBlurSucceeded)
+  bool*                         fadeBlurSucceeded,
+  PixelData*                    sequenceBlurTimingPrototype)
 {
+  if(sequenceBlurTimingPrototype)
+  {
+    *sequenceBlurTimingPrototype = {};
+  }
   if(fadeBlurSucceeded)
   {
     *fadeBlurSucceeded = fadeBlurScale <= 0.0f;
@@ -860,7 +939,9 @@ PixelData Typesetter::RenderTextRevealMetadata(
 
   const uint32_t width  = static_cast<uint32_t>(tileSize.width);
   const uint32_t height = visibleHeight + topGuard + bottomGuard;
-  if(!mImpl->BeginRevealMetadata(width, height, plan))
+  const bool     createSequenceBlurTimingPrototype =
+    sequenceBlurTimingPrototype && plan.sequenceBlurTimingPrototype;
+  if(!mImpl->BeginRevealMetadata(width, height, plan, createSequenceBlurTimingPrototype))
   {
     return {};
   }
@@ -880,7 +961,8 @@ PixelData Typesetter::RenderTextRevealMetadata(
                                                            !fadeBlurHasPreservedColor,
                                                            topGuard,
                                                            visibleHeight,
-                                                           succeeded);
+                                                           succeeded,
+                                                           sequenceBlurTimingPrototype);
     if(fadeBlurSucceeded)
     {
       *fadeBlurSucceeded = succeeded;

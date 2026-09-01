@@ -1758,6 +1758,178 @@ int UtcDaliTextRevealFadeBlurMetadataP(void)
   END_TEST;
 }
 
+int UtcDaliTextRevealSequenceBlurV2MetadataP(void)
+{
+  UiTestApplication application;
+
+  // Vertically adjacent line owners stress cross-line blur overlap. The
+  // sidecar follows blur ownership without ever replacing foreground RG.
+  constexpr uint32_t HEIGHT = 21u;
+  std::vector<uint8_t> metadata(HEIGHT * 4u, 0u);
+  std::vector<uint8_t> sequence(HEIGHT * 4u, 0u);
+  auto writeSource = [&](uint32_t y, uint16_t start, uint8_t sequenceStart, uint8_t sequenceEnd)
+  {
+    uint8_t* metadataPixel = metadata.data() + y * 4u;
+    metadataPixel[0u]      = static_cast<uint8_t>((start >> 8u) & 0xffu);
+    metadataPixel[1u]      = static_cast<uint8_t>(start & 0xffu);
+    metadataPixel[2u]      = 255u;
+    metadataPixel[3u]      = 255u;
+    uint8_t* sequencePixel = sequence.data() + y * 4u;
+    sequencePixel[0u] = sequenceStart;
+    sequencePixel[1u] = sequenceEnd;
+    sequencePixel[2u] = sequenceStart;
+    sequencePixel[3u] = sequenceEnd;
+  };
+  for(uint32_t x = 8u; x <= 10u; ++x)
+  {
+    writeSource(x, 0u, 0u, 100u);
+  }
+  writeSource(12u, 65534u, 120u, 255u);
+
+  Reveal::MaterializeFadeBlurTiming(metadata.data(),
+                                    1u,
+                                    HEIGHT,
+                                    1.0f,
+                                    4.0f,
+                                    false,
+                                    sequence.data());
+  const uint8_t* earlyForegroundMetadata = metadata.data() + 10u * 4u;
+  const uint8_t* earlyForegroundSequence = sequence.data() + 10u * 4u;
+  DALI_TEST_EQUALS(earlyForegroundMetadata[0u], 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundMetadata[1u], 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundMetadata[2u], 255u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundSequence[0u], 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundSequence[1u], 100u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundSequence[2u], 120u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlyForegroundSequence[3u], 255u, TEST_LOCATION);
+
+  // Real two-line rasterization must leave the production RG16/B8/A8 bytes
+  // unchanged while publishing two independent final-line envelopes.
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetText("Sequence blur line zero\nSequence blur line one");
+  controller->SetDefaultFontSize(24.0f, UiText::Controller::PIXEL_SIZE);
+  controller->SetMultiLineEnabled(true);
+  const Vector2 layoutSize(300.0f, 100.0f);
+  controller->Relayout(layoutSize);
+  const UiText::ModelInterface* model = controller->GetRenderTextModel();
+  DALI_TEST_CHECK(model && model->GetNumberOfLines() == 2u);
+  UiText::TypesetterPtr typesetter = UiText::Typesetter::New(model);
+  const Reveal::Plan sourcePlan = Reveal::BuildCharacterPlan(*model, 0.25f);
+  const Reveal::Plan productionPlan = typesetter->CreateFinalRevealPlan(sourcePlan,
+                                                                         Reveal::Unit::CHARACTER,
+                                                                         Reveal::Sequence::LINE,
+                                                                         0.05f);
+  const Reveal::Plan v2Plan = typesetter->CreateFinalRevealPlan(sourcePlan,
+                                                                 Reveal::Unit::CHARACTER,
+                                                                 Reveal::Sequence::LINE,
+                                                                 0.05f,
+                                                                 true);
+  DALI_TEST_CHECK(!productionPlan.sequenceBlurTimingPrototype);
+  DALI_TEST_CHECK(v2Plan.sequenceBlurTimingPrototype);
+  DALI_TEST_EQUALS(v2Plan.sequenceBlurTimingPrototype->sequences.size(), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(v2Plan.unitStart.size(), productionPlan.unitStart.size(), TEST_LOCATION);
+  for(uint32_t unit = 0u; unit < v2Plan.GetUnitCount(); ++unit)
+  {
+    DALI_TEST_EQUALS(v2Plan.unitStart[unit], productionPlan.unitStart[unit], EPSILON, TEST_LOCATION);
+  }
+
+  float productionFade = 0.0f;
+  bool  productionSucceeded = false;
+  PixelData productionMetadata = typesetter->RenderTextRevealMetadata(layoutSize,
+                                                                       UiText::Direction::LEFT_TO_RIGHT,
+                                                                       productionPlan,
+                                                                       productionFade,
+                                                                       0u,
+                                                                       Size::ZERO,
+                                                                       false,
+                                                                       Size::ZERO,
+                                                                       0.5f,
+                                                                       6.0f,
+                                                                       false,
+                                                                       0u,
+                                                                       &productionSucceeded);
+  float v2Fade = 0.0f;
+  bool  v2Succeeded = false;
+  PixelData sequenceMetadata;
+  PixelData v2Metadata = typesetter->RenderTextRevealMetadata(layoutSize,
+                                                               UiText::Direction::LEFT_TO_RIGHT,
+                                                               v2Plan,
+                                                               v2Fade,
+                                                               0u,
+                                                               Size::ZERO,
+                                                               false,
+                                                               Size::ZERO,
+                                                               0.5f,
+                                                               6.0f,
+                                                               false,
+                                                               0u,
+                                                               &v2Succeeded,
+                                                               &sequenceMetadata);
+  DALI_TEST_CHECK(productionSucceeded && v2Succeeded);
+  DALI_TEST_CHECK(productionMetadata && v2Metadata && sequenceMetadata);
+  DALI_TEST_EQUALS(sequenceMetadata.GetPixelFormat(), Pixel::RGBA8888, TEST_LOCATION);
+  DALI_TEST_EQUALS(sequenceMetadata.GetWidth(), v2Metadata.GetWidth(), TEST_LOCATION);
+  DALI_TEST_EQUALS(sequenceMetadata.GetHeight(), v2Metadata.GetHeight(), TEST_LOCATION);
+  DALI_TEST_EQUALS(v2Fade, productionFade, EPSILON, TEST_LOCATION);
+  const auto productionPixels = Dali::Integration::GetPixelDataBuffer(productionMetadata);
+  const auto v2Pixels         = Dali::Integration::GetPixelDataBuffer(v2Metadata);
+  DALI_TEST_CHECK(productionPixels.buffer && v2Pixels.buffer);
+  for(uint32_t y = 0u; y < v2Metadata.GetHeight(); ++y)
+  {
+    DALI_TEST_EQUALS(std::memcmp(productionPixels.buffer + static_cast<size_t>(y) * productionMetadata.GetStrideBytes(),
+                                 v2Pixels.buffer + static_cast<size_t>(y) * v2Metadata.GetStrideBytes(),
+                                 static_cast<size_t>(v2Metadata.GetWidth()) * 4u),
+                     0,
+                     TEST_LOCATION);
+  }
+
+  Ui::Label label = Ui::Label::New("Sequence blur line zero\nSequence blur line one");
+  label.SetProperty(Actor::Property::SIZE, Vector3(300.0f, 100.0f, 0.0f));
+  label.SetProperty(Ui::Label::Property::MULTI_LINE, true);
+  Ui::Text::Reveal reveal;
+  reveal.SetUnit(Ui::Text::Reveal::Unit::CHARACTER);
+  reveal.SetSequence(Ui::Text::Reveal::Sequence::LINE);
+  reveal.SetSequenceStaggerRatio(0.05f);
+  reveal.SetBlurStrength(Ui::Text::Reveal::AUTO_BLUR_STRENGTH);
+  label.SetTextReveal(reveal);
+  label.SetTextRevealProgress(0.0f);
+  application.GetScene().Add(label);
+  application.SendNotification();
+  application.Render(16u);
+  application.SendNotification();
+  application.Render(16u);
+  DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+  Renderer renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+  const Property::Index enabledIndex = renderer.GetPropertyIndex("uTextRevealSequenceBlurEnabled");
+  const Property::Index durationIndex = renderer.GetPropertyIndex("uTextRevealSequenceBlurDurationRatio");
+  DALI_TEST_CHECK(enabledIndex != Property::INVALID_INDEX);
+  DALI_TEST_CHECK(durationIndex != Property::INVALID_INDEX);
+  renderer.SetProperty(enabledIndex, 1.0f);
+  renderer.SetProperty(durationIndex, 0.35f);
+
+  TestGlAbstraction& gl = application.GetGlAbstraction();
+  gl.EnableTextureCallTrace(true);
+  gl.ResetTextureCallStack();
+  for(uint32_t frame = 0u; frame < 100u; ++frame)
+  {
+    label.SetTextRevealProgress(static_cast<float>(frame + 1u) / 100.0f);
+    application.SendNotification();
+    application.Render(1u);
+    DALI_TEST_CHECK(label.GetRendererAt(0u) == renderer);
+    DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), 3u, TEST_LOCATION);
+  }
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+
+  label.SetTextReveal(Ui::Text::Reveal::None());
+  application.SendNotification();
+  application.Render(16u);
+  DALI_TEST_EQUALS(label.GetRendererAt(0u).GetTextures().GetTextureCount(), 1u, TEST_LOCATION);
+
+  END_TEST;
+}
+
 int UtcDaliTextRevealFadeBlurProcessorP(void)
 {
   constexpr uint32_t PIXEL_SIZE = 4u;

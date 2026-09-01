@@ -207,10 +207,11 @@ void ApplyBoxBlurPass(PixelBuffer& buffer, PixelBuffer& temporary, uint32_t radi
   }
 }
 
-void SlidingMaximum(const std::vector<uint16_t>& input,
-                    std::vector<uint16_t>&       output,
-                    std::vector<uint32_t>&       queue,
-                    uint32_t                     radius)
+template<typename Timing>
+void SlidingMaximum(const std::vector<Timing>& input,
+                    std::vector<Timing>&       output,
+                    std::vector<uint32_t>&     queue,
+                    uint32_t                   radius)
 {
   const uint32_t length = static_cast<uint32_t>(input.size());
   if(length == 0u || radius == 0u)
@@ -239,17 +240,17 @@ void SlidingMaximum(const std::vector<uint16_t>& input,
     {
       ++head;
     }
-    output[destination] = head < tail ? input[queue[head]] : 0u;
+    output[destination] = head < tail ? input[queue[head]] : Timing{};
   }
 }
 
-template<typename Read, typename Write>
+template<typename Timing, typename Read, typename Write>
 void FilterLine(uint32_t               length,
                 uint32_t               radius,
                 Read&&                 read,
                 Write&&                write,
-                std::vector<uint16_t>& input,
-                std::vector<uint16_t>& output,
+                std::vector<Timing>&   input,
+                std::vector<Timing>&   output,
                 std::vector<uint32_t>& queue)
 {
   input.resize(length);
@@ -266,8 +267,9 @@ void FilterLine(uint32_t               length,
   }
 }
 
-void ApplyHorizontalMaximum(std::vector<uint16_t>& timing, uint32_t width, uint32_t height, uint32_t radius,
-                            std::vector<uint16_t>& input, std::vector<uint16_t>& output, std::vector<uint32_t>& queue)
+template<typename Timing>
+void ApplyHorizontalMaximum(std::vector<Timing>& timing, uint32_t width, uint32_t height, uint32_t radius,
+                            std::vector<Timing>& input, std::vector<Timing>& output, std::vector<uint32_t>& queue)
 {
   for(uint32_t y = 0u; y < height; ++y)
   {
@@ -275,33 +277,35 @@ void ApplyHorizontalMaximum(std::vector<uint16_t>& timing, uint32_t width, uint3
     FilterLine(width, radius,
                [&](uint32_t x)
     { return timing[row + x]; },
-               [&](uint32_t x, uint16_t value)
+               [&](uint32_t x, Timing value)
     { timing[row + x] = value; },
                input, output, queue);
   }
 }
 
-void ApplyVerticalMaximum(std::vector<uint16_t>& timing, uint32_t width, uint32_t height, uint32_t radius,
-                          std::vector<uint16_t>& input, std::vector<uint16_t>& output, std::vector<uint32_t>& queue)
+template<typename Timing>
+void ApplyVerticalMaximum(std::vector<Timing>& timing, uint32_t width, uint32_t height, uint32_t radius,
+                          std::vector<Timing>& input, std::vector<Timing>& output, std::vector<uint32_t>& queue)
 {
   for(uint32_t x = 0u; x < width; ++x)
   {
     FilterLine(height, radius,
                [&](uint32_t y)
     { return timing[static_cast<size_t>(y) * width + x]; },
-               [&](uint32_t y, uint16_t value)
+               [&](uint32_t y, Timing value)
     { timing[static_cast<size_t>(y) * width + x] = value; },
                input, output, queue);
   }
 }
 
-void ApplyDiagonalMaximum(std::vector<uint16_t>& timing,
+template<typename Timing>
+void ApplyDiagonalMaximum(std::vector<Timing>&   timing,
                           uint32_t               width,
                           uint32_t               height,
                           uint32_t               radius,
                           bool                   rising,
-                          std::vector<uint16_t>& input,
-                          std::vector<uint16_t>& output,
+                          std::vector<Timing>&   input,
+                          std::vector<Timing>&   output,
                           std::vector<uint32_t>& queue)
 {
   const uint32_t lineCount = width + height - 1u;
@@ -323,7 +327,7 @@ void ApplyDiagonalMaximum(std::vector<uint16_t>& timing,
       const int32_t y = startY + static_cast<int32_t>(index);
       return timing[static_cast<size_t>(y) * width + static_cast<uint32_t>(x)];
     },
-               [&](uint32_t index, uint16_t value)
+               [&](uint32_t index, Timing value)
     {
       const int32_t x                                                   = rising ? startX + static_cast<int32_t>(index) : startX - static_cast<int32_t>(index);
       const int32_t y                                                   = startY + static_cast<int32_t>(index);
@@ -351,6 +355,17 @@ uint8_t QuantizeOwnershipKey(uint16_t key)
            ? 0u
            : static_cast<uint8_t>((static_cast<uint32_t>(key - 1u) * 255u + 65533u) / 65534u);
 }
+
+struct SequenceBlurOwnership
+{
+  uint16_t owner{0u};
+  uint32_t sequenceTiming{0u};
+
+  bool operator<=(const SequenceBlurOwnership& rhs) const
+  {
+    return owner <= rhs.owner;
+  }
+};
 } // unnamed namespace
 
 float ResolveFadeBlurReferencePixelSize(const ModelInterface&       model,
@@ -601,7 +616,8 @@ void MaterializeFadeBlurTiming(uint8_t* metadata,
                                uint32_t height,
                                float    scale,
                                float    targetRadius,
-                               bool     coverageAware)
+                               bool     coverageAware,
+                               uint8_t* sequenceBlurTimingPrototype)
 {
   DALI_TRACE_SCOPE(gTraceFilter, "DALI_TEXT_REVEAL_FADE_BLUR_OWNERSHIP");
   if(!metadata || width == 0u || height == 0u)
@@ -649,6 +665,58 @@ void MaterializeFadeBlurTiming(uint8_t* metadata,
   const uint32_t timingMaxY   = std::min(height - 1u, sourceMaxY + footprintExtent);
   const uint32_t timingWidth  = timingMaxX - timingMinX + 1u;
   const uint32_t timingHeight = timingMaxY - timingMinY + 1u;
+
+  if(sequenceBlurTimingPrototype)
+  {
+    std::vector<SequenceBlurOwnership> timing(static_cast<size_t>(timingWidth) * timingHeight);
+    for(uint32_t y = 0u; y < timingHeight; ++y)
+    {
+      const uint32_t sourceY = timingMinY + y;
+      for(uint32_t x = 0u; x < timingWidth; ++x)
+      {
+        const uint32_t sourceX                           = timingMinX + x;
+        const size_t   pixelIndex                        = static_cast<size_t>(sourceY) * width + sourceX;
+        const uint8_t* sequence                          = sequenceBlurTimingPrototype + pixelIndex * 4u;
+        timing[static_cast<size_t>(y) * timingWidth + x] = {
+          GetRevealOwnershipKey(metadata + pixelIndex * METADATA_PIXEL_SIZE),
+          (static_cast<uint32_t>(sequence[0u]) << 24u) |
+            (static_cast<uint32_t>(sequence[1u]) << 16u) |
+            (static_cast<uint32_t>(sequence[2u]) << 8u) |
+            sequence[3u]};
+      }
+    }
+
+    std::vector<SequenceBlurOwnership> input;
+    std::vector<SequenceBlurOwnership> output;
+    std::vector<uint32_t>              queue;
+    input.reserve(std::max(timingWidth, timingHeight));
+    output.reserve(std::max(timingWidth, timingHeight));
+    queue.reserve(std::max(timingWidth, timingHeight));
+
+    ApplyHorizontalMaximum(timing, timingWidth, timingHeight, axisRadius, input, output, queue);
+    ApplyVerticalMaximum(timing, timingWidth, timingHeight, axisRadius, input, output, queue);
+    ApplyDiagonalMaximum(timing, timingWidth, timingHeight, diagonalRadius, true, input, output, queue);
+    ApplyDiagonalMaximum(timing, timingWidth, timingHeight, diagonalRadius, false, input, output, queue);
+
+    for(uint32_t y = 0u; y < timingHeight; ++y)
+    {
+      const uint32_t destinationY = timingMinY + y;
+      for(uint32_t x = 0u; x < timingWidth; ++x)
+      {
+        const uint32_t destinationX   = timingMinX + x;
+        const size_t   pixelIndex     = static_cast<size_t>(destinationY) * width + destinationX;
+        uint8_t*       pixel          = metadata + pixelIndex * METADATA_PIXEL_SIZE;
+        uint8_t*       sequence       = sequenceBlurTimingPrototype + pixelIndex * 4u;
+        const auto&    selected       = timing[static_cast<size_t>(y) * timingWidth + x];
+        const bool     suppress       = coverageAware && pixel[3u] < COVERAGE_TIMING_THRESHOLD;
+        pixel[2u]                     = suppress ? 0u : QuantizeOwnershipKey(selected.owner);
+        const uint32_t sequenceTiming = suppress ? 0u : selected.sequenceTiming;
+        sequence[2u]                  = static_cast<uint8_t>((sequenceTiming >> 8u) & 0xffu);
+        sequence[3u]                  = static_cast<uint8_t>(sequenceTiming & 0xffu);
+      }
+    }
+    return;
+  }
 
   std::vector<uint16_t> timing(static_cast<size_t>(timingWidth) * timingHeight);
   for(uint32_t y = 0u; y < timingHeight; ++y)

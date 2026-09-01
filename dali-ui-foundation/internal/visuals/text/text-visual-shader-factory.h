@@ -150,6 +150,15 @@ enum Type
 };
 } // namespace TextRevealFadeBlurPreserved
 
+namespace TextRevealSequenceBlurPrototype
+{
+enum Type
+{
+  NO_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE = 0,
+  HAS_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+};
+} // namespace TextRevealSequenceBlurPrototype
+
 /**
  * @brief Collection of current text visual feature.
  */
@@ -167,6 +176,7 @@ public:
   FeatureBuilder& EnableTextGradientOverlay(bool enableTextGradientOverlay);
   FeatureBuilder& EnableTextReveal(bool enableTextReveal);
   FeatureBuilder& EnableTextRevealFadeBlur(bool enableTextRevealFadeBlur, bool enablePreservedColorBlur);
+  FeatureBuilder& EnableTextRevealSequenceBlurPrototype(bool enableTextRevealSequenceBlurPrototype);
 
   VisualFactoryCache::ShaderType GetShaderType() const;
   void                           GetVertexShaderPrefixList(std::string& vertexShaderPrefixList) const;
@@ -228,6 +238,12 @@ public:
     return IsEnabledTextRevealFadeBlur() &&
            mTextRevealFadeBlurPreserved == TextRevealFadeBlurPreserved::HAS_TEXT_REVEAL_FADE_BLUR_PRESERVED;
   }
+  bool IsEnabledTextRevealSequenceBlurPrototype() const
+  {
+    return IsEnabledTextRevealFadeBlur() &&
+           mTextRevealSequenceBlurPrototype ==
+             TextRevealSequenceBlurPrototype::HAS_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE;
+  }
 
 private:
   TextMultiColor::Type
@@ -243,6 +259,8 @@ private:
   TextReveal::Type                  mTextReveal : 2;                  ///< Sequential foreground reveal shader variant.
   TextRevealFadeBlur::Type          mTextRevealFadeBlur : 2;          ///< Whether Reveal uses preblur composition.
   TextRevealFadeBlurPreserved::Type mTextRevealFadeBlurPreserved : 2; ///< Adds preserved-color preblur sampling.
+  TextRevealSequenceBlurPrototype::Type
+    mTextRevealSequenceBlurPrototype : 2; ///< Temporary V2 sidecar timing variant.
 };
 
 } // namespace TextVisualShaderFeature

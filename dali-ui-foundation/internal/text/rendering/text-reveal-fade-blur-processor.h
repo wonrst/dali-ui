@@ -145,7 +145,8 @@ void MaterializeFadeBlurTiming(uint8_t* metadata,
                                uint32_t height,
                                float    scale,
                                float    targetRadius,
-                               bool     coverageAware);
+                               bool     coverageAware,
+                               uint8_t* sequenceBlurTimingPrototype = nullptr);
 
 } // namespace Reveal
 } // namespace Internal

@@ -36,6 +36,9 @@ UNIFORM sampler2D sTextRevealFadeBlurPreserved;
 #ifdef IS_REQUIRED_TEXT_REVEAL
 UNIFORM sampler2D sTextRevealMetadata;
 #endif
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+UNIFORM sampler2D sTextRevealSequenceBlurPrototype;
+#endif
 
 UNIFORM_BLOCK FragBlock
 {
@@ -87,6 +90,10 @@ UNIFORM_BLOCK FragBlock
   #ifdef IS_REQUIRED_TEXT_REVEAL
   UNIFORM highp float uTextRevealProgress;
   UNIFORM highp float uTextRevealFadeDuration;
+    #ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+    UNIFORM highp float uTextRevealSequenceBlurEnabled;
+    UNIFORM highp float uTextRevealSequenceBlurDurationRatio;
+    #endif
   #endif
 };
 
@@ -212,6 +219,16 @@ highp float ResolveTextRevealFadeBlurProgress(highp float normalizedStart)
   localProgress *= sign(max(revealProgress, 0.0));
   return mix(localProgress, 1.0, step(1.0, revealProgress));
 }
+
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+highp float ResolveTextRevealSequenceSharpProgress(highp float sequenceStart, highp float sequenceEnd)
+{
+  highp float duration = max((sequenceEnd - sequenceStart) *
+                              clamp(uTextRevealSequenceBlurDurationRatio, 0.0, 1.0),
+                            0.000001);
+  return clamp((clamp(uTextRevealProgress, 0.0, 1.0) - sequenceStart) / duration, 0.0, 1.0);
+}
+#endif
 #endif
 
 void main()
@@ -223,6 +240,13 @@ void main()
     floor(textRevealFadeBlurMetadata.g * 255.0 + 0.5);
   highp float sharpRevealProgress = ResolveTextRevealFadeBlurProgress(sharpEncodedStart / 65535.0);
   highp float blurRevealProgress = ResolveTextRevealFadeBlurProgress(textRevealFadeBlurMetadata.b);
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+  mediump vec4 sequenceBlurTiming = TEXTURE(sTextRevealSequenceBlurPrototype, vTexCoord);
+  highp float sharpSequenceProgress = ResolveTextRevealSequenceSharpProgress(sequenceBlurTiming.r,
+                                                                              sequenceBlurTiming.g);
+  highp float blurSequenceProgress = ResolveTextRevealSequenceSharpProgress(sequenceBlurTiming.b,
+                                                                             sequenceBlurTiming.a);
+#endif
   mediump vec4 fadeBlurColor;
 #endif
 
@@ -369,8 +393,20 @@ void main()
 #ifdef IS_REQUIRED_TEXT_REVEAL
 #ifdef IS_REQUIRED_TEXT_REVEAL_FADE_BLUR
   // p^2 sharp + p(1-p) preblur preserves opacity ~= p while reducing blur to zero.
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR_PROTOTYPE
+  mediump vec4 unitLocalBlurColor =
+    textColor * (sharpRevealProgress * sharpRevealProgress) +
+    fadeBlurColor * (blurRevealProgress * (1.0 - blurRevealProgress));
+  mediump vec4 sequenceBlurColor =
+    textColor * sharpRevealProgress * sharpSequenceProgress +
+    fadeBlurColor * blurRevealProgress * (1.0 - blurSequenceProgress);
+  textColor = mix(unitLocalBlurColor,
+                  sequenceBlurColor,
+                  step(0.5, uTextRevealSequenceBlurEnabled));
+#else
   textColor = textColor * (sharpRevealProgress * sharpRevealProgress) +
               fadeBlurColor * (blurRevealProgress * (1.0 - blurRevealProgress));
+#endif
 #else
 #ifndef TEXT_REVEAL_RESOLVED_IN_EMBOSS
   // textColor is premultiplied, so scale rgb and alpha together.

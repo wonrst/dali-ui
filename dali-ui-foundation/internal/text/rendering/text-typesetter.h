@@ -269,12 +269,17 @@ public:
    *
    * @param[in] sourcePlan The reveal plan indexed by source glyph.
    * @param[in] unit The reveal unit used to assign synthetic ellipsis ownership.
+   * @param[in] sequence The final sequence scope.
+   * @param[in] sequenceStaggerRatio The final sequence stagger ratio.
+   * @param[in] includeSequenceBlurTimingPrototype Whether to attach the
+   *            temporary V2 sequence lookup after final scheduling.
    * @return A reveal plan indexed by final rendered glyph.
    */
   Internal::Reveal::Plan CreateFinalRevealPlan(const Internal::Reveal::Plan& sourcePlan,
                                                Internal::Reveal::Unit        unit,
-                                               Internal::Reveal::Sequence    sequence             = Internal::Reveal::Sequence::TEXT,
-                                               float                         sequenceStaggerRatio = 0.0f);
+                                               Internal::Reveal::Sequence    sequence                           = Internal::Reveal::Sequence::TEXT,
+                                               float                         sequenceStaggerRatio               = 0.0f,
+                                               bool                          includeSequenceBlurTimingPrototype = false);
 
   /**
    * @brief Extracts visible ImageSpan timing from a finalized shared plan.
@@ -312,6 +317,8 @@ public:
    * @param[in] fadeBlurHasPreservedColor Whether a separate preserved-color blur uses the timing field.
    * @param[in] fadeBlurGuardBand Vertical source pixels included around a height tile.
    * @param[out] fadeBlurSucceeded Optional result for requested Fade+Blur processing.
+   * @param[out] sequenceBlurTimingPrototype Optional V2 RGBA8888 sequence
+   *             ownership sidecar generated without modifying Reveal metadata.
    * @return RGBA8888 reveal metadata for the requested full texture or tile.
    */
   PixelData RenderTextRevealMetadata(
@@ -319,15 +326,16 @@ public:
     Direction                     textDirection,
     const Internal::Reveal::Plan& plan,
     float&                        fadeDuration,
-    uint32_t                      tileOffsetY               = 0u,
-    const Vector2&                fullSize                  = Size::ZERO,
-    bool                          ignoreHorizontalAlignment = false,
-    const Vector2&                originSize                = Size::ZERO,
-    float                         fadeBlurScale             = 0.0f,
-    float                         targetBlurRadius          = 8.0f,
-    bool                          fadeBlurHasPreservedColor = false,
-    uint32_t                      fadeBlurGuardBand         = 0u,
-    bool*                         fadeBlurSucceeded         = nullptr);
+    uint32_t                      tileOffsetY                 = 0u,
+    const Vector2&                fullSize                    = Size::ZERO,
+    bool                          ignoreHorizontalAlignment   = false,
+    const Vector2&                originSize                  = Size::ZERO,
+    float                         fadeBlurScale               = 0.0f,
+    float                         targetBlurRadius            = 8.0f,
+    bool                          fadeBlurHasPreservedColor   = false,
+    uint32_t                      fadeBlurGuardBand           = 0u,
+    bool*                         fadeBlurSucceeded           = nullptr,
+    PixelData*                    sequenceBlurTimingPrototype = nullptr);
 
   /**
    * @brief Rasterizes and preblurs color glyphs and authored-color glyphs.

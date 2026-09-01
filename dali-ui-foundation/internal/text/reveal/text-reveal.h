@@ -23,6 +23,7 @@
 #include <dali-ui-foundation/public-api/text/style/reveal.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace Dali::TextAbstraction
@@ -72,6 +73,27 @@ struct PixelUnitTiming
 };
 
 /**
+ * @brief Stores one final sequence envelope for the V2 blur prototype.
+ */
+struct SequenceBlurTiming
+{
+  float start{0.0f};
+  float end{0.0f};
+};
+
+/**
+ * @brief Maps final reveal units to a compact sequence timing table.
+ *
+ * The temporary V2 prototype keeps one mapping entry per unit and one timing
+ * entry per active sequence instead of duplicating both floats per unit.
+ */
+struct SequenceBlurTimingMap
+{
+  std::vector<uint32_t>           unitToSequence;
+  std::vector<SequenceBlurTiming> sequences;
+};
+
+/**
  * @brief Stores backend-independent reveal ownership and timing data.
  *
  * glyphToUnit maps each glyph to a logical reveal unit or NO_UNIT. unitStart
@@ -84,12 +106,13 @@ struct PixelUnitTiming
  */
 struct Plan
 {
-  std::vector<uint32_t>        glyphToUnit;
-  std::vector<float>           unitStart;
-  std::vector<PixelUnitTiming> pixelUnitTiming;
-  std::vector<uint8_t>         imageReplacementUnitMask;
-  float                        fadeDurationRatio{Text::Reveal::AUTO_FADE_DURATION_RATIO};
-  float                        fadeDuration{0.0f};
+  std::vector<uint32_t>                        glyphToUnit;
+  std::vector<float>                           unitStart;
+  std::vector<PixelUnitTiming>                 pixelUnitTiming;
+  std::vector<uint8_t>                         imageReplacementUnitMask;
+  std::shared_ptr<const SequenceBlurTimingMap> sequenceBlurTimingPrototype;
+  float                                        fadeDurationRatio{Text::Reveal::AUTO_FADE_DURATION_RATIO};
+  float                                        fadeDuration{0.0f};
 
   /**
    * @brief Returns the number of scheduled reveal units.

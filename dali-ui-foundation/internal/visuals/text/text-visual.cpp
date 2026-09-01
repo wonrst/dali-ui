@@ -102,6 +102,8 @@ constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_CONIC_START_ANGLE_NAME = "uT
 constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_MODE_NAME              = "uTextGradientOverlayMode";
 constexpr const char* UNIFORM_TEXT_REVEAL_PROGRESS_NAME                    = "uTextRevealProgress";
 constexpr const char* UNIFORM_TEXT_REVEAL_FADE_DURATION_NAME               = "uTextRevealFadeDuration";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_ENABLED_NAME       = "uTextRevealSequenceBlurEnabled";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DURATION_NAME      = "uTextRevealSequenceBlurDurationRatio";
 bool                  IsAsyncRenderRequest(Ui::Integration::Text::Async::RequestType requestType)
 {
   switch(requestType)
@@ -2207,7 +2209,8 @@ bool TextVisual::TryClearTextRevealResources()
   }
 
   const uint32_t revealTextureCount =
-    1u + static_cast<uint32_t>(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved());
+    1u + static_cast<uint32_t>(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved()) +
+    static_cast<uint32_t>(mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype());
   for(const VisualRenderer& renderer : mRendererList)
   {
     if(!renderer)
@@ -2283,6 +2286,8 @@ void TextVisual::BindTextRevealConstraint(VisualRenderer& renderer)
     renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_PROGRESS_NAME,
                               control.GetCurrentProperty<float>(data->progressPropertyIndex));
   renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_FADE_DURATION_NAME, data->fadeDuration);
+  renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_ENABLED_NAME, 0.0f);
+  renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DURATION_NAME, 0.35f);
   if(progressIndex == Property::INVALID_INDEX)
   {
     return;
@@ -2359,7 +2364,8 @@ Text::Internal::Reveal::Plan TextVisual::BuildFinalTextRevealPlan(
   auto finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
                                                        data->unit,
                                                        data->sequence,
-                                                       data->sequenceStaggerRatio);
+                                                       data->sequenceStaggerRatio,
+                                                       mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype());
   if(hasReplacementProjection)
   {
     replacementSourceRevision = replacementSource.sourceRevision;
@@ -2373,7 +2379,8 @@ Text::Internal::Reveal::Plan TextVisual::BuildFinalTextRevealPlan(
       finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
                                                       data->unit,
                                                       data->sequence,
-                                                      data->sequenceStaggerRatio);
+                                                      data->sequenceStaggerRatio,
+                                                      mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype());
     }
   }
   return finalPlan;
@@ -2791,6 +2798,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
   {
     PublishReplacementRevealTimings({}, 0u);
   }
+  const bool sequenceBlurPrototypeEnabled =
+    textRevealFadeBlurEnabled && !hasInlineReplacement && !isHeightTiling &&
+    revealData->unit == Text::Internal::Reveal::Unit::CHARACTER &&
+    revealData->sequence == Text::Internal::Reveal::Sequence::LINE;
 
   TextVisualShaderFeature::FeatureBuilder featureBuilder;
   featureBuilder.EnableMultiColor(hasMultipleTextColors)
@@ -2803,7 +2814,8 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
     .EnableTextReveal(textRevealEnabled)
     .EnableTextRevealFadeBlur(textRevealFadeBlurEnabled,
-                              hasMultipleTextColors || containsColorGlyph);
+                              hasMultipleTextColors || containsColorGlyph)
+    .EnableTextRevealSequenceBlurPrototype(sequenceBlurPrototypeEnabled);
 
   Shader shader = GetTextShader(mFactoryCache, featureBuilder);
   mImpl->mRenderer.SetShader(shader);
@@ -3345,6 +3357,7 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     }
 
     bool      fadeBlurSucceeded = !mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur();
+    PixelData sequenceBlurTimingPrototype;
     PixelData metadata =
       mTypesetter->RenderTextRevealMetadata(size, textDirection, finalPlan, revealData->fadeDuration,
                                             0u, Size::ZERO, false, Size::ZERO,
@@ -3354,11 +3367,24 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
                                             fadeBlurParameters.targetRadius,
                                             mTextShaderFeatureCache.IsEnabledTextRevealFadeBlurPreserved(),
                                             0u,
-                                            &fadeBlurSucceeded);
+                                            &fadeBlurSucceeded,
+                                            mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype()
+                                              ? &sequenceBlurTimingPrototype
+                                              : nullptr);
     if(mTextShaderFeatureCache.IsEnabledTextRevealFadeBlur() && !fadeBlurSucceeded)
     {
       disableFadeBlur();
       preservedBlur = {};
+    }
+    if(mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype() &&
+       (!sequenceBlurTimingPrototype ||
+        sequenceBlurTimingPrototype.GetPixelFormat() != Pixel::RGBA8888 ||
+        sequenceBlurTimingPrototype.GetWidth() != static_cast<uint32_t>(size.width) ||
+        sequenceBlurTimingPrototype.GetHeight() != static_cast<uint32_t>(size.height)))
+    {
+      disableFadeBlur();
+      preservedBlur               = {};
+      sequenceBlurTimingPrototype = {};
     }
     if(!metadata || metadata.GetPixelFormat() != Pixel::RGBA8888 ||
        metadata.GetWidth() != static_cast<uint32_t>(size.width) ||
@@ -3386,6 +3412,11 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
       Sampler nearestSampler = Sampler::New();
       nearestSampler.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
       AddTexture(textureSet, metadata, nearestSampler, textureSetIndex);
+      ++textureSetIndex;
+      if(mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlurPrototype())
+      {
+        AddTexture(textureSet, sequenceBlurTimingPrototype, nearestSampler, textureSetIndex);
+      }
       PublishReplacementRevealTimings(replacementTimings, replacementSourceRevision);
     }
     else
