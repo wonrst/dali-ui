@@ -46,6 +46,11 @@ namespace Reveal
 {
 constexpr uint32_t NO_UNIT = 0xffffffffu;
 
+/**
+ * @brief Internal sequence-local entrance interval used by the Blur V2 prototype.
+ */
+constexpr float DEFAULT_SEQUENCE_BLUR_DURATION = 0.15f;
+
 enum class Unit : uint8_t
 {
   DISABLED,
@@ -75,22 +80,27 @@ struct PixelUnitTiming
 /**
  * @brief Stores backend-independent reveal ownership and timing data.
  *
- * glyphToUnit maps each glyph to a logical reveal unit or NO_UNIT. unitStart
- * and fadeDuration use the normalized progress timeline. fadeDurationRatio
- * preserves the authored AUTO sentinel or explicit duration through final
- * projection so the schedule can be resolved from the final visible unit
- * count before metadata is rasterized. imageReplacementUnitMask remains empty
- * for text-only plans. When present, it has one entry per unit and identifies
- * units containing at least one eligible visible ImageSpan marker.
+ * glyphToUnit maps each glyph to a logical reveal unit or NO_UNIT. unitStart,
+ * unitSequenceStart, fadeDuration, and sequenceBlurDuration use the normalized
+ * progress timeline. WHOLE_TEXT assigns sequence start zero to every unit;
+ * PER_LINE assigns the authoritative final-visible-line start. The authored
+ * fadeDurationRatio and sequenceBlurDurationRatio survive final projection so
+ * scheduling can resolve them against the final visible topology.
+ * imageReplacementUnitMask remains empty for text-only plans. When present, it
+ * has one entry per unit and identifies units containing at least one eligible
+ * visible ImageSpan marker.
  */
 struct Plan
 {
   std::vector<uint32_t>        glyphToUnit;
   std::vector<float>           unitStart;
+  std::vector<float>           unitSequenceStart;
   std::vector<PixelUnitTiming> pixelUnitTiming;
   std::vector<uint8_t>         imageReplacementUnitMask;
   float                        fadeDurationRatio{Text::Reveal::AUTO_FADE_DURATION_RATIO};
+  float                        sequenceBlurDurationRatio{DEFAULT_SEQUENCE_BLUR_DURATION};
   float                        fadeDuration{0.0f};
+  float                        sequenceBlurDuration{DEFAULT_SEQUENCE_BLUR_DURATION};
 
   /**
    * @brief Returns the number of scheduled reveal units.

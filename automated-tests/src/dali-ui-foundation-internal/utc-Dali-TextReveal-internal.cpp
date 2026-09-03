@@ -19,6 +19,7 @@
 #include <dali-ui-foundation/internal/text/controller/text-controller-impl.h>
 #include <dali-ui-foundation/internal/text/controller/text-controller.h>
 #include <dali-ui-foundation/internal/text/line-run.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-sequence-blur-processor.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
@@ -176,12 +177,43 @@ float CalculateRevealOpacityReference(float progress, float unitStart, float fad
   return std::max(0.0f, std::min(1.0f, (progress - unitStart) / fadeDuration));
 }
 
-UiText::ControllerPtr BuildReplacementController(const char*                                 text,
-                                                 const std::vector<UiText::CharacterRun>&     ranges,
-                                                 const Size&                                 size,
-                                                 bool                                        elideText         = false,
-                                                 float                                       replacementHeight = 24.0f,
-                                                 float                                       replacementWidth  = 32.0f)
+float CalculateSequenceBlurSharpnessReference(float progress,
+                                              float sequenceStart,
+                                              float blurDuration,
+                                              float curveBlend = 0.0f)
+{
+  progress = std::isnan(progress) ? 0.0f : std::max(0.0f, std::min(1.0f, progress));
+  if(progress >= 1.0f)
+  {
+    return 1.0f;
+  }
+  const float sharpness = std::max(0.0f,
+                                   std::min(1.0f,
+                                            (progress - sequenceStart) / std::max(blurDuration, 0.000001f)));
+  curveBlend            = std::max(0.0f, std::min(1.0f, curveBlend));
+  return sharpness + (sharpness * sharpness - sharpness) * curveBlend;
+}
+
+float CalculateSequenceBlurContributionReference(float progress,
+                                                 float unitStart,
+                                                 float fadeDuration,
+                                                 float sequenceStart,
+                                                 float blurDuration,
+                                                 float curveBlend = 0.0f)
+{
+  return CalculateRevealOpacityReference(progress, unitStart, fadeDuration) *
+         (1.0f - CalculateSequenceBlurSharpnessReference(progress,
+                                                         sequenceStart,
+                                                         blurDuration,
+                                                         curveBlend));
+}
+
+UiText::ControllerPtr BuildReplacementController(const char*                              text,
+                                                 const std::vector<UiText::CharacterRun>& ranges,
+                                                 const Size&                              size,
+                                                 bool                                     elideText         = false,
+                                                 float                                    replacementHeight = 24.0f,
+                                                 float                                    replacementWidth  = 32.0f)
 {
   UiText::ControllerPtr     controller = UiText::Controller::New();
   UiText::Controller::Impl& impl       = UiText::Controller::Impl::GetImplementation(*controller.Get());
@@ -877,7 +909,14 @@ int UtcDaliTextRevealPerLineSequenceScheduleP(void)
       DALI_TEST_EQUALS(singleton.unitStart[0u], 0.0f, EPSILON, TEST_LOCATION);
       DALI_TEST_EQUALS(singleton.unitStart[1u], ratio / totalDuration, EPSILON, TEST_LOCATION);
       DALI_TEST_EQUALS(singleton.unitStart[2u], 2.0f * ratio / totalDuration, EPSILON, TEST_LOCATION);
+      DALI_TEST_EQUALS(singleton.unitSequenceStart[0u], 0.0f, EPSILON, TEST_LOCATION);
+      DALI_TEST_EQUALS(singleton.unitSequenceStart[1u], ratio / totalDuration, EPSILON, TEST_LOCATION);
+      DALI_TEST_EQUALS(singleton.unitSequenceStart[2u], 2.0f * ratio / totalDuration, EPSILON, TEST_LOCATION);
       DALI_TEST_EQUALS(singleton.fadeDuration, resolvedFade / totalDuration, EPSILON, TEST_LOCATION);
+      DALI_TEST_EQUALS(singleton.sequenceBlurDuration,
+                       Reveal::DEFAULT_SEQUENCE_BLUR_DURATION / totalDuration,
+                       EPSILON,
+                       TEST_LOCATION);
     }
   }
 
@@ -890,6 +929,7 @@ int UtcDaliTextRevealPerLineSequenceScheduleP(void)
                                                        1.0f));
   DALI_TEST_CHECK(singleLine.glyphToUnit == originalSingle.glyphToUnit);
   DALI_TEST_CHECK(singleLine.unitStart == originalSingle.unitStart);
+  DALI_TEST_CHECK(singleLine.unitSequenceStart == originalSingle.unitSequenceStart);
   DALI_TEST_EQUALS(singleLine.fadeDuration, originalSingle.fadeDuration, EPSILON, TEST_LOCATION);
 
   Reveal::Plan crossLineWord;
@@ -953,6 +993,7 @@ int UtcDaliTextRevealPerLineSequenceScheduleP(void)
                                                         0.5f));
   DALI_TEST_CHECK(incompleteMapping.glyphToUnit == originalMapping.glyphToUnit);
   DALI_TEST_CHECK(incompleteMapping.unitStart == originalMapping.unitStart);
+  DALI_TEST_CHECK(incompleteMapping.unitSequenceStart == originalMapping.unitSequenceStart);
   DALI_TEST_EQUALS(incompleteMapping.fadeDuration, originalMapping.fadeDuration, EPSILON, TEST_LOCATION);
 
   const std::vector<uint32_t> stressCounts(100u, 50u);
@@ -977,6 +1018,314 @@ int UtcDaliTextRevealPerLineSequenceScheduleP(void)
     }
   }
 
+  END_TEST;
+}
+
+int UtcDaliTextRevealSequenceBlurDurationP(void)
+{
+  constexpr uint32_t           UNIT_COUNT           = 6u;
+  const UiText::Character      text[UNIT_COUNT]     = {'A', 'B', 'C', 'D', 'E', 'F'};
+  const UiText::CharacterIndex glyphMap[UNIT_COUNT] = {0u, 1u, 2u, 3u, 4u, 5u};
+  const UiText::GlyphIndex     finalMap[UNIT_COUNT] = {0u, 1u, 2u, 3u, 4u, 5u};
+  UiText::LineRun              lines[2u];
+  lines[0u].glyphRun = {0u, 3u};
+  lines[1u].glyphRun = {3u, 3u};
+
+  Reveal::Plan referencePerLine;
+  for(float authoredDuration : {0.15f, 0.35f, 0.50f})
+  {
+    Reveal::Plan source              = Reveal::BuildPlan(text,
+                                                         UNIT_COUNT,
+                                                         glyphMap,
+                                                         UNIT_COUNT,
+                                                         Reveal::Unit::CHARACTER,
+                                                         0.25f);
+    source.sequenceBlurDurationRatio = authoredDuration;
+    Reveal::Plan wholeText           = Reveal::ProjectToFinalGlyphs(source,
+                                                                    UNIT_COUNT,
+                                                                    finalMap,
+                                                                    UiText::FinalElisionResult::INVALID_GLYPH_INDEX,
+                                                                    Reveal::Unit::CHARACTER);
+    DALI_TEST_EQUALS(wholeText.sequenceBlurDurationRatio, authoredDuration, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(wholeText.sequenceBlurDuration, authoredDuration, EPSILON, TEST_LOCATION);
+
+    Reveal::Plan perLine = wholeText;
+    DALI_TEST_CHECK(Reveal::ApplyPerLineSequenceSchedule(perLine, lines, 2u, 0.20f));
+    constexpr float TOTAL_DURATION = 1.20f;
+    DALI_TEST_EQUALS(perLine.sequenceBlurDurationRatio, authoredDuration, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(perLine.sequenceBlurDuration,
+                     authoredDuration / TOTAL_DURATION,
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(perLine.unitSequenceStart[0u], 0.0f, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(perLine.unitSequenceStart[3u], 0.20f / TOTAL_DURATION, EPSILON, TEST_LOCATION);
+
+    if(referencePerLine.unitStart.empty())
+    {
+      referencePerLine = perLine;
+    }
+    else
+    {
+      DALI_TEST_CHECK(perLine.glyphToUnit == referencePerLine.glyphToUnit);
+      DALI_TEST_CHECK(perLine.unitStart == referencePerLine.unitStart);
+      DALI_TEST_EQUALS(perLine.fadeDuration, referencePerLine.fadeDuration, EPSILON, TEST_LOCATION);
+    }
+  }
+
+  for(float fadeDuration : {0.0f, 0.10f, 0.75f})
+  {
+    Reveal::Plan source              = Reveal::BuildPlan(text,
+                                                         UNIT_COUNT,
+                                                         glyphMap,
+                                                         UNIT_COUNT,
+                                                         Reveal::Unit::CHARACTER,
+                                                         fadeDuration);
+    source.sequenceBlurDurationRatio = 0.35f;
+    const Reveal::Plan wholeText     = Reveal::ProjectToFinalGlyphs(source,
+                                                                    UNIT_COUNT,
+                                                                    finalMap,
+                                                                    UiText::FinalElisionResult::INVALID_GLYPH_INDEX,
+                                                                    Reveal::Unit::CHARACTER);
+    DALI_TEST_EQUALS(wholeText.fadeDurationRatio, fadeDuration, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(wholeText.sequenceBlurDurationRatio, 0.35f, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(wholeText.sequenceBlurDuration, 0.35f, EPSILON, TEST_LOCATION);
+  }
+
+  DALI_TEST_EQUALS(CalculateSequenceBlurContributionReference(0.0f, 0.0f, 0.0f, 0.0f, 0.35f),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(CalculateSequenceBlurContributionReference(1.0f, 0.0f, 0.25f, 0.0f, 0.35f),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_CHECK(CalculateSequenceBlurContributionReference(0.10f, 0.0f, 0.25f, 0.0f, 0.35f) > 0.0f);
+
+  // Blur remains a visual overlay and never extends the established Reveal
+  // schedule. Consequently a long authored blur can outlive a late, short
+  // sequence; the shader's progress-one endpoint then supplies final sharpness.
+  constexpr uint32_t     UNEVEN_UNIT_COUNT = 9u;
+  UiText::Character      unevenText[UNEVEN_UNIT_COUNT];
+  UiText::CharacterIndex unevenGlyphMap[UNEVEN_UNIT_COUNT];
+  for(uint32_t index = 0u; index < UNEVEN_UNIT_COUNT; ++index)
+  {
+    unevenText[index]     = static_cast<UiText::Character>('A' + index);
+    unevenGlyphMap[index] = index;
+  }
+  Reveal::Plan longBlur              = Reveal::BuildPlan(unevenText,
+                                                         UNEVEN_UNIT_COUNT,
+                                                         unevenGlyphMap,
+                                                         UNEVEN_UNIT_COUNT,
+                                                         Reveal::Unit::CHARACTER,
+                                                         0.0f);
+  longBlur.sequenceBlurDurationRatio = 0.75f;
+  UiText::LineRun unevenLines[2u];
+  unevenLines[0u].glyphRun = {0u, 8u};
+  unevenLines[1u].glyphRun = {8u, 1u};
+  DALI_TEST_CHECK(Reveal::ApplyPerLineSequenceSchedule(longBlur, unevenLines, 2u, 0.50f));
+  DALI_TEST_CHECK(longBlur.unitSequenceStart.back() + longBlur.sequenceBlurDuration > 1.0f);
+  END_TEST;
+}
+
+int UtcDaliTextRevealSequenceBlurCurveP(void)
+{
+  constexpr std::array<float, 5u> SHARPNESS_VALUES{{0.0f, 0.25f, 0.50f, 0.75f, 1.0f}};
+  constexpr std::array<float, 5u> SOFT_VALUES{{0.0f, 0.15625f, 0.375f, 0.65625f, 1.0f}};
+  std::size_t                     valueIndex = 0u;
+  for(float value : SHARPNESS_VALUES)
+  {
+    DALI_TEST_EQUALS(CalculateSequenceBlurSharpnessReference(value, 0.0f, 1.0f, 0.0f),
+                     value,
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(CalculateSequenceBlurSharpnessReference(value, 0.0f, 1.0f, 0.5f),
+                     SOFT_VALUES[valueIndex],
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(CalculateSequenceBlurSharpnessReference(value, 0.0f, 1.0f, 1.0f),
+                     value * value,
+                     EPSILON,
+                     TEST_LOCATION);
+    ++valueIndex;
+  }
+
+  for(float progress : {0.10f, 0.25f, 0.50f, 0.75f, 0.90f})
+  {
+    const float revealOpacity = progress;
+    DALI_TEST_EQUALS(revealOpacity *
+                       CalculateSequenceBlurSharpnessReference(progress, 0.0f, 1.0f, 0.0f),
+                     progress * progress,
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(CalculateSequenceBlurContributionReference(progress,
+                                                                0.0f,
+                                                                1.0f,
+                                                                0.0f,
+                                                                1.0f,
+                                                                0.0f),
+                     progress * (1.0f - progress),
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(revealOpacity *
+                       CalculateSequenceBlurSharpnessReference(progress, 0.0f, 1.0f, 1.0f),
+                     progress * progress * progress,
+                     EPSILON,
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(CalculateSequenceBlurContributionReference(progress,
+                                                                0.0f,
+                                                                1.0f,
+                                                                0.0f,
+                                                                1.0f,
+                                                                1.0f),
+                     progress * (1.0f - progress * progress),
+                     EPSILON,
+                     TEST_LOCATION);
+  }
+
+  DALI_TEST_EQUALS(CalculateSequenceBlurContributionReference(0.0f,
+                                                              0.0f,
+                                                              1.0f,
+                                                              0.0f,
+                                                              1.0f,
+                                                              1.0f),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(CalculateSequenceBlurSharpnessReference(1.0f, 0.0f, 2.0f, 1.0f),
+                   1.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliTextRevealSequenceBlurReachabilityP(void)
+{
+  UiTestApplication                          application;
+  constexpr Vector2                          LAYOUT_SIZE(560.0f, 210.0f);
+  constexpr std::array<float, 5u>            DURATIONS{{0.15f, 0.25f, 0.35f, 0.50f, 0.75f}};
+  constexpr std::array<Reveal::Unit, 4u>     UNITS{{Reveal::Unit::CHARACTER,
+                                                    Reveal::Unit::WORD,
+                                                    Reveal::Unit::LINE,
+                                                    Reveal::Unit::PIXEL}};
+  constexpr std::array<Reveal::Sequence, 2u> SEQUENCES{{Reveal::Sequence::WHOLE_TEXT,
+                                                        Reveal::Sequence::PER_LINE}};
+
+  UiText::ControllerPtr controller = UiText::Controller::New();
+  controller->SetText("Reveal blur quality across units\nThe quick brown fox jumps over\nPIXEL timing stays independent");
+  controller->SetDefaultFontSize(32.0f, UiText::Controller::PIXEL_SIZE);
+  controller->SetMultiLineEnabled(true);
+  controller->Relayout(LAYOUT_SIZE);
+  const UiText::ModelInterface* model = controller->GetRenderTextModel();
+  DALI_TEST_CHECK(model);
+
+  UiText::TypesetterPtr textTypesetter = UiText::Typesetter::New(model);
+  PixelData             foreground     = textTypesetter->Render(LAYOUT_SIZE,
+                                                                UiText::Direction::LEFT_TO_RIGHT,
+                                                                UiText::Typesetter::RENDER_NO_STYLES,
+                                                                false,
+                                                                Pixel::L8);
+  DALI_TEST_CHECK(foreground);
+  const Dali::Integration::PixelDataBuffer foregroundPixels = Dali::Integration::GetPixelDataBuffer(foreground);
+  DALI_TEST_CHECK(foregroundPixels.buffer);
+
+  std::array<std::array<std::array<float, DURATIONS.size()>, SEQUENCES.size()>, UNITS.size()> actualPercentages{};
+  for(std::size_t unitIndex = 0u; unitIndex < UNITS.size(); ++unitIndex)
+  {
+    for(std::size_t sequenceIndex = 0u; sequenceIndex < SEQUENCES.size(); ++sequenceIndex)
+    {
+      for(std::size_t durationIndex = 0u; durationIndex < DURATIONS.size(); ++durationIndex)
+      {
+        Reveal::Plan source;
+        if(UNITS[unitIndex] == Reveal::Unit::WORD)
+        {
+          TextAbstraction::Segmentation segmentation = TextAbstraction::Segmentation::New();
+          source                                     = Reveal::BuildPlan(*model, UNITS[unitIndex], 0.0f, segmentation);
+        }
+        else if(UNITS[unitIndex] == Reveal::Unit::LINE)
+        {
+          source = Reveal::BuildLinePlan(*model, 0.0f);
+        }
+        else if(UNITS[unitIndex] == Reveal::Unit::PIXEL)
+        {
+          source = Reveal::BuildPixelPlan(*model, 0.0f);
+        }
+        else
+        {
+          source = Reveal::BuildCharacterPlan(*model, 0.0f);
+        }
+        source.sequenceBlurDurationRatio = DURATIONS[durationIndex];
+
+        UiText::TypesetterPtr typesetter           = UiText::Typesetter::New(model);
+        const Reveal::Plan    finalPlan            = typesetter->CreateFinalRevealPlan(source,
+                                                                                       UNITS[unitIndex],
+                                                                                       SEQUENCES[sequenceIndex],
+                                                                                       0.10f);
+        float                 fadeDuration         = 0.0f;
+        float                 resolvedBlurDuration = 0.0f;
+        PixelData             sequenceMetadata;
+        PixelData             metadata = typesetter->RenderTextRevealMetadata(LAYOUT_SIZE,
+                                                                              UiText::Direction::LEFT_TO_RIGHT,
+                                                                              finalPlan,
+                                                                              fadeDuration,
+                                                                              0u,
+                                                                              Size::ZERO,
+                                                                              false,
+                                                                              Size::ZERO,
+                                                                              1.0f,
+                                                                              32.0f,
+                                                                              &sequenceMetadata,
+                                                                              &resolvedBlurDuration);
+        DALI_TEST_CHECK(metadata && sequenceMetadata);
+        const Dali::Integration::PixelDataBuffer metadataPixels = Dali::Integration::GetPixelDataBuffer(metadata);
+        const Dali::Integration::PixelDataBuffer sequencePixels = Dali::Integration::GetPixelDataBuffer(sequenceMetadata);
+        DALI_TEST_CHECK(metadataPixels.buffer && sequencePixels.buffer);
+        uint32_t foregroundCount     = 0u;
+        uint32_t exactReachable      = 0u;
+        uint32_t actualReachable     = 0u;
+        uint32_t missingBlurMetadata = 0u;
+        for(uint32_t y = 0u; y < foreground.GetHeight(); ++y)
+        {
+          const uint8_t* foregroundRow = foregroundPixels.buffer + static_cast<size_t>(y) * foreground.GetStrideBytes();
+          const uint8_t* metadataRow   = metadataPixels.buffer + static_cast<size_t>(y) * metadata.GetStrideBytes();
+          const uint8_t* sequenceRow   = sequencePixels.buffer + static_cast<size_t>(y) * sequenceMetadata.GetStrideBytes();
+          for(uint32_t x = 0u; x < foreground.GetWidth(); ++x)
+          {
+            if(foregroundRow[x] == 0u)
+            {
+              continue;
+            }
+            ++foregroundCount;
+            const uint8_t* pixel = metadataRow + static_cast<size_t>(x) * 4u;
+            if(pixel[2u] == 0u || sequenceRow[x] == 0u || pixel[3u] < 2u)
+            {
+              ++missingBlurMetadata;
+              continue;
+            }
+            const float exactStart        = static_cast<float>((static_cast<uint32_t>(pixel[0u]) << 8u) | pixel[1u]) / 65535.0f;
+            const float conservativeStart = static_cast<float>(pixel[2u] - 1u) / 254.0f;
+            const float sequenceStart     = static_cast<float>(sequenceRow[x] - 1u) / 254.0f;
+            const float blurEnd           = sequenceStart + resolvedBlurDuration;
+            exactReachable += exactStart < blurEnd ? 1u : 0u;
+            actualReachable += conservativeStart < blurEnd ? 1u : 0u;
+          }
+        }
+        DALI_TEST_CHECK(foregroundCount > 0u);
+        const float exactPercentage                                = 100.0f * static_cast<float>(exactReachable) / foregroundCount;
+        const float actualPercentage                               = 100.0f * static_cast<float>(actualReachable) / foregroundCount;
+        actualPercentages[unitIndex][sequenceIndex][durationIndex] = actualPercentage;
+        DALI_TEST_CHECK(actualPercentage <= exactPercentage + EPSILON);
+        DALI_TEST_CHECK(exactPercentage - actualPercentage < 5.0f);
+        DALI_TEST_CHECK(100.0f * static_cast<float>(missingBlurMetadata) / foregroundCount < 20.0f);
+      }
+
+      for(std::size_t durationIndex = 1u; durationIndex < DURATIONS.size(); ++durationIndex)
+      {
+        DALI_TEST_CHECK(actualPercentages[unitIndex][sequenceIndex][durationIndex] + EPSILON >=
+                        actualPercentages[unitIndex][sequenceIndex][durationIndex - 1u]);
+      }
+      DALI_TEST_CHECK(actualPercentages[unitIndex][sequenceIndex].back() > 0.0f);
+    }
+  }
   END_TEST;
 }
 
@@ -1961,9 +2310,189 @@ int UtcDaliTextRevealMetadataOwnershipHaloP(void)
   END_TEST;
 }
 
+int UtcDaliTextRevealSequenceBlurMetadataP(void)
+{
+  constexpr uint32_t WIDTH    = 9u;
+  constexpr uint32_t HEIGHT   = 9u;
+  PixelBuffer        metadata = PixelBuffer::New(WIDTH, HEIGHT, Pixel::RGBA8888);
+  PixelBuffer        sequence = PixelBuffer::New(WIDTH, HEIGHT, Pixel::L8);
+  DALI_TEST_CHECK(metadata && sequence);
+  std::memset(metadata.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT * 4u);
+  std::memset(sequence.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT);
+
+  auto setSource = [&](uint32_t x, uint16_t encodedUnitStart, uint8_t encodedSequenceStart)
+  {
+    uint8_t* pixel                       = metadata.GetBuffer() + (4u * WIDTH + x) * 4u;
+    pixel[0u]                            = static_cast<uint8_t>(encodedUnitStart >> 8u);
+    pixel[1u]                            = static_cast<uint8_t>(encodedUnitStart & 0xffu);
+    pixel[2u]                            = 0xffu;
+    pixel[3u]                            = 0xffu;
+    sequence.GetBuffer()[4u * WIDTH + x] = encodedSequenceStart;
+  };
+  setSource(3u, 0x1999u, 1u);
+  setSource(5u, 0xccccu, 204u);
+
+  const Reveal::SequenceBlurParameters parameters{2.0f, 1.0f};
+  PixelBuffer                         mediumBlur;
+  DALI_TEST_CHECK(Reveal::PrepareSequenceBlurMetadata(metadata, sequence, parameters, &mediumBlur));
+  DALI_TEST_CHECK(mediumBlur && mediumBlur.GetPixelFormat() == Pixel::L8);
+  DALI_TEST_EQUALS(mediumBlur.GetWidth(), WIDTH, TEST_LOCATION);
+  DALI_TEST_EQUALS(mediumBlur.GetHeight(), HEIGHT, TEST_LOCATION);
+
+  uint32_t fullCoverageCount   = 0u;
+  uint32_t mediumCoverageCount = 0u;
+  for(uint32_t y = 0u; y < HEIGHT; ++y)
+  {
+    for(uint32_t x = 0u; x < WIDTH; ++x)
+    {
+      fullCoverageCount += metadata.GetBuffer()[(y * WIDTH + x) * 4u + 3u] > 0u ? 1u : 0u;
+      mediumCoverageCount += mediumBlur.GetBuffer()[y * WIDTH + x] > 0u ? 1u : 0u;
+    }
+  }
+  DALI_TEST_CHECK(fullCoverageCount > mediumCoverageCount);
+  DALI_TEST_CHECK(mediumCoverageCount > 0u);
+
+  const uint8_t* overlap = metadata.GetBuffer() + (4u * WIDTH + 4u) * 4u;
+  DALI_TEST_CHECK(overlap[2u] > 190u);
+  DALI_TEST_CHECK(overlap[3u] > 0u);
+  DALI_TEST_EQUALS(sequence.GetBuffer()[4u * WIDTH + 4u], 204u, TEST_LOCATION);
+
+  PixelBuffer oracleMetadata = PixelBuffer::New(WIDTH, HEIGHT, Pixel::RGBA8888);
+  PixelBuffer oracleSequence = PixelBuffer::New(WIDTH, HEIGHT, Pixel::L8);
+  PixelBuffer earlyMetadata  = PixelBuffer::New(WIDTH, HEIGHT, Pixel::RGBA8888);
+  PixelBuffer earlySequence  = PixelBuffer::New(WIDTH, HEIGHT, Pixel::L8);
+  DALI_TEST_CHECK(oracleMetadata && oracleSequence && earlyMetadata && earlySequence);
+  std::memset(oracleMetadata.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT * 4u);
+  std::memset(oracleSequence.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT);
+  std::memset(earlyMetadata.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT * 4u);
+  std::memset(earlySequence.GetBuffer(), 0, static_cast<size_t>(WIDTH) * HEIGHT);
+  auto setOracleSource = [&](PixelBuffer& targetMetadata,
+                             PixelBuffer& targetSequence,
+                             uint32_t     x,
+                             uint16_t     encodedUnitStart,
+                             uint8_t      encodedSequenceStart)
+  {
+    uint8_t* pixel                               = targetMetadata.GetBuffer() + (4u * WIDTH + x) * 4u;
+    pixel[0u]                                    = static_cast<uint8_t>(encodedUnitStart >> 8u);
+    pixel[1u]                                    = static_cast<uint8_t>(encodedUnitStart & 0xffu);
+    pixel[2u]                                    = 0xffu;
+    pixel[3u]                                    = 0xffu;
+    targetSequence.GetBuffer()[4u * WIDTH + x] = encodedSequenceStart;
+  };
+  setOracleSource(oracleMetadata, oracleSequence, 1u, 0x1999u, 1u);
+  setOracleSource(oracleMetadata, oracleSequence, 8u, 0xccccu, 204u);
+  setOracleSource(earlyMetadata, earlySequence, 1u, 0x1999u, 1u);
+  PixelBuffer oracleMedium;
+  PixelBuffer earlyMedium;
+  DALI_TEST_CHECK(Reveal::PrepareSequenceBlurMetadata(oracleMetadata,
+                                                      oracleSequence,
+                                                      parameters,
+                                                      &oracleMedium,
+                                                      0.25f));
+  DALI_TEST_CHECK(Reveal::PrepareSequenceBlurMetadata(earlyMetadata,
+                                                      earlySequence,
+                                                      parameters,
+                                                      &earlyMedium));
+  for(uint32_t pixelIndex = 0u; pixelIndex < WIDTH * HEIGHT; ++pixelIndex)
+  {
+    DALI_TEST_EQUALS(oracleMetadata.GetBuffer()[pixelIndex * 4u + 3u],
+                     earlyMetadata.GetBuffer()[pixelIndex * 4u + 3u],
+                     TEST_LOCATION);
+    DALI_TEST_EQUALS(oracleMedium.GetBuffer()[pixelIndex], earlyMedium.GetBuffer()[pixelIndex], TEST_LOCATION);
+  }
+  const uint8_t* gatedLateSource = oracleMetadata.GetBuffer() + (4u * WIDTH + 8u) * 4u;
+  DALI_TEST_EQUALS(gatedLateSource[0u], 0xccu, TEST_LOCATION);
+  DALI_TEST_EQUALS(gatedLateSource[1u], 0xccu, TEST_LOCATION);
+  DALI_TEST_EQUALS(gatedLateSource[2u], 0xffu, TEST_LOCATION);
+  DALI_TEST_EQUALS(gatedLateSource[3u], 0u, TEST_LOCATION);
+
+  const auto small = Reveal::ResolveSequenceBlurParameters(16.0f, 1.0f);
+  const auto large = Reveal::ResolveSequenceBlurParameters(96.0f, 1.0f);
+  DALI_TEST_EQUALS(small.targetRadius, 2.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(large.targetRadius, 12.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_CHECK(small.mediumRadius < small.targetRadius);
+  DALI_TEST_CHECK(large.mediumRadius < large.targetRadius);
+  DALI_TEST_EQUALS(small.mediumRadius, 1.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(large.mediumRadius, 6.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(small.targetRadius / 16.0f, large.targetRadius / 96.0f, EPSILON, TEST_LOCATION);
+
+  struct ScaleCase
+  {
+    float referencePixelSize;
+    float fullRadius;
+    float mediumRadius;
+    float currentScale;
+    float qualityScale;
+  };
+  constexpr std::array<ScaleCase, 5u> SCALE_CASES{{
+    {20.0f, 2.5f, 1.25f, 1.0f, 1.0f},
+    {32.0f, 4.0f, 2.0f, 0.5f, 1.0f},
+    {48.0f, 6.0f, 3.0f, 0.5f, 1.0f},
+    {64.0f, 8.0f, 4.0f, 0.25f, 0.5f},
+    {96.0f, 12.0f, 6.0f, 0.25f, 0.5f},
+  }};
+  for(const auto& scaleCase : SCALE_CASES)
+  {
+    const auto current = Reveal::ResolveSequenceBlurParameters(scaleCase.referencePixelSize, 1.0f);
+    const auto quality = Reveal::ResolveSequenceBlurParameters(scaleCase.referencePixelSize, 1.0f, true);
+    DALI_TEST_EQUALS(current.targetRadius, scaleCase.fullRadius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(current.mediumRadius, scaleCase.mediumRadius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(current.preprocessingScale, scaleCase.currentScale, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(quality.targetRadius, scaleCase.fullRadius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(quality.mediumRadius, scaleCase.mediumRadius, EPSILON, TEST_LOCATION);
+    DALI_TEST_EQUALS(quality.preprocessingScale, scaleCase.qualityScale, EPSILON, TEST_LOCATION);
+    if(scaleCase.mediumRadius >= 2.0f)
+    {
+      DALI_TEST_CHECK(quality.mediumRadius * quality.preprocessingScale >= 2.0f);
+    }
+  }
+
+  PixelBuffer lowResolutionMetadata = PixelBuffer::New(64u, 32u, Pixel::RGBA8888);
+  PixelBuffer lowResolutionSequence = PixelBuffer::New(64u, 32u, Pixel::L8);
+  DALI_TEST_CHECK(lowResolutionMetadata && lowResolutionSequence);
+  std::memset(lowResolutionMetadata.GetBuffer(), 0, 64u * 32u * 4u);
+  std::memset(lowResolutionSequence.GetBuffer(), 0, 64u * 32u);
+  auto setLowResolutionSource = [&](uint32_t x, uint16_t encodedUnitStart, uint8_t encodedSequenceStart)
+  {
+    uint8_t* pixel                                   = lowResolutionMetadata.GetBuffer() + (16u * 64u + x) * 4u;
+    pixel[0u]                                        = static_cast<uint8_t>(encodedUnitStart >> 8u);
+    pixel[1u]                                        = static_cast<uint8_t>(encodedUnitStart & 0xffu);
+    pixel[2u]                                        = 0xffu;
+    pixel[3u]                                        = 0xffu;
+    lowResolutionSequence.GetBuffer()[16u * 64u + x] = encodedSequenceStart;
+  };
+  setLowResolutionSource(8u, 0x1111u, 1u);
+  setLowResolutionSource(48u, 0xeeeeu, 220u);
+  DALI_TEST_CHECK(Reveal::PrepareSequenceBlurMetadata(lowResolutionMetadata,
+                                                      lowResolutionSequence,
+                                                      {8.0f, 0.25f}));
+  bool foundBlurHalo = false;
+  for(uint32_t y = 0u; y < 32u; ++y)
+  {
+    for(uint32_t x = 0u; x < 64u; ++x)
+    {
+      const uint8_t* pixel = lowResolutionMetadata.GetBuffer() + (y * 64u + x) * 4u;
+      if(pixel[3u] >= 2u)
+      {
+        DALI_TEST_CHECK(pixel[2u] != 0u);
+        DALI_TEST_CHECK(lowResolutionSequence.GetBuffer()[y * 64u + x] != 0u);
+        foundBlurHalo |= y != 16u || (x != 8u && x != 48u);
+      }
+    }
+  }
+  DALI_TEST_CHECK(foundBlurHalo);
+  const uint8_t* earlySource = lowResolutionMetadata.GetBuffer() + (16u * 64u + 8u) * 4u;
+  const uint8_t* lateSource  = lowResolutionMetadata.GetBuffer() + (16u * 64u + 48u) * 4u;
+  DALI_TEST_EQUALS(earlySource[0u], 0x11u, TEST_LOCATION);
+  DALI_TEST_EQUALS(earlySource[1u], 0x11u, TEST_LOCATION);
+  DALI_TEST_EQUALS(lateSource[0u], 0xeeu, TEST_LOCATION);
+  DALI_TEST_EQUALS(lateSource[1u], 0xeeu, TEST_LOCATION);
+  END_TEST;
+}
+
 int UtcDaliTextRevealPixelP(void)
 {
-  UiTestApplication application;
+  UiTestApplication           application;
   TextAbstraction::FontClient fontClient = TextAbstraction::FontClient::Get();
 
   auto BuildFinalPixelPlan = [](UiText::ControllerPtr controller,
@@ -2145,6 +2674,26 @@ int UtcDaliTextRevealPixelP(void)
   }
   DALI_TEST_EQUALS(firstLineStart, 0.0f, EPSILON, TEST_LOCATION);
   DALI_TEST_CHECK(secondLineStart > firstLineStart);
+  for(UiText::GlyphIndex glyph = finalLines[0u].glyphRun.glyphIndex;
+      glyph < finalLines[0u].glyphRun.glyphIndex + finalLines[0u].glyphRun.numberOfGlyphs;
+      ++glyph)
+  {
+    const uint32_t unit = perLinePlan.glyphToUnit[glyph];
+    if(unit != Reveal::NO_UNIT)
+    {
+      DALI_TEST_EQUALS(perLinePlan.unitSequenceStart[unit], firstLineStart, EPSILON, TEST_LOCATION);
+    }
+  }
+  for(UiText::GlyphIndex glyph = finalLines[1u].glyphRun.glyphIndex;
+      glyph < finalLines[1u].glyphRun.glyphIndex + finalLines[1u].glyphRun.numberOfGlyphs;
+      ++glyph)
+  {
+    const uint32_t unit = perLinePlan.glyphToUnit[glyph];
+    if(unit != Reveal::NO_UNIT)
+    {
+      DALI_TEST_EQUALS(perLinePlan.unitSequenceStart[unit], secondLineStart, EPSILON, TEST_LOCATION);
+    }
+  }
 
   // Replacement width never enters the PIXEL schedule and every surviving
   // descriptor has an ordinary text glyph backing it.

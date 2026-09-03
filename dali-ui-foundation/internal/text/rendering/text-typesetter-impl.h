@@ -130,9 +130,14 @@ public:
    */
   TextAbstraction::FontClient& GetFontClient();
 
-  void BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan);
+  void BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan, bool sequenceBlurEnabled);
 
-  PixelData EndRevealMetadata();
+  PixelData EndRevealMetadata(float      referencePixelSize,
+                              float      blurStrength,
+                              PixelData* sequenceMetadata,
+                              PixelData* mediumBlurMetadata,
+                              bool       useMultiRadiusQualityScale,
+                              float      ownershipOracleProgress);
 
 public: // Image buffer creation
   void DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth, const uint32_t bufferHeight,

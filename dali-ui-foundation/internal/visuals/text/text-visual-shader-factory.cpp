@@ -124,7 +124,9 @@ FeatureBuilder::FeatureBuilder()
   mTextEmboss(TextEmboss::NO_EMBOSS),
   mTextGradient(TextGradient::NO_TEXT_GRADIENT),
   mTextGradientOverlay(TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY),
-  mTextReveal(TextReveal::NO_TEXT_REVEAL)
+  mTextReveal(TextReveal::NO_TEXT_REVEAL),
+  mTextRevealSequenceBlur(TextRevealSequenceBlur::NO_TEXT_REVEAL_SEQUENCE_BLUR),
+  mTextRevealMultiRadiusBlur(TextRevealMultiRadiusBlur::NO_TEXT_REVEAL_MULTI_RADIUS_BLUR)
 {
 }
 
@@ -188,6 +190,22 @@ FeatureBuilder& FeatureBuilder::EnableTextGradientOverlay(bool enableTextGradien
 FeatureBuilder& FeatureBuilder::EnableTextReveal(bool enableTextReveal)
 {
   mTextReveal = enableTextReveal ? TextReveal::HAS_TEXT_REVEAL : TextReveal::NO_TEXT_REVEAL;
+  return *this;
+}
+
+FeatureBuilder& FeatureBuilder::EnableTextRevealSequenceBlur(bool enableTextRevealSequenceBlur)
+{
+  mTextRevealSequenceBlur = enableTextRevealSequenceBlur
+                              ? TextRevealSequenceBlur::HAS_TEXT_REVEAL_SEQUENCE_BLUR
+                              : TextRevealSequenceBlur::NO_TEXT_REVEAL_SEQUENCE_BLUR;
+  return *this;
+}
+
+FeatureBuilder& FeatureBuilder::EnableTextRevealMultiRadiusBlur(bool enableTextRevealMultiRadiusBlur)
+{
+  mTextRevealMultiRadiusBlur = enableTextRevealMultiRadiusBlur
+                                 ? TextRevealMultiRadiusBlur::HAS_TEXT_REVEAL_MULTI_RADIUS_BLUR
+                                 : TextRevealMultiRadiusBlur::NO_TEXT_REVEAL_MULTI_RADIUS_BLUR;
   return *this;
 }
 
@@ -305,6 +323,14 @@ void FeatureBuilder::GetFragmentShaderPrefixList(std::string& fragmentShaderPref
   {
     fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_REVEAL\n";
   }
+  if(IsEnabledTextRevealSequenceBlur())
+  {
+    fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR\n";
+  }
+  if(IsEnabledTextRevealMultiRadiusBlur())
+  {
+    fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR\n";
+  }
   if(IsEnabledAnyTextGradient())
   {
     fragmentShaderPrefixList += "#define IS_REQUIRED_TEXT_GRADIENT\n";
@@ -358,8 +384,10 @@ Shader TextVisualShaderFactory::GetShader(VisualFactoryCache&                   
   VisualFactoryCache::ShaderType shaderType = featureBuilder.GetShaderType();
   if(featureBuilder.IsEnabledTextReveal())
   {
-    const uint32_t cacheKey = static_cast<uint32_t>(shaderType);
-    const auto     found    = mRevealShaderIds.find(cacheKey);
+    const uint32_t cacheKey = static_cast<uint32_t>(shaderType) * 4u |
+                              (featureBuilder.IsEnabledTextRevealSequenceBlur() ? 1u : 0u) |
+                              (featureBuilder.IsEnabledTextRevealMultiRadiusBlur() ? 2u : 0u);
+    const auto found = mRevealShaderIds.find(cacheKey);
     if(found != mRevealShaderIds.end())
     {
       shader = factoryCache.GetExternalShader(found->second);
@@ -386,7 +414,7 @@ Shader TextVisualShaderFactory::GetShader(VisualFactoryCache&                   
     return shader;
   }
 
-  shader                                    = factoryCache.GetShader(shaderType);
+  shader = factoryCache.GetShader(shaderType);
 
   if(!shader)
   {

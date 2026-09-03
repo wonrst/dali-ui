@@ -32,6 +32,7 @@
 #include <dali-ui-foundation/integration-api/view-depth-index-ranges.h>
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/color-glyph-helper.h>
+#include <dali-ui-foundation/internal/text/glyph-metrics-helper.h>
 #include <dali-ui-foundation/internal/text/replacement/inline-replacement-reveal-bridge.h>
 #include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/text-effects-style.h>
@@ -102,6 +103,11 @@ constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_CONIC_START_ANGLE_NAME = "uT
 constexpr const char* UNIFORM_TEXT_GRADIENT_OVERLAY_MODE_NAME              = "uTextGradientOverlayMode";
 constexpr const char* UNIFORM_TEXT_REVEAL_PROGRESS_NAME                    = "uTextRevealProgress";
 constexpr const char* UNIFORM_TEXT_REVEAL_FADE_DURATION_NAME               = "uTextRevealFadeDuration";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DURATION_NAME      = "uTextRevealSequenceBlurDuration";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_CURVE_NAME         = "uTextRevealSequenceBlurCurve";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DEBUG_VIEW_NAME    = "uTextRevealSequenceBlurDebugView";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DEBUG_TIMING_NAME  = "uTextRevealSequenceBlurDebugTiming";
+constexpr const char* UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_STAGE_SPLIT_NAME   = "uTextRevealSequenceBlurStageSplit";
 
 bool IsAsyncRenderRequest(Ui::Integration::Text::Async::RequestType requestType)
 {
@@ -2062,11 +2068,31 @@ void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit     unit,
                                      Property::Index                  progressPropertyIndex,
                                      uint64_t                         revision,
                                      Text::Internal::Reveal::Sequence sequence,
-                                     float                            sequenceStaggerRatio)
+                                     float                            sequenceStaggerRatio,
+                                     float                            prototypeBlurStrength,
+                                     float                            prototypeBlurDurationRatio,
+                                     float                            prototypeBlurCurve,
+                                     float                            prototypeBlurDebugView,
+                                     float                            prototypeBlurDebugTiming,
+                                     float                            prototypeBlurSpatialMode,
+                                     float                            prototypeBlurPreprocessingMode,
+                                     float                            prototypeBlurStageSplit,
+                                     float                            prototypeBlurOwnershipOracleProgress)
 {
-  sequence             = unit == Text::Internal::Reveal::Unit::DISABLED ? Text::Internal::Reveal::Sequence::WHOLE_TEXT : sequence;
-  sequenceStaggerRatio = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : sequenceStaggerRatio;
-  auto* data           = GetTextVisualRevealData(mRevealData);
+  sequence                             = unit == Text::Internal::Reveal::Unit::DISABLED ? Text::Internal::Reveal::Sequence::WHOLE_TEXT : sequence;
+  sequenceStaggerRatio                 = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : sequenceStaggerRatio;
+  prototypeBlurStrength                = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurStrength;
+  prototypeBlurDurationRatio           = unit == Text::Internal::Reveal::Unit::DISABLED
+                                           ? Text::Internal::Reveal::DEFAULT_SEQUENCE_BLUR_DURATION
+                                           : prototypeBlurDurationRatio;
+  prototypeBlurCurve                   = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurCurve;
+  prototypeBlurDebugView               = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurDebugView;
+  prototypeBlurDebugTiming             = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurDebugTiming;
+  prototypeBlurSpatialMode             = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurSpatialMode;
+  prototypeBlurPreprocessingMode       = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.0f : prototypeBlurPreprocessingMode;
+  prototypeBlurStageSplit              = unit == Text::Internal::Reveal::Unit::DISABLED ? 0.5f : prototypeBlurStageSplit;
+  prototypeBlurOwnershipOracleProgress = unit == Text::Internal::Reveal::Unit::DISABLED ? -1.0f : prototypeBlurOwnershipOracleProgress;
+  auto* data                           = GetTextVisualRevealData(mRevealData);
   if(!data)
   {
     if(unit == Text::Internal::Reveal::Unit::DISABLED)
@@ -2078,20 +2104,38 @@ void TextVisual::ConfigureTextReveal(Text::Internal::Reveal::Unit     unit,
           data->sequence == sequence &&
           Equals(data->fadeDurationRatio, fadeDurationRatio) &&
           Equals(data->sequenceStaggerRatio, sequenceStaggerRatio) &&
+          Equals(data->prototypeBlurStrength, prototypeBlurStrength) &&
+          Equals(data->prototypeBlurDurationRatio, prototypeBlurDurationRatio) &&
+          Equals(data->prototypeBlurCurve, prototypeBlurCurve) &&
+          Equals(data->prototypeBlurDebugView, prototypeBlurDebugView) &&
+          Equals(data->prototypeBlurDebugTiming, prototypeBlurDebugTiming) &&
+          Equals(data->prototypeBlurSpatialMode, prototypeBlurSpatialMode) &&
+          Equals(data->prototypeBlurPreprocessingMode, prototypeBlurPreprocessingMode) &&
+          Equals(data->prototypeBlurStageSplit, prototypeBlurStageSplit) &&
+          Equals(data->prototypeBlurOwnershipOracleProgress, prototypeBlurOwnershipOracleProgress) &&
           data->progressPropertyIndex == progressPropertyIndex &&
           data->revision == revision)
   {
     return;
   }
 
-  data                        = &GetOrCreateTextVisualRevealData(mRevealData);
-  data->unit                  = unit;
-  data->sequence              = sequence;
-  data->fadeDurationRatio     = fadeDurationRatio;
-  data->sequenceStaggerRatio  = sequenceStaggerRatio;
-  data->progressPropertyIndex = progressPropertyIndex;
-  data->revision              = revision;
-  mRendererUpdateNeeded       = true;
+  data                                       = &GetOrCreateTextVisualRevealData(mRevealData);
+  data->unit                                 = unit;
+  data->sequence                             = sequence;
+  data->fadeDurationRatio                    = fadeDurationRatio;
+  data->sequenceStaggerRatio                 = sequenceStaggerRatio;
+  data->prototypeBlurStrength                = prototypeBlurStrength;
+  data->prototypeBlurDurationRatio           = prototypeBlurDurationRatio;
+  data->prototypeBlurCurve                   = prototypeBlurCurve;
+  data->prototypeBlurDebugView               = prototypeBlurDebugView;
+  data->prototypeBlurDebugTiming             = prototypeBlurDebugTiming;
+  data->prototypeBlurSpatialMode             = prototypeBlurSpatialMode;
+  data->prototypeBlurPreprocessingMode       = prototypeBlurPreprocessingMode;
+  data->prototypeBlurStageSplit              = prototypeBlurStageSplit;
+  data->prototypeBlurOwnershipOracleProgress = prototypeBlurOwnershipOracleProgress;
+  data->progressPropertyIndex                = progressPropertyIndex;
+  data->revision                             = revision;
+  mRendererUpdateNeeded                      = true;
   if(unit == Text::Internal::Reveal::Unit::DISABLED)
   {
     RemoveTextRevealConstraints();
@@ -2140,6 +2184,17 @@ void TextVisual::BindTextRevealConstraint(VisualRenderer& renderer)
     renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_PROGRESS_NAME,
                               control.GetCurrentProperty<float>(data->progressPropertyIndex));
   renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_FADE_DURATION_NAME, data->fadeDuration);
+  if(data->prototypeBlurStrength > 0.0f)
+  {
+    renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DURATION_NAME, data->sequenceBlurDuration);
+    renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_CURVE_NAME, data->prototypeBlurCurve);
+    renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DEBUG_VIEW_NAME, data->prototypeBlurDebugView);
+    renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_DEBUG_TIMING_NAME, data->prototypeBlurDebugTiming);
+    if(mTextShaderFeatureCache.IsEnabledTextRevealMultiRadiusBlur())
+    {
+      renderer.RegisterProperty(UNIFORM_TEXT_REVEAL_SEQUENCE_BLUR_STAGE_SPLIT_NAME, data->prototypeBlurStageSplit);
+    }
+  }
   if(progressIndex == Property::INVALID_INDEX)
   {
     return;
@@ -2216,11 +2271,12 @@ Text::Internal::Reveal::Plan TextVisual::BuildFinalTextRevealPlan(
   const bool                             hasReplacementProjection = replacementSource.hasValidReplacementSource &&
                                         replacementState.processingModel &&
                                         replacementState.projection.HasReplacements();
-  auto sourcePlan = BuildTextRevealSourcePlan(hasReplacementProjection);
-  auto finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
-                                                       data->unit,
-                                                       data->sequence,
-                                                       data->sequenceStaggerRatio);
+  auto sourcePlan                      = BuildTextRevealSourcePlan(hasReplacementProjection);
+  sourcePlan.sequenceBlurDurationRatio = data->prototypeBlurDurationRatio;
+  auto finalPlan                       = mTypesetter->CreateFinalRevealPlan(sourcePlan,
+                                                                            data->unit,
+                                                                            data->sequence,
+                                                                            data->sequenceStaggerRatio);
   if(hasReplacementProjection)
   {
     replacementSourceRevision = replacementSource.sourceRevision;
@@ -2230,11 +2286,12 @@ Text::Internal::Reveal::Plan TextVisual::BuildFinalTextRevealPlan(
                                                      replacementTimings))
     {
       replacementTimings.Clear();
-      sourcePlan = BuildTextRevealSourcePlan(false);
-      finalPlan  = mTypesetter->CreateFinalRevealPlan(sourcePlan,
-                                                      data->unit,
-                                                      data->sequence,
-                                                      data->sequenceStaggerRatio);
+      sourcePlan                           = BuildTextRevealSourcePlan(false);
+      sourcePlan.sequenceBlurDurationRatio = data->prototypeBlurDurationRatio;
+      finalPlan                            = mTypesetter->CreateFinalRevealPlan(sourcePlan,
+                                                                                data->unit,
+                                                                                data->sequence,
+                                                                                data->sequenceStaggerRatio);
     }
   }
   return finalPlan;
@@ -2626,6 +2683,9 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
   const bool textRevealEnabled =
     revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED &&
     !isMarqueeEnabled && !mController->IsTextCutout();
+  const bool textRevealSequenceBlurEnabled =
+    textRevealEnabled && revealData->prototypeBlurStrength > 0.0f &&
+    !isHeightTiling && !embossEnabled;
   if(revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED && !textRevealEnabled)
   {
     DALI_LOG_DEBUG_INFO("Text::Reveal foreground rendering is disabled while marquee or cutout is active\n");
@@ -2645,7 +2705,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     .EnableTextGradient(textGradientCompositionEnabled)
     .EnableTextGradientMixed(textGradientMixedCompositionEnabled)
     .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
-    .EnableTextReveal(textRevealEnabled);
+    .EnableTextReveal(textRevealEnabled)
+    .EnableTextRevealSequenceBlur(textRevealSequenceBlurEnabled)
+    .EnableTextRevealMultiRadiusBlur(textRevealSequenceBlurEnabled &&
+                                     revealData->prototypeBlurSpatialMode > 0.5f);
 
   Shader shader = GetTextShader(mFactoryCache, featureBuilder);
   mImpl->mRenderer.SetShader(shader);
@@ -2999,10 +3062,43 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     uint64_t                              replacementSourceRevision = 0u;
     const auto                            finalPlan                 = BuildFinalTextRevealPlan(replacementTimings,
                                                                                                replacementSourceRevision);
-    PixelData                             metadata                  = mTypesetter->RenderTextRevealMetadata(size,
-                                                                                                            textDirection,
-                                                                                                            finalPlan,
-                                                                                                            revealData->fadeDuration);
+    PixelData                             sequenceMetadata;
+    PixelData                             mediumBlurMetadata;
+    float                                 referencePixelSize = 0.0f;
+    if(mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlur())
+    {
+      const Text::ModelInterface& model                = *mController->GetRenderTextModel();
+      bool                        hasInlineReplacement = false;
+      const Text::GlyphInfo*      glyphs               = model.GetGlyphs();
+      for(Text::Length glyphIndex = 0u; glyphs && glyphIndex < model.GetNumberOfGlyphs(); ++glyphIndex)
+      {
+        if(Text::IsSyntheticReplacementGlyph(glyphs[glyphIndex]))
+        {
+          hasInlineReplacement = true;
+          break;
+        }
+      }
+      referencePixelSize = Text::ResolveTextForegroundReferencePixelSize(model,
+                                                                         hasInlineReplacement,
+                                                                         mTypesetter->GetFontClient());
+    }
+    PixelData metadata = mTypesetter->RenderTextRevealMetadata(
+      size,
+      textDirection,
+      finalPlan,
+      revealData->fadeDuration,
+      0u,
+      Size::ZERO,
+      false,
+      Size::ZERO,
+      revealData->prototypeBlurStrength,
+      referencePixelSize,
+      mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlur() ? &sequenceMetadata : nullptr,
+      &revealData->sequenceBlurDuration,
+      mTextShaderFeatureCache.IsEnabledTextRevealMultiRadiusBlur() ? &mediumBlurMetadata : nullptr,
+      mTextShaderFeatureCache.IsEnabledTextRevealMultiRadiusBlur() &&
+        revealData->prototypeBlurPreprocessingMode > 0.5f,
+      revealData->prototypeBlurOwnershipOracleProgress);
 
     DALI_ASSERT_ALWAYS(metadata && metadata.GetPixelFormat() == Pixel::RGBA8888 &&
                        metadata.GetWidth() == static_cast<uint32_t>(size.width) &&
@@ -3011,6 +3107,22 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     Sampler nearestSampler = Sampler::New();
     nearestSampler.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
     AddTexture(textureSet, metadata, nearestSampler, textureSetIndex);
+    if(mTextShaderFeatureCache.IsEnabledTextRevealSequenceBlur())
+    {
+      DALI_ASSERT_ALWAYS(sequenceMetadata && sequenceMetadata.GetPixelFormat() == Pixel::L8 &&
+                         sequenceMetadata.GetWidth() == static_cast<uint32_t>(size.width) &&
+                         sequenceMetadata.GetHeight() == static_cast<uint32_t>(size.height));
+      ++textureSetIndex;
+      AddTexture(textureSet, sequenceMetadata, nearestSampler, textureSetIndex);
+      if(mTextShaderFeatureCache.IsEnabledTextRevealMultiRadiusBlur())
+      {
+        DALI_ASSERT_ALWAYS(mediumBlurMetadata && mediumBlurMetadata.GetPixelFormat() == Pixel::L8 &&
+                           mediumBlurMetadata.GetWidth() == static_cast<uint32_t>(size.width) &&
+                           mediumBlurMetadata.GetHeight() == static_cast<uint32_t>(size.height));
+        ++textureSetIndex;
+        AddTexture(textureSet, mediumBlurMetadata, nearestSampler, textureSetIndex);
+      }
+    }
     PublishReplacementRevealTimings(replacementTimings, replacementSourceRevision);
   }
 

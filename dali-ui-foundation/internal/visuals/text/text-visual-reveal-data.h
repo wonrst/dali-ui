@@ -40,9 +40,10 @@ namespace Internal
  * @brief Stores TextVisual reveal state after Reveal is first enabled.
  *
  * Label owns the stable progress scene-property identity. TextVisual retains
- * only renderer state, the async publication revision, and optional WORD
- * segmentation. Keeping this attachment after disable preserves revision
- * history; segmentation remains empty until synchronous WORD planning.
+ * only renderer state, the async publication revision, optional WORD
+ * segmentation, and the internal Blur V2 experiment state. Keeping this
+ * attachment after disable preserves revision history; segmentation remains
+ * empty until synchronous WORD planning.
  */
 struct TextVisualRevealData
 {
@@ -54,6 +55,16 @@ struct TextVisualRevealData
   float                                fadeDurationRatio{Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO};
   float                                fadeDuration{0.0f};
   float                                sequenceStaggerRatio{0.0f};
+  float                                prototypeBlurStrength{0.0f};
+  float                                prototypeBlurDurationRatio{Ui::Text::Internal::Reveal::DEFAULT_SEQUENCE_BLUR_DURATION};
+  float                                prototypeBlurCurve{0.0f};
+  float                                prototypeBlurDebugView{0.0f};
+  float                                prototypeBlurDebugTiming{0.0f};
+  float                                prototypeBlurSpatialMode{0.0f};
+  float                                prototypeBlurPreprocessingMode{0.0f};
+  float                                prototypeBlurStageSplit{0.5f};
+  float                                prototypeBlurOwnershipOracleProgress{-1.0f};
+  float                                sequenceBlurDuration{0.0f};
   Property::Index                      progressPropertyIndex{Property::INVALID_INDEX};
   uint64_t                             revision{0u};
 };

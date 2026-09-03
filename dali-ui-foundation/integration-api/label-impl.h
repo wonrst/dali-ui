@@ -271,6 +271,19 @@ public:
   void SetTextReveal(const Ui::Text::Reveal& reveal);
 
   /**
+   * @brief Sets the internal Blur V2 prototype parameters without extending the public Reveal API.
+   */
+  void SetTextRevealBlurForPrototype(float strength,
+                                     float durationRatio,
+                                     float curve,
+                                     float debugView,
+                                     float debugTiming,
+                                     float spatialMode,
+                                     float preprocessingMode,
+                                     float stageSplit,
+                                     float ownershipOracleProgress);
+
+  /**
    * @copydoc Dali::Ui::Label::GetTextReveal
    */
   Ui::Text::Reveal GetTextReveal() const;

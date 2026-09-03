@@ -16,6 +16,7 @@
  */
 
 #include <dali-ui-foundation/dali-ui-foundation.h>
+#include <dali-ui-foundation/integration-api/text/text-reveal-blur-prototype.h>
 
 #include <array>
 #include <cstddef>
@@ -28,18 +29,47 @@ using namespace Dali::Ui;
 
 namespace
 {
-constexpr float       CONTROLS_PANEL_HEIGHT       = 408.0f;
+enum class FillMode
+{
+  GRADIENT,
+  SOLID,
+  WHITE_ON_BLACK
+};
+
+enum class PreviewAlignment
+{
+  LEFT_EDGE,
+  CENTER,
+  RIGHT_EDGE
+};
+
+constexpr float       CONTROLS_PANEL_HEIGHT       = 888.0f;
 constexpr float       CONTROL_HEIGHT              = 34.0f;
 constexpr float       CONTROL_SPACING             = 6.0f;
 constexpr float       MENU_TITLE_WIDTH            = 86.0f;
 constexpr float       STATUS_HEIGHT               = 104.0f;
 constexpr std::size_t FADE_CASE_COUNT             = 7u;
+constexpr std::size_t BLUR_CASE_COUNT             = 5u;
+constexpr std::size_t BLUR_DURATION_CASE_COUNT    = 7u;
+constexpr std::size_t BLUR_CURVE_CASE_COUNT       = 3u;
+constexpr std::size_t BLUR_VIEW_CASE_COUNT        = 4u;
+constexpr std::size_t BLUR_TIMING_CASE_COUNT      = 3u;
+constexpr std::size_t BLUR_SPATIAL_CASE_COUNT     = 2u;
+constexpr std::size_t BLUR_PREPROCESS_CASE_COUNT  = 2u;
+constexpr std::size_t BLUR_STAGE_SPLIT_CASE_COUNT = 2u;
 constexpr std::size_t DURATION_CASE_COUNT         = 5u;
+constexpr std::size_t FIXED_PROGRESS_CASE_COUNT   = 10u;
 constexpr std::size_t TEXT_CASE_COUNT             = 7u;
 constexpr std::size_t SEQUENCE_CASE_COUNT         = 2u;
 constexpr std::size_t STAGGER_CASE_COUNT          = 8u;
+constexpr std::size_t DIAGNOSTIC_TEXT_CASE_COUNT  = 7u;
+constexpr std::size_t FONT_SIZE_CASE_COUNT        = 4u;
+constexpr std::size_t ALIGNMENT_CASE_COUNT        = 3u;
 constexpr std::size_t DEFAULT_DURATION_CASE_INDEX = 3u;
+constexpr std::size_t DEFAULT_BLUR_DURATION_INDEX = 1u;
 constexpr std::size_t DEFAULT_TEXT_CASE_INDEX     = 1u;
+constexpr std::size_t NO_FIXED_PROGRESS_INDEX     = FIXED_PROGRESS_CASE_COUNT;
+constexpr std::size_t NO_DIAGNOSTIC_TEXT_INDEX    = DIAGNOSTIC_TEXT_CASE_COUNT;
 constexpr std::size_t LOCAL_IMAGE_CASE_INDEX      = 5u;
 constexpr std::size_t REMOTE_IMAGE_CASE_INDEX     = 6u;
 constexpr uint32_t    PANEL_COLOR                 = 0x111827;
@@ -48,7 +78,7 @@ constexpr uint32_t    BUTTON_BORDER_COLOR         = 0x475569;
 constexpr uint32_t    SELECTED_BUTTON_COLOR       = 0x1D4ED8;
 constexpr uint32_t    SELECTED_BORDER_COLOR       = 0x93C5FD;
 constexpr const char* REMOTE_IMAGE_URL =
-  "https://raw.githubusercontent.com/dalihub/dali-ui/devel/samples/text/res/flag_us_alt.png";
+  "https://raw.githubusercontent.com/dalihub/dali-ui/devel/samples/text/res/flag_us.png";
 
 // FadeDurationRatio controls the unit transition duration;
 // SequenceStaggerRatio controls the spacing between independent sequence starts.
@@ -78,6 +108,118 @@ const char* const FADE_STATUS_LABELS[FADE_CASE_COUNT] = {
   "Overlap (0.50)",
   "Long (0.75)",
   "Full Fade (1.00)"};
+
+const float BLUR_STRENGTHS[BLUR_CASE_COUNT] = {
+  0.0f,
+  0.25f,
+  0.50f,
+  0.75f,
+  1.0f};
+
+const char* const BLUR_BUTTON_LABELS[BLUR_CASE_COUNT] = {
+  "Off",
+  "0.25",
+  "0.50",
+  "0.75",
+  "1.00"};
+
+const float BLUR_DURATION_RATIOS[BLUR_DURATION_CASE_COUNT] = {
+  0.10f,
+  0.15f,
+  0.25f,
+  0.35f,
+  0.50f,
+  0.75f,
+  1.0f};
+
+const char* const BLUR_DURATION_BUTTON_LABELS[BLUR_DURATION_CASE_COUNT] = {
+  "0.10",
+  "0.15",
+  "0.25",
+  "0.35",
+  "0.50",
+  "0.75",
+  "1.00"};
+
+const Integration::TextRevealBlurCurve BLUR_CURVES[BLUR_CURVE_CASE_COUNT] = {
+  Integration::TextRevealBlurCurve::LINEAR,
+  Integration::TextRevealBlurCurve::SOFT,
+  Integration::TextRevealBlurCurve::EASE_IN_QUADRATIC};
+
+const char* const BLUR_CURVE_BUTTON_LABELS[BLUR_CURVE_CASE_COUNT] = {
+  "Linear",
+  "Soft",
+  "Quadratic"};
+
+const Integration::TextRevealBlurDebugView BLUR_VIEWS[BLUR_VIEW_CASE_COUNT] = {
+  Integration::TextRevealBlurDebugView::NORMAL,
+  Integration::TextRevealBlurDebugView::BLUR_ONLY,
+  Integration::TextRevealBlurDebugView::MEDIUM_BLUR_ONLY,
+  Integration::TextRevealBlurDebugView::SHARP_ONLY};
+
+const char* const BLUR_VIEW_BUTTON_LABELS[BLUR_VIEW_CASE_COUNT] = {
+  "Normal",
+  "Full Blur",
+  "Medium Blur",
+  "Sharp Only"};
+
+const Integration::TextRevealBlurDebugTiming BLUR_TIMINGS[BLUR_TIMING_CASE_COUNT] = {
+  Integration::TextRevealBlurDebugTiming::CONSERVATIVE,
+  Integration::TextRevealBlurDebugTiming::COMMON,
+  Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE};
+
+const char* const BLUR_TIMING_BUTTON_LABELS[BLUR_TIMING_CASE_COUNT] = {
+  "Conservative",
+  "Common (Debug)",
+  "Oracle (Fixed)"};
+
+const Integration::TextRevealBlurSpatialMode BLUR_SPATIAL_MODES[BLUR_SPATIAL_CASE_COUNT] = {
+  Integration::TextRevealBlurSpatialMode::TWO_STATE,
+  Integration::TextRevealBlurSpatialMode::MULTI_RADIUS};
+
+const char* const BLUR_SPATIAL_BUTTON_LABELS[BLUR_SPATIAL_CASE_COUNT] = {
+  "Two State",
+  "Multi Radius"};
+
+const Integration::TextRevealBlurPreprocessingMode BLUR_PREPROCESS_MODES[BLUR_PREPROCESS_CASE_COUNT] = {
+  Integration::TextRevealBlurPreprocessingMode::CURRENT_SCALE,
+  Integration::TextRevealBlurPreprocessingMode::MULTI_RADIUS_QUALITY_SCALE};
+
+const char* const BLUR_PREPROCESS_BUTTON_LABELS[BLUR_PREPROCESS_CASE_COUNT] = {
+  "Current Scale",
+  "Quality Scale"};
+
+const Integration::TextRevealBlurStageSplit BLUR_STAGE_SPLITS[BLUR_STAGE_SPLIT_CASE_COUNT] = {
+  Integration::TextRevealBlurStageSplit::HALF,
+  Integration::TextRevealBlurStageSplit::EARLY};
+
+const char* const BLUR_STAGE_SPLIT_BUTTON_LABELS[BLUR_STAGE_SPLIT_CASE_COUNT] = {
+  "0.50",
+  "0.40"};
+
+const float FIXED_PROGRESS_VALUES[FIXED_PROGRESS_CASE_COUNT] = {
+  0.10f,
+  0.20f,
+  0.25f,
+  0.40f,
+  0.50f,
+  0.60f,
+  0.75f,
+  0.80f,
+  0.90f,
+  1.0f};
+
+const char* const FIXED_PROGRESS_BUTTON_LABELS[FIXED_PROGRESS_CASE_COUNT] = {
+  "0.10",
+  "0.20",
+  "0.25",
+  "0.40",
+  "0.50",
+  "0.60",
+  "0.75",
+  "0.80",
+  "0.90",
+  "1.00"};
 
 // Wall-clock duration is application-owned; Reveal consumes normalized progress.
 const float DURATION_SECONDS[DURATION_CASE_COUNT] = {
@@ -136,8 +278,9 @@ const char* const STAGGER_BUTTON_LABELS[STAGGER_CASE_COUNT] = {
   "1.00"};
 
 const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
-  "Good morning. Start the day with cafe\u0301 by the window, "
-  "a design review at 11:00, and a quiet walk by the river before sunset.",
+  "Jason, I've got something you\nand Michale might enjoy.\nSince you both like Taylor Swift,\nI found some performances and\nconcert photos you want to\ntogether.",
+  // "Good morning. Start the day with cafe\u0301 by the window, "
+  // "a design review at 11:00, and a quiet walk by the river before sunset.",
   "오늘의 일정이 준비되었습니다.\n"
   "오전에는 천천히 커피를 즐기고, 오후 3시에는 Atlas 룸에서 "
   "디자인 리뷰를 진행한 뒤 해 질 무렵 산책을 떠나보세요.",
@@ -152,6 +295,46 @@ const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
   "전시를 보고, 해 질 무렵에는 강변을 걸어보세요.",
   "Tonight in Seoul: warm lights, late cafés, and a quiet walk along the Han River.",
   "Next stop, San Francisco: morning coffee, cool fog, and a sunset walk along the waterfront."};
+
+const char* const DIAGNOSTIC_TEXT_BUTTON_LABELS[DIAGNOSTIC_TEXT_CASE_COUNT] = {
+  "Wide Latin",
+  "Thin Latin",
+  "Blur",
+  "Korean",
+  "Timing 1L",
+  "Timing 2L",
+  "Pixel"};
+
+const char* const DIAGNOSTIC_TEXT_CASES[DIAGNOSTIC_TEXT_CASE_COUNT] = {
+  "IIII MMMM WWWW",
+  "Agjpqy",
+  "Reveal Blur",
+  "안녕하세요 텍스트 블러",
+  "AAAA BBBB CCCC",
+  "AAAA BBBB CCCC\nABCDEF",
+  "PIXEL"};
+
+const float FONT_SIZES[FONT_SIZE_CASE_COUNT] = {
+  20.0f,
+  32.0f,
+  48.0f,
+  64.0f};
+
+const char* const FONT_SIZE_BUTTON_LABELS[FONT_SIZE_CASE_COUNT] = {
+  "20 px",
+  "32 px",
+  "48 px",
+  "64 px"};
+
+const PreviewAlignment PREVIEW_ALIGNMENTS[ALIGNMENT_CASE_COUNT] = {
+  PreviewAlignment::LEFT_EDGE,
+  PreviewAlignment::CENTER,
+  PreviewAlignment::RIGHT_EDGE};
+
+const char* const ALIGNMENT_BUTTON_LABELS[ALIGNMENT_CASE_COUNT] = {
+  "Left Edge",
+  "Centered",
+  "Right Edge"};
 
 Label NewLabel(const char* text, float size, uint32_t color)
 {
@@ -213,6 +396,29 @@ void SetButtonSelected(Label button, bool selected)
   button.SetTextColor(UiColor(selected ? 0xF8FAFC : 0xCBD5E1));
   button.SetBackgroundColor(UiColor(selected ? SELECTED_BUTTON_COLOR : BUTTON_COLOR));
   button.SetBorderlineColor(UiColor(selected ? SELECTED_BORDER_COLOR : BUTTON_BORDER_COLOR));
+}
+
+void SetPrototypeBlur(Label                                              label,
+                      float                                              strength,
+                      float                                              durationRatio,
+                      Integration::TextRevealBlurCurve                   curve,
+                      Integration::TextRevealBlurDebugView               debugView,
+                      Integration::TextRevealBlurDebugTiming             debugTiming,
+                      Integration::TextRevealBlurSpatialMode             spatialMode,
+                      Integration::TextRevealBlurPreprocessingMode preprocessingMode,
+                      Integration::TextRevealBlurStageSplit              stageSplit,
+                      float                                              ownershipOracleProgress)
+{
+  Integration::SetTextRevealBlurForPrototype(label,
+                                             strength,
+                                             durationRatio,
+                                             curve,
+                                             debugView,
+                                             debugTiming,
+                                             spatialMode,
+                                             preprocessingMode,
+                                             stageSplit,
+                                             ownershipOracleProgress);
 }
 } // unnamed namespace
 
@@ -278,6 +484,41 @@ private:
       });
     }
 
+    StackLayout diagnosticTextControls = NewMenuRow("DIAG TEXT");
+    for(std::size_t textIndex = 0u; textIndex < DIAGNOSTIC_TEXT_CASE_COUNT; ++textIndex)
+    {
+      mDiagnosticTextButtons[textIndex] = NewButton(DIAGNOSTIC_TEXT_BUTTON_LABELS[textIndex]);
+      diagnosticTextControls.Add(mDiagnosticTextButtons[textIndex]);
+      mDiagnosticTextButtons[textIndex].AsInteractive().ClickedSignal().Connect(this, [this, textIndex](View, InputEvent)
+      {
+        SetDiagnosticText(textIndex);
+      });
+    }
+
+    StackLayout fontSizeControls = NewMenuRow("FONT SIZE");
+    for(std::size_t fontSizeIndex = 0u; fontSizeIndex < FONT_SIZE_CASE_COUNT; ++fontSizeIndex)
+    {
+      mFontSizeButtons[fontSizeIndex] = NewButton(FONT_SIZE_BUTTON_LABELS[fontSizeIndex]);
+      fontSizeControls.Add(mFontSizeButtons[fontSizeIndex]);
+      mFontSizeButtons[fontSizeIndex].AsInteractive().ClickedSignal().Connect(this, [this, fontSizeIndex](View, InputEvent)
+      {
+        mFontSizeIndex = fontSizeIndex;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout alignmentControls = NewMenuRow("EDGE TEST");
+    for(std::size_t alignmentIndex = 0u; alignmentIndex < ALIGNMENT_CASE_COUNT; ++alignmentIndex)
+    {
+      mAlignmentButtons[alignmentIndex] = NewButton(ALIGNMENT_BUTTON_LABELS[alignmentIndex]);
+      alignmentControls.Add(mAlignmentButtons[alignmentIndex]);
+      mAlignmentButtons[alignmentIndex].AsInteractive().ClickedSignal().Connect(this, [this, alignmentIndex](View, InputEvent)
+      {
+        mAlignmentIndex = alignmentIndex;
+        ConfigureAndReplay();
+      });
+    }
+
     StackLayout sequenceControls = NewMenuRow("SEQUENCE");
     for(std::size_t sequenceIndex = 0u; sequenceIndex < SEQUENCE_CASE_COUNT; ++sequenceIndex)
     {
@@ -299,6 +540,118 @@ private:
       {
         mFadeDurationRatioIndex = fadeIndex;
         ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurControls = NewMenuRow("BLUR V2");
+    for(std::size_t blurIndex = 0u; blurIndex < BLUR_CASE_COUNT; ++blurIndex)
+    {
+      mBlurButtons[blurIndex] = NewButton(BLUR_BUTTON_LABELS[blurIndex]);
+      blurControls.Add(mBlurButtons[blurIndex]);
+      mBlurButtons[blurIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurIndex](View, InputEvent)
+      {
+        mBlurStrengthIndex = blurIndex;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurDurationControls = NewMenuRow("BLUR TIME");
+    for(std::size_t blurDurationIndex = 0u; blurDurationIndex < BLUR_DURATION_CASE_COUNT; ++blurDurationIndex)
+    {
+      mBlurDurationButtons[blurDurationIndex] = NewButton(BLUR_DURATION_BUTTON_LABELS[blurDurationIndex]);
+      blurDurationControls.Add(mBlurDurationButtons[blurDurationIndex]);
+      mBlurDurationButtons[blurDurationIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurDurationIndex](View, InputEvent)
+      {
+        mBlurDurationIndex = blurDurationIndex;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurCurveControls = NewMenuRow("BLUR CURVE");
+    for(std::size_t blurCurveIndex = 0u; blurCurveIndex < BLUR_CURVE_CASE_COUNT; ++blurCurveIndex)
+    {
+      mBlurCurveButtons[blurCurveIndex] = NewButton(BLUR_CURVE_BUTTON_LABELS[blurCurveIndex]);
+      blurCurveControls.Add(mBlurCurveButtons[blurCurveIndex]);
+      mBlurCurveButtons[blurCurveIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurCurveIndex](View, InputEvent)
+      {
+        mBlurCurveIndex = blurCurveIndex;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurSpatialControls = NewMenuRow("BLUR SPACE");
+    for(std::size_t blurSpatialIndex = 0u; blurSpatialIndex < BLUR_SPATIAL_CASE_COUNT; ++blurSpatialIndex)
+    {
+      mBlurSpatialButtons[blurSpatialIndex] = NewButton(BLUR_SPATIAL_BUTTON_LABELS[blurSpatialIndex]);
+      blurSpatialControls.Add(mBlurSpatialButtons[blurSpatialIndex]);
+      mBlurSpatialButtons[blurSpatialIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurSpatialIndex](View, InputEvent)
+      {
+        mBlurSpatialIndex = blurSpatialIndex;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurPreprocessControls = NewMenuRow("BLUR SCALE");
+    for(std::size_t blurPreprocessIndex = 0u; blurPreprocessIndex < BLUR_PREPROCESS_CASE_COUNT; ++blurPreprocessIndex)
+    {
+      mBlurPreprocessButtons[blurPreprocessIndex] = NewButton(BLUR_PREPROCESS_BUTTON_LABELS[blurPreprocessIndex]);
+      blurPreprocessControls.Add(mBlurPreprocessButtons[blurPreprocessIndex]);
+      mBlurPreprocessButtons[blurPreprocessIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurPreprocessIndex](View, InputEvent)
+      {
+        mBlurPreprocessIndex = blurPreprocessIndex;
+        if(BLUR_PREPROCESS_MODES[blurPreprocessIndex] == Integration::TextRevealBlurPreprocessingMode::MULTI_RADIUS_QUALITY_SCALE)
+        {
+          mBlurSpatialIndex = 1u;
+        }
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurStageSplitControls = NewMenuRow("BLUR SPLIT");
+    for(std::size_t blurStageSplitIndex = 0u; blurStageSplitIndex < BLUR_STAGE_SPLIT_CASE_COUNT; ++blurStageSplitIndex)
+    {
+      mBlurStageSplitButtons[blurStageSplitIndex] = NewButton(BLUR_STAGE_SPLIT_BUTTON_LABELS[blurStageSplitIndex]);
+      blurStageSplitControls.Add(mBlurStageSplitButtons[blurStageSplitIndex]);
+      mBlurStageSplitButtons[blurStageSplitIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurStageSplitIndex](View, InputEvent)
+      {
+        mBlurStageSplitIndex = blurStageSplitIndex;
+        mBlurSpatialIndex    = 1u;
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurViewControls = NewMenuRow("BLUR VIEW");
+    for(std::size_t blurViewIndex = 0u; blurViewIndex < BLUR_VIEW_CASE_COUNT; ++blurViewIndex)
+    {
+      mBlurViewButtons[blurViewIndex] = NewButton(BLUR_VIEW_BUTTON_LABELS[blurViewIndex]);
+      blurViewControls.Add(mBlurViewButtons[blurViewIndex]);
+      mBlurViewButtons[blurViewIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurViewIndex](View, InputEvent)
+      {
+        mBlurViewIndex = blurViewIndex;
+        if(BLUR_VIEWS[blurViewIndex] == Integration::TextRevealBlurDebugView::MEDIUM_BLUR_ONLY)
+        {
+          mBlurSpatialIndex = 1u;
+        }
+        ConfigureAndReplay();
+      });
+    }
+
+    StackLayout blurTimingControls = NewMenuRow("BLUR TIMING");
+    for(std::size_t blurTimingIndex = 0u; blurTimingIndex < BLUR_TIMING_CASE_COUNT; ++blurTimingIndex)
+    {
+      mBlurTimingButtons[blurTimingIndex] = NewButton(BLUR_TIMING_BUTTON_LABELS[blurTimingIndex]);
+      blurTimingControls.Add(mBlurTimingButtons[blurTimingIndex]);
+      mBlurTimingButtons[blurTimingIndex].AsInteractive().ClickedSignal().Connect(this, [this, blurTimingIndex](View, InputEvent)
+      {
+        mBlurTimingIndex = blurTimingIndex;
+        if(BLUR_TIMINGS[blurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE)
+        {
+          SetFixedProgress(3u);
+        }
+        else
+        {
+          ConfigureAndReplay();
+        }
       });
     }
 
@@ -327,10 +680,21 @@ private:
       });
     }
 
+    StackLayout fixedProgressControls = NewMenuRow("PROGRESS");
+    for(std::size_t progressIndex = 0u; progressIndex < FIXED_PROGRESS_CASE_COUNT; ++progressIndex)
+    {
+      mFixedProgressButtons[progressIndex] = NewButton(FIXED_PROGRESS_BUTTON_LABELS[progressIndex]);
+      fixedProgressControls.Add(mFixedProgressButtons[progressIndex]);
+      mFixedProgressButtons[progressIndex].AsInteractive().ClickedSignal().Connect(this, [this, progressIndex](View, InputEvent)
+      {
+        SetFixedProgress(progressIndex);
+      });
+    }
+
     StackLayout playbackControls = NewMenuRow("PLAYBACK");
-    Label replayButton  = NewButton("Replay");
-    mStopPlayButton     = NewButton("Stop");
-    Label reverseButton = NewButton("Reverse");
+    Label       replayButton     = NewButton("Replay");
+    mStopPlayButton              = NewButton("Stop");
+    Label reverseButton          = NewButton("Reverse");
     playbackControls.Add(replayButton);
     playbackControls.Add(mStopPlayButton);
     playbackControls.Add(reverseButton);
@@ -352,10 +716,22 @@ private:
     controlsPanel.SetSpacing(CONTROL_SPACING);
     controlsPanel.Add(configurationControls);
     controlsPanel.Add(textControls);
+    controlsPanel.Add(diagnosticTextControls);
+    controlsPanel.Add(fontSizeControls);
+    controlsPanel.Add(alignmentControls);
     controlsPanel.Add(sequenceControls);
     controlsPanel.Add(fadeControls);
+    controlsPanel.Add(blurControls);
+    controlsPanel.Add(blurDurationControls);
+    controlsPanel.Add(blurCurveControls);
+    controlsPanel.Add(blurSpatialControls);
+    controlsPanel.Add(blurPreprocessControls);
+    controlsPanel.Add(blurStageSplitControls);
+    controlsPanel.Add(blurViewControls);
+    controlsPanel.Add(blurTimingControls);
     controlsPanel.Add(staggerControls);
     controlsPanel.Add(durationControls);
+    controlsPanel.Add(fixedProgressControls);
     controlsPanel.Add(playbackControls);
     controlsPanel.Add(mStatus);
 
@@ -390,7 +766,18 @@ private:
     });
     mFillButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
     {
-      mGradientEnabled = !mGradientEnabled;
+      if(mFillMode == FillMode::GRADIENT)
+      {
+        mFillMode = FillMode::SOLID;
+      }
+      else if(mFillMode == FillMode::SOLID)
+      {
+        mFillMode = FillMode::WHITE_ON_BLACK;
+      }
+      else
+      {
+        mFillMode = FillMode::GRADIENT;
+      }
       ConfigureAndReplay();
     });
     mRevealButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
@@ -419,28 +806,50 @@ private:
 
   void ConfigureAndReplay()
   {
+    const std::size_t fixedProgressIndex = mFixedProgressIndex;
+    ApplyPreviewLayout();
     ApplyRevealConfiguration();
     mPreview.SetAsyncRendering(mAsync);
     ApplyFill();
 
     mUnitButton.SetText(GetUnitButtonLabel());
     mAsyncButton.SetText(mAsync ? "Path: Async" : "Path: Sync");
-    mFillButton.SetText(mGradientEnabled ? "Fill: Gradient" : "Fill: Solid");
+    mFillButton.SetText(GetFillButtonLabel());
     mRevealButton.SetText(mRevealEnabled ? "Reveal: On" : "Reveal: Off");
     SetButtonSelected(mAsyncButton, mAsync);
-    SetButtonSelected(mFillButton, mGradientEnabled);
+    SetButtonSelected(mFillButton, mFillMode == FillMode::GRADIENT);
     SetButtonSelected(mRevealButton, mRevealEnabled);
     UpdateTextButtons();
+    UpdateDiagnosticTextButtons();
+    UpdateFontSizeButtons();
+    UpdateAlignmentButtons();
     UpdateSequenceButtons();
     UpdateStaggerButtons();
     UpdateFadeButtons();
+    UpdateBlurButtons();
+    UpdateBlurDurationButtons();
+    UpdateBlurCurveButtons();
+    UpdateBlurSpatialButtons();
+    UpdateBlurPreprocessButtons();
+    UpdateBlurStageSplitButtons();
+    UpdateBlurViewButtons();
+    UpdateBlurTimingButtons();
     UpdateDurationButtons();
-    Replay();
+    UpdateFixedProgressButtons();
+    if(fixedProgressIndex < FIXED_PROGRESS_CASE_COUNT)
+    {
+      SetFixedProgress(fixedProgressIndex);
+    }
+    else
+    {
+      Replay();
+    }
   }
 
   void SetTextCase(std::size_t textIndex)
   {
-    mTextCaseIndex = textIndex % TEXT_CASE_COUNT;
+    mTextCaseIndex        = textIndex % TEXT_CASE_COUNT;
+    mDiagnosticTextIndex = NO_DIAGNOSTIC_TEXT_INDEX;
     if(mTextCaseIndex == LOCAL_IMAGE_CASE_INDEX || mTextCaseIndex == REMOTE_IMAGE_CASE_INDEX)
     {
       Text::StyledTextBuilder builder = Text::StyledTextBuilder::New();
@@ -463,6 +872,16 @@ private:
       mPreview.SetText(TEXT_CASES[mTextCaseIndex]);
     }
     UpdateTextButtons();
+    UpdateDiagnosticTextButtons();
+    Replay();
+  }
+
+  void SetDiagnosticText(std::size_t textIndex)
+  {
+    mDiagnosticTextIndex = textIndex % DIAGNOSTIC_TEXT_CASE_COUNT;
+    mPreview.SetText(DIAGNOSTIC_TEXT_CASES[mDiagnosticTextIndex]);
+    UpdateTextButtons();
+    UpdateDiagnosticTextButtons();
     Replay();
   }
 
@@ -498,12 +917,29 @@ private:
     }
   }
 
+  float GetOwnershipOracleProgress() const
+  {
+    return BLUR_TIMINGS[mBlurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE
+             ? mPreview.GetTextRevealProgress()
+             : -1.0f;
+  }
+
   void ApplyRevealConfiguration()
   {
     if(!mRevealEnabled)
     {
       // Reveal::None() disables the effect while preserving authored progress.
       mPreview.SetTextReveal(Text::Reveal::None());
+      SetPrototypeBlur(mPreview,
+                       BLUR_STRENGTHS[mBlurStrengthIndex],
+                       BLUR_DURATION_RATIOS[mBlurDurationIndex],
+                       BLUR_CURVES[mBlurCurveIndex],
+                       BLUR_VIEWS[mBlurViewIndex],
+                       BLUR_TIMINGS[mBlurTimingIndex],
+                       BLUR_SPATIAL_MODES[mBlurSpatialIndex],
+                       BLUR_PREPROCESS_MODES[mBlurPreprocessIndex],
+                       BLUR_STAGE_SPLITS[mBlurStageSplitIndex],
+                       GetOwnershipOracleProgress());
       return;
     }
 
@@ -513,6 +949,16 @@ private:
     reveal.SetSequenceStaggerRatio(STAGGER_RATIOS[mStaggerIndex]);
     reveal.SetFadeDurationRatio(FADE_DURATION_RATIOS[mFadeDurationRatioIndex]);
     mPreview.SetTextReveal(reveal);
+    SetPrototypeBlur(mPreview,
+                     BLUR_STRENGTHS[mBlurStrengthIndex],
+                     BLUR_DURATION_RATIOS[mBlurDurationIndex],
+                     BLUR_CURVES[mBlurCurveIndex],
+                     BLUR_VIEWS[mBlurViewIndex],
+                     BLUR_TIMINGS[mBlurTimingIndex],
+                     BLUR_SPATIAL_MODES[mBlurSpatialIndex],
+                     BLUR_PREPROCESS_MODES[mBlurPreprocessIndex],
+                     BLUR_STAGE_SPLITS[mBlurStageSplitIndex],
+                     GetOwnershipOracleProgress());
   }
 
   void UpdateFadeButtons()
@@ -520,6 +966,78 @@ private:
     for(std::size_t fadeIndex = 0u; fadeIndex < FADE_CASE_COUNT; ++fadeIndex)
     {
       SetButtonSelected(mFadeButtons[fadeIndex], fadeIndex == mFadeDurationRatioIndex);
+    }
+  }
+
+  void UpdateBlurButtons()
+  {
+    for(std::size_t blurIndex = 0u; blurIndex < BLUR_CASE_COUNT; ++blurIndex)
+    {
+      SetButtonSelected(mBlurButtons[blurIndex], blurIndex == mBlurStrengthIndex);
+    }
+  }
+
+  void UpdateBlurDurationButtons()
+  {
+    for(std::size_t blurDurationIndex = 0u; blurDurationIndex < BLUR_DURATION_CASE_COUNT; ++blurDurationIndex)
+    {
+      SetButtonSelected(mBlurDurationButtons[blurDurationIndex], blurDurationIndex == mBlurDurationIndex);
+    }
+  }
+
+  void UpdateBlurCurveButtons()
+  {
+    for(std::size_t blurCurveIndex = 0u; blurCurveIndex < BLUR_CURVE_CASE_COUNT; ++blurCurveIndex)
+    {
+      SetButtonSelected(mBlurCurveButtons[blurCurveIndex], blurCurveIndex == mBlurCurveIndex);
+    }
+  }
+
+  void UpdateBlurViewButtons()
+  {
+    for(std::size_t blurViewIndex = 0u; blurViewIndex < BLUR_VIEW_CASE_COUNT; ++blurViewIndex)
+    {
+      SetButtonSelected(mBlurViewButtons[blurViewIndex], blurViewIndex == mBlurViewIndex);
+    }
+  }
+
+  void UpdateBlurSpatialButtons()
+  {
+    for(std::size_t blurSpatialIndex = 0u; blurSpatialIndex < BLUR_SPATIAL_CASE_COUNT; ++blurSpatialIndex)
+    {
+      SetButtonSelected(mBlurSpatialButtons[blurSpatialIndex], blurSpatialIndex == mBlurSpatialIndex);
+    }
+  }
+
+  void UpdateBlurPreprocessButtons()
+  {
+    for(std::size_t blurPreprocessIndex = 0u; blurPreprocessIndex < BLUR_PREPROCESS_CASE_COUNT; ++blurPreprocessIndex)
+    {
+      SetButtonSelected(mBlurPreprocessButtons[blurPreprocessIndex], blurPreprocessIndex == mBlurPreprocessIndex);
+    }
+  }
+
+  void UpdateBlurStageSplitButtons()
+  {
+    for(std::size_t blurStageSplitIndex = 0u; blurStageSplitIndex < BLUR_STAGE_SPLIT_CASE_COUNT; ++blurStageSplitIndex)
+    {
+      SetButtonSelected(mBlurStageSplitButtons[blurStageSplitIndex], blurStageSplitIndex == mBlurStageSplitIndex);
+    }
+  }
+
+  void UpdateBlurTimingButtons()
+  {
+    for(std::size_t blurTimingIndex = 0u; blurTimingIndex < BLUR_TIMING_CASE_COUNT; ++blurTimingIndex)
+    {
+      SetButtonSelected(mBlurTimingButtons[blurTimingIndex], blurTimingIndex == mBlurTimingIndex);
+    }
+  }
+
+  void UpdateFixedProgressButtons()
+  {
+    for(std::size_t progressIndex = 0u; progressIndex < FIXED_PROGRESS_CASE_COUNT; ++progressIndex)
+    {
+      SetButtonSelected(mFixedProgressButtons[progressIndex], progressIndex == mFixedProgressIndex);
     }
   }
 
@@ -551,16 +1069,72 @@ private:
   {
     for(std::size_t textIndex = 0u; textIndex < TEXT_CASE_COUNT; ++textIndex)
     {
-      SetButtonSelected(mTextButtons[textIndex], textIndex == mTextCaseIndex);
+      SetButtonSelected(mTextButtons[textIndex],
+                        mDiagnosticTextIndex == NO_DIAGNOSTIC_TEXT_INDEX && textIndex == mTextCaseIndex);
+    }
+  }
+
+  void UpdateDiagnosticTextButtons()
+  {
+    for(std::size_t textIndex = 0u; textIndex < DIAGNOSTIC_TEXT_CASE_COUNT; ++textIndex)
+    {
+      SetButtonSelected(mDiagnosticTextButtons[textIndex], textIndex == mDiagnosticTextIndex);
+    }
+  }
+
+  void UpdateFontSizeButtons()
+  {
+    for(std::size_t fontSizeIndex = 0u; fontSizeIndex < FONT_SIZE_CASE_COUNT; ++fontSizeIndex)
+    {
+      SetButtonSelected(mFontSizeButtons[fontSizeIndex], fontSizeIndex == mFontSizeIndex);
+    }
+  }
+
+  void UpdateAlignmentButtons()
+  {
+    for(std::size_t alignmentIndex = 0u; alignmentIndex < ALIGNMENT_CASE_COUNT; ++alignmentIndex)
+    {
+      SetButtonSelected(mAlignmentButtons[alignmentIndex], alignmentIndex == mAlignmentIndex);
+    }
+  }
+
+  void ApplyPreviewLayout()
+  {
+    mPreview.SetFontSize(FONT_SIZES[mFontSizeIndex]);
+    switch(PREVIEW_ALIGNMENTS[mAlignmentIndex])
+    {
+      case PreviewAlignment::LEFT_EDGE:
+        mPreview.SetPadding(Insets(0.0f, 48.0f, 16.0f, 16.0f));
+        mPreview.SetHorizontalTextAlignment(Text::Alignment::START);
+        break;
+      case PreviewAlignment::RIGHT_EDGE:
+        mPreview.SetPadding(Insets(48.0f, 0.0f, 16.0f, 16.0f));
+        mPreview.SetHorizontalTextAlignment(Text::Alignment::END);
+        break;
+      case PreviewAlignment::CENTER:
+      default:
+        mPreview.SetPadding(Insets(48.0f, 48.0f, 16.0f, 16.0f));
+        mPreview.SetHorizontalTextAlignment(Text::Alignment::CENTER);
+        break;
     }
   }
 
   void ApplyFill()
   {
-    mPreview.SetTextColor(UiColor(0x0F172A));
-    if(!mGradientEnabled)
+    mPreview.SetTextGradient(Gradient::Base::None());
+    if(mFillMode == FillMode::WHITE_ON_BLACK)
     {
-      mPreview.SetTextGradient(Gradient::Base::None());
+      mPreview.SetBackgroundColor(UiColor(0x000000));
+      mPreview.SetBorderlineColor(UiColor(0x334155));
+      mPreview.SetTextColor(UiColor(0xFFFFFF));
+      return;
+    }
+
+    mPreview.SetBackgroundColor(UiColor(0xFFFFFF));
+    mPreview.SetBorderlineColor(UiColor(0xCBD5E1));
+    mPreview.SetTextColor(UiColor(0x0F172A));
+    if(mFillMode == FillMode::SOLID)
+    {
       return;
     }
 
@@ -572,14 +1146,80 @@ private:
     mPreview.SetTextGradient(gradient);
   }
 
+  const char* GetFillButtonLabel() const
+  {
+    switch(mFillMode)
+    {
+      case FillMode::SOLID:
+        return "Fill: Solid";
+      case FillMode::WHITE_ON_BLACK:
+        return "Fill: White/Black";
+      case FillMode::GRADIENT:
+      default:
+        return "Fill: Gradient";
+    }
+  }
+
+  const char* GetFillStatusLabel() const
+  {
+    switch(mFillMode)
+    {
+      case FillMode::SOLID:
+        return "Solid";
+      case FillMode::WHITE_ON_BLACK:
+        return "White on Black";
+      case FillMode::GRADIENT:
+      default:
+        return "Gradient";
+    }
+  }
+
+  const char* GetTextStatusLabel() const
+  {
+    return mDiagnosticTextIndex < DIAGNOSTIC_TEXT_CASE_COUNT
+             ? DIAGNOSTIC_TEXT_BUTTON_LABELS[mDiagnosticTextIndex]
+             : TEXT_BUTTON_LABELS[mTextCaseIndex];
+  }
+
   float GetAnimationDuration() const
   {
     return DURATION_SECONDS[mDurationCaseIndex];
   }
 
-  void Replay()
+  void SetFixedProgress(std::size_t progressIndex)
   {
     StopAnimation();
+    mFixedProgressIndex  = progressIndex;
+    const float progress = FIXED_PROGRESS_VALUES[progressIndex];
+    mPreview.SetTextRevealProgress(progress);
+    if(BLUR_TIMINGS[mBlurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE)
+    {
+      // Step timing makes the fixed-progress source mask an exact visibility
+      // oracle. All ordinary playback modes keep progress paint-only.
+      mFadeDurationRatioIndex = 1u;
+      UpdateFadeButtons();
+      ApplyRevealConfiguration();
+    }
+    mStopPlayButton.SetText("Play");
+
+    std::ostringstream playback;
+    playback << "Fixed progress " << std::fixed << std::setprecision(2) << progress
+             << ": compare the selected Blur Curve without animation.";
+    mPlaybackStatus = playback.str();
+    UpdateFixedProgressButtons();
+    UpdateStatus();
+  }
+
+  void Replay()
+  {
+    if(BLUR_TIMINGS[mBlurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE)
+    {
+      SetFixedProgress(mFixedProgressIndex < FIXED_PROGRESS_CASE_COUNT ? mFixedProgressIndex : 3u);
+      return;
+    }
+    StopAnimation();
+    mFixedProgressIndex = NO_FIXED_PROGRESS_INDEX;
+    UpdateFixedProgressButtons();
     mPreview.SetTextRevealProgress(0.0f);
     const float duration = GetAnimationDuration();
 
@@ -592,6 +1232,11 @@ private:
 
   void StopOrPlay()
   {
+    if(BLUR_TIMINGS[mBlurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE)
+    {
+      SetFixedProgress(mFixedProgressIndex < FIXED_PROGRESS_CASE_COUNT ? mFixedProgressIndex : 3u);
+      return;
+    }
     if(mAnimationRunning)
     {
       const float progress = mPreview.GetTextRevealProgress();
@@ -624,6 +1269,11 @@ private:
 
   void Reverse()
   {
+    if(BLUR_TIMINGS[mBlurTimingIndex] == Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE)
+    {
+      SetFixedProgress(mFixedProgressIndex < FIXED_PROGRESS_CASE_COUNT ? mFixedProgressIndex : 3u);
+      return;
+    }
     const float progress = mPreview.GetTextRevealProgress();
     StopAnimation();
     mPreview.SetTextRevealProgress(progress);
@@ -646,6 +1296,8 @@ private:
 
   void StartAnimation(float target, float duration)
   {
+    mFixedProgressIndex = NO_FIXED_PROGRESS_INDEX;
+    UpdateFixedProgressButtons();
     mAnimationTarget  = target;
     mAnimationRunning = true;
     mStopPlayButton.SetText("Stop");
@@ -723,14 +1375,25 @@ private:
                                       ? GetFadeDescription()
                                       : "Reveal is unset with Text::Reveal::None(); progress is preserved.";
     std::ostringstream status;
-    status << "TEXT " << TEXT_BUTTON_LABELS[mTextCaseIndex]
+    status << "TEXT " << GetTextStatusLabel()
+           << " | FONT " << FONT_SIZE_BUTTON_LABELS[mFontSizeIndex]
+           << " | EDGE " << ALIGNMENT_BUTTON_LABELS[mAlignmentIndex]
            << " | UNIT " << GetUnitStatusLabel()
            << " | SEQUENCE " << SEQUENCE_STATUS_LABELS[mSequenceIndex]
            << " | FADE " << FADE_STATUS_LABELS[mFadeDurationRatioIndex]
+           << " | BLUR " << BLUR_BUTTON_LABELS[mBlurStrengthIndex]
+           << " | BLUR TIME " << BLUR_DURATION_BUTTON_LABELS[mBlurDurationIndex]
+           << " | BLUR CURVE " << BLUR_CURVE_BUTTON_LABELS[mBlurCurveIndex]
+           << " | BLUR SPACE " << BLUR_SPATIAL_BUTTON_LABELS[mBlurSpatialIndex]
+           << " | BLUR SCALE " << BLUR_PREPROCESS_BUTTON_LABELS[mBlurPreprocessIndex]
+           << " | BLUR SPLIT " << BLUR_STAGE_SPLIT_BUTTON_LABELS[mBlurStageSplitIndex]
+           << " | BLUR VIEW " << BLUR_VIEW_BUTTON_LABELS[mBlurViewIndex]
+           << " | BLUR TIMING " << BLUR_TIMING_BUTTON_LABELS[mBlurTimingIndex]
            << " | STAGGER " << STAGGER_BUTTON_LABELS[mStaggerIndex]
            << " | DURATION " << std::fixed << std::setprecision(1) << GetAnimationDuration() << " s"
            << "\nPATH " << (mAsync ? "Async" : "Sync")
-           << " | FILL " << (mGradientEnabled ? "Gradient" : "Solid")
+           << (mAsync && mBlurStrengthIndex != 0u ? " (Blur V2 deferred)" : "")
+           << " | FILL " << GetFillStatusLabel()
            << " | REVEAL " << (mRevealEnabled ? "On" : "Off")
            << " | UI SCALE " << std::setprecision(1) << mUiScale << 'x'
            << "\n"
@@ -785,33 +1448,57 @@ private:
   }
 
 private:
-  Application&                               mApplication;
-  Label                                      mPreview;
-  Label                                      mUnitButton;
-  std::array<Label, TEXT_CASE_COUNT>        mTextButtons;
-  std::array<Label, SEQUENCE_CASE_COUNT>    mSequenceButtons;
-  std::array<Label, STAGGER_CASE_COUNT>      mStaggerButtons;
-  std::array<Label, FADE_CASE_COUNT>        mFadeButtons;
-  std::array<Label, DURATION_CASE_COUNT>    mDurationButtons;
-  Label                                      mAsyncButton;
-  Label                                      mFillButton;
-  Label                                      mRevealButton;
-  Label                                      mStopPlayButton;
-  Label                                      mStatus;
-  Animation                                  mAnimation;
-  std::string                                mPlaybackStatus;
-  Text::Reveal::Unit                         mUnit{Text::Reveal::Unit::CHARACTER};
-  std::size_t                                mSequenceIndex{0u};
-  std::size_t                                mStaggerIndex{0u};
-  std::size_t                                mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
-  std::size_t                                mFadeDurationRatioIndex{0u};
-  std::size_t                                mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
-  bool                                       mAsync{false};
-  bool                                       mGradientEnabled{true};
-  bool                                       mRevealEnabled{true};
-  bool                                       mAnimationRunning{false};
-  float                                      mAnimationTarget{1.0f};
-  float                                      mUiScale{1.0f};
+  Application&                                 mApplication;
+  Label                                        mPreview;
+  Label                                        mUnitButton;
+  std::array<Label, TEXT_CASE_COUNT>           mTextButtons;
+  std::array<Label, DIAGNOSTIC_TEXT_CASE_COUNT> mDiagnosticTextButtons;
+  std::array<Label, FONT_SIZE_CASE_COUNT>       mFontSizeButtons;
+  std::array<Label, ALIGNMENT_CASE_COUNT>       mAlignmentButtons;
+  std::array<Label, SEQUENCE_CASE_COUNT>       mSequenceButtons;
+  std::array<Label, STAGGER_CASE_COUNT>        mStaggerButtons;
+  std::array<Label, FADE_CASE_COUNT>             mFadeButtons;
+  std::array<Label, BLUR_CASE_COUNT>             mBlurButtons;
+  std::array<Label, BLUR_DURATION_CASE_COUNT>    mBlurDurationButtons;
+  std::array<Label, BLUR_CURVE_CASE_COUNT>       mBlurCurveButtons;
+  std::array<Label, BLUR_SPATIAL_CASE_COUNT>     mBlurSpatialButtons;
+  std::array<Label, BLUR_PREPROCESS_CASE_COUNT>  mBlurPreprocessButtons;
+  std::array<Label, BLUR_STAGE_SPLIT_CASE_COUNT> mBlurStageSplitButtons;
+  std::array<Label, BLUR_VIEW_CASE_COUNT>        mBlurViewButtons;
+  std::array<Label, BLUR_TIMING_CASE_COUNT>      mBlurTimingButtons;
+  std::array<Label, DURATION_CASE_COUNT>         mDurationButtons;
+  std::array<Label, FIXED_PROGRESS_CASE_COUNT>   mFixedProgressButtons;
+  Label                                          mAsyncButton;
+  Label                                          mFillButton;
+  Label                                          mRevealButton;
+  Label                                          mStopPlayButton;
+  Label                                          mStatus;
+  Animation                                      mAnimation;
+  std::string                                    mPlaybackStatus;
+  Text::Reveal::Unit                             mUnit{Text::Reveal::Unit::CHARACTER};
+  std::size_t                                    mSequenceIndex{0u};
+  std::size_t                                    mStaggerIndex{0u};
+  std::size_t                                    mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
+  std::size_t                                    mDiagnosticTextIndex{NO_DIAGNOSTIC_TEXT_INDEX};
+  std::size_t                                    mFontSizeIndex{1u};
+  std::size_t                                    mAlignmentIndex{1u};
+  std::size_t                                    mFadeDurationRatioIndex{0u};
+  std::size_t                                    mBlurStrengthIndex{0u};
+  std::size_t                                    mBlurDurationIndex{DEFAULT_BLUR_DURATION_INDEX};
+  std::size_t                                    mBlurCurveIndex{0u};
+  std::size_t                                    mBlurSpatialIndex{1u};
+  std::size_t                                    mBlurPreprocessIndex{1u};
+  std::size_t                                    mBlurStageSplitIndex{0u};
+  std::size_t                                    mBlurViewIndex{0u};
+  std::size_t                                    mBlurTimingIndex{0u};
+  std::size_t                                    mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
+  std::size_t                                    mFixedProgressIndex{NO_FIXED_PROGRESS_INDEX};
+  bool                                           mAsync{false};
+  FillMode                                       mFillMode{FillMode::GRADIENT};
+  bool                                           mRevealEnabled{true};
+  bool                                         mAnimationRunning{false};
+  float                                        mAnimationTarget{1.0f};
+  float                                        mUiScale{1.0f};
 };
 
 int DALI_EXPORT_API main(int argc, char** argv)

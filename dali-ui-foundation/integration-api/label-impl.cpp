@@ -838,13 +838,107 @@ void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
                                               progressIndex,
                                               data->revision,
                                               sequence,
-                                              sequenceStaggerRatio);
+                                              sequenceStaggerRatio,
+                                              mController->IsAsyncRendering() ? 0.0f : data->prototypeBlurStrength,
+                                              data->prototypeBlurDurationRatio,
+                                              data->prototypeBlurCurve,
+                                              data->prototypeBlurDebugView,
+                                              data->prototypeBlurDebugTiming,
+                                              data->prototypeBlurSpatialMode,
+                                              data->prototypeBlurPreprocessingMode,
+                                              data->prototypeBlurStageSplit,
+                                              data->prototypeBlurOwnershipOracleProgress);
   }
 
   if(mController && mController->IsAsyncRendering())
   {
     RequestAsyncRender();
     RelayoutRequest();
+  }
+}
+
+void LabelImpl::SetTextRevealBlurForPrototype(float strength,
+                                              float durationRatio,
+                                              float curve,
+                                              float debugView,
+                                              float debugTiming,
+                                              float spatialMode,
+                                              float preprocessingMode,
+                                              float stageSplit,
+                                              float ownershipOracleProgress)
+{
+  strength                = std::isnan(strength) ? 0.0f : std::max(0.0f, std::min(1.0f, strength));
+  durationRatio           = std::isnan(durationRatio)
+                              ? Ui::Text::Internal::Reveal::DEFAULT_SEQUENCE_BLUR_DURATION
+                              : std::max(0.0f, std::min(1.0f, durationRatio));
+  curve                   = std::isnan(curve) ? 0.0f : std::max(0.0f, std::min(1.0f, curve));
+  debugView               = !std::isnan(debugView) && debugView >= 2.5f
+                              ? 3.0f
+                              : (!std::isnan(debugView) && debugView >= 1.5f
+                                   ? 2.0f
+                                   : (!std::isnan(debugView) && debugView >= 0.5f ? 1.0f : 0.0f));
+  debugTiming             = !std::isnan(debugTiming) && debugTiming >= 1.5f
+                              ? 2.0f
+                              : (!std::isnan(debugTiming) && debugTiming >= 0.5f ? 1.0f : 0.0f);
+  spatialMode             = !std::isnan(spatialMode) && spatialMode >= 0.5f ? 1.0f : 0.0f;
+  preprocessingMode       = !std::isnan(preprocessingMode) && preprocessingMode >= 0.5f ? 1.0f : 0.0f;
+  stageSplit              = !std::isnan(stageSplit) && stageSplit < 0.45f ? 0.4f : 0.5f;
+  ownershipOracleProgress = debugTiming > 1.5f && !std::isnan(ownershipOracleProgress)
+                              ? std::max(0.0f, std::min(1.0f, ownershipOracleProgress))
+                              : -1.0f;
+  auto& data              = Internal::Text::GetOrCreateTextRevealData(mTextRevealData);
+  if(Dali::Equals(data.prototypeBlurStrength, strength) &&
+     Dali::Equals(data.prototypeBlurDurationRatio, durationRatio) &&
+     Dali::Equals(data.prototypeBlurCurve, curve) &&
+     Dali::Equals(data.prototypeBlurDebugView, debugView) &&
+     Dali::Equals(data.prototypeBlurDebugTiming, debugTiming) &&
+     Dali::Equals(data.prototypeBlurSpatialMode, spatialMode) &&
+     Dali::Equals(data.prototypeBlurPreprocessingMode, preprocessingMode) &&
+     Dali::Equals(data.prototypeBlurStageSplit, stageSplit) &&
+     Dali::Equals(data.prototypeBlurOwnershipOracleProgress, ownershipOracleProgress))
+  {
+    return;
+  }
+
+  const float previousStrength              = data.prototypeBlurStrength;
+  data.prototypeBlurStrength                = strength;
+  data.prototypeBlurDurationRatio           = durationRatio;
+  data.prototypeBlurCurve                   = curve;
+  data.prototypeBlurDebugView               = debugView;
+  data.prototypeBlurDebugTiming             = debugTiming;
+  data.prototypeBlurSpatialMode             = spatialMode;
+  data.prototypeBlurPreprocessingMode       = preprocessingMode;
+  data.prototypeBlurStageSplit              = stageSplit;
+  data.prototypeBlurOwnershipOracleProgress = ownershipOracleProgress;
+  // Blur V2 is deliberately sync-only in this prototype. Keep the authored
+  // value for a later sync transition, but do not invalidate an in-flight
+  // async Reveal result for a setting that cannot affect that result. Changes
+  // while Reveal and Blur are both disabled are likewise authored-state only.
+  if(mController->IsAsyncRendering() || !data.enabled ||
+     (previousStrength <= 0.0f && strength <= 0.0f))
+  {
+    return;
+  }
+
+  ++data.revision;
+  if(data.enabled && mVisual)
+  {
+    Internal::TextVisual::ConfigureTextReveal(mVisual,
+                                              Ui::Text::Internal::Reveal::ToInternalUnit(data.unit),
+                                              data.fadeDurationRatio,
+                                              EnsureTextRevealProgress(),
+                                              data.revision,
+                                              Ui::Text::Internal::Reveal::ToInternalSequence(data.sequence),
+                                              data.sequenceStaggerRatio,
+                                              data.prototypeBlurStrength,
+                                              data.prototypeBlurDurationRatio,
+                                              data.prototypeBlurCurve,
+                                              data.prototypeBlurDebugView,
+                                              data.prototypeBlurDebugTiming,
+                                              data.prototypeBlurSpatialMode,
+                                              data.prototypeBlurPreprocessingMode,
+                                              data.prototypeBlurStageSplit,
+                                              data.prototypeBlurOwnershipOracleProgress);
   }
 }
 
@@ -1735,7 +1829,16 @@ void LabelImpl::SetAsyncRendering(bool asyncRendering)
                                                 EnsureTextRevealProgress(),
                                                 revealData->revision,
                                                 Ui::Text::Internal::Reveal::ToInternalSequence(revealData->sequence),
-                                                revealData->sequenceStaggerRatio);
+                                                revealData->sequenceStaggerRatio,
+                                                asyncRendering ? 0.0f : revealData->prototypeBlurStrength,
+                                                revealData->prototypeBlurDurationRatio,
+                                                revealData->prototypeBlurCurve,
+                                                revealData->prototypeBlurDebugView,
+                                                revealData->prototypeBlurDebugTiming,
+                                                revealData->prototypeBlurSpatialMode,
+                                                revealData->prototypeBlurPreprocessingMode,
+                                                revealData->prototypeBlurStageSplit,
+                                                revealData->prototypeBlurOwnershipOracleProgress);
     }
   }
   if(!asyncRendering)

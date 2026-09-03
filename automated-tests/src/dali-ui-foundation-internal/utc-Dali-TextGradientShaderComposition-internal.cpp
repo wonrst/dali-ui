@@ -15,6 +15,7 @@
  *
  */
 
+#include <dali-ui-foundation/integration-api/text/text-reveal-blur-prototype.h>
 #include <dali-ui-foundation/integration-api/text/text-scroller-interface.h>
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/async-text/async-text-loader.h>
@@ -37,19 +38,21 @@ using namespace Dali;
 namespace
 {
 
-namespace TextFeature = Dali::Ui::Internal::TextVisualShaderFeature;
-namespace TextInternal = Dali::Ui::Text::Internal;
+namespace TextFeature       = Dali::Ui::Internal::TextVisualShaderFeature;
+namespace TextInternal      = Dali::Ui::Text::Internal;
 namespace UiIntegrationText = Dali::Ui::Integration::Text;
-namespace UiText      = Dali::Ui::Text;
-namespace UiInternal  = Dali::Ui::Internal;
+namespace UiText            = Dali::Ui::Text;
+namespace UiInternal        = Dali::Ui::Internal;
 
-constexpr const char* TEXT_GRADIENT_DEFINE         = "#define IS_REQUIRED_TEXT_GRADIENT\n";
-constexpr const char* TEXT_GRADIENT_MIXED_DEFINE   = "#define IS_REQUIRED_TEXT_GRADIENT_MIXED\n";
-constexpr const char* TEXT_GRADIENT_OVERLAY_DEFINE = "#define IS_REQUIRED_TEXT_GRADIENT_OVERLAY\n";
-constexpr const char* TEXT_REVEAL_DEFINE          = "#define IS_REQUIRED_TEXT_REVEAL\n";
-constexpr const char* TEXT_STYLE_DEFINE            = "#define IS_REQUIRED_TEXT_STYLE\n";
-constexpr const char* TEXT_OVERLAY_STYLE_DEFINE    = "#define IS_REQUIRED_TEXT_OVERLAY_STYLE\n";
-constexpr float       EPSILON                      = 0.0001f;
+constexpr const char* TEXT_GRADIENT_DEFINE             = "#define IS_REQUIRED_TEXT_GRADIENT\n";
+constexpr const char* TEXT_GRADIENT_MIXED_DEFINE       = "#define IS_REQUIRED_TEXT_GRADIENT_MIXED\n";
+constexpr const char* TEXT_GRADIENT_OVERLAY_DEFINE     = "#define IS_REQUIRED_TEXT_GRADIENT_OVERLAY\n";
+constexpr const char* TEXT_REVEAL_DEFINE               = "#define IS_REQUIRED_TEXT_REVEAL\n";
+constexpr const char* TEXT_REVEAL_SEQUENCE_BLUR_DEFINE = "#define IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR\n";
+constexpr const char* TEXT_REVEAL_MULTI_RADIUS_DEFINE  = "#define IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR\n";
+constexpr const char* TEXT_STYLE_DEFINE                = "#define IS_REQUIRED_TEXT_STYLE\n";
+constexpr const char* TEXT_OVERLAY_STYLE_DEFINE        = "#define IS_REQUIRED_TEXT_OVERLAY_STYLE\n";
+constexpr float       EPSILON                          = 0.0001f;
 
 std::string GetFragmentPrefix(const TextFeature::FeatureBuilder& builder)
 {
@@ -713,9 +716,263 @@ int UtcDaliTextRevealForegroundShaderCompositionP(void)
   END_TEST;
 }
 
-int UtcDaliTextRevealShaderCacheSeparatesEffectiveVariantsP(void)
+int UtcDaliTextRevealSequenceBlurShaderCompositionP(void)
 {
   UiTestApplication application;
+
+  TextFeature::FeatureBuilder disabled;
+  disabled.EnableTextRevealSequenceBlur(true);
+  DALI_TEST_CHECK(!disabled.IsEnabledTextRevealSequenceBlur());
+  disabled.EnableTextRevealMultiRadiusBlur(true);
+  DALI_TEST_CHECK(!disabled.IsEnabledTextRevealMultiRadiusBlur());
+  DALI_TEST_CHECK(GetFragmentPrefix(disabled).find(TEXT_REVEAL_SEQUENCE_BLUR_DEFINE) == std::string::npos);
+  DALI_TEST_CHECK(GetFragmentPrefix(disabled).find(TEXT_REVEAL_MULTI_RADIUS_DEFINE) == std::string::npos);
+
+  TextFeature::FeatureBuilder reveal;
+  reveal.EnableTextReveal(true);
+  const std::string revealPrefix = GetFragmentPrefix(reveal);
+  DALI_TEST_CHECK(revealPrefix.find(TEXT_REVEAL_DEFINE) != std::string::npos);
+  DALI_TEST_CHECK(revealPrefix.find(TEXT_REVEAL_SEQUENCE_BLUR_DEFINE) == std::string::npos);
+
+  TextFeature::FeatureBuilder blur;
+  blur.EnableTextReveal(true).EnableTextRevealSequenceBlur(true);
+  const std::string blurPrefix = GetFragmentPrefix(blur);
+  const std::string blurShader = blurPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
+  DALI_TEST_CHECK(blur.IsEnabledTextRevealSequenceBlur());
+  DALI_TEST_CHECK(!blur.IsEnabledTextRevealMultiRadiusBlur());
+  DALI_TEST_CHECK(blurPrefix.find(TEXT_REVEAL_DEFINE) != std::string::npos);
+  DALI_TEST_CHECK(blurPrefix.find(TEXT_REVEAL_SEQUENCE_BLUR_DEFINE) != std::string::npos);
+  DALI_TEST_CHECK(blurPrefix.find(TEXT_REVEAL_MULTI_RADIUS_DEFINE) == std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("UNIFORM sampler2D sTextRevealSequenceMetadata;") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("uTextRevealSequenceBlurDuration") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("uTextRevealSequenceBlurCurve") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("uTextRevealSequenceBlurDebugView") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("uTextRevealSequenceBlurDebugTiming") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("sharpness * sharpness") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("ResolveTextRevealBlurOpacity") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("ResolveTextRevealSequenceSharpness") != std::string::npos);
+  DALI_TEST_CHECK(blurShader.find("textRevealBlurColor = ApplyTextGradientOverlay") != std::string::npos);
+  TextFeature::FeatureBuilder multiRadius;
+  multiRadius.EnableTextReveal(true)
+    .EnableTextRevealSequenceBlur(true)
+    .EnableTextRevealMultiRadiusBlur(true);
+  const std::string multiRadiusPrefix = GetFragmentPrefix(multiRadius);
+  const std::string multiRadiusShader = multiRadiusPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
+  DALI_TEST_CHECK(multiRadius.IsEnabledTextRevealMultiRadiusBlur());
+  DALI_TEST_CHECK(multiRadiusPrefix.find(TEXT_REVEAL_MULTI_RADIUS_DEFINE) != std::string::npos);
+  DALI_TEST_CHECK(multiRadiusShader.find("UNIFORM sampler2D sTextRevealMediumBlur;") != std::string::npos);
+  DALI_TEST_CHECK(multiRadiusShader.find("uTextRevealSequenceBlurStageSplit") != std::string::npos);
+  DALI_TEST_CHECK(multiRadiusShader.find("sequenceSharpness / stageSplit") != std::string::npos);
+  DALI_TEST_CHECK(multiRadiusShader.find("(sequenceSharpness - stageSplit) / (1.0 - stageSplit)") != std::string::npos);
+  DALI_TEST_CHECK(multiRadiusShader.find("mix(textRevealBlurColor, textRevealMediumBlurColor, fullToMedium)") != std::string::npos);
+
+  UiInternal::VisualFactoryCache      cache(false);
+  UiInternal::TextVisualShaderFactory factory;
+  Shader                              revealShader       = factory.GetShader(cache, reveal);
+  Shader                              sequenceBlurShader = factory.GetShader(cache, blur);
+  Shader                              multiRadiusShaderHandle = factory.GetShader(cache, multiRadius);
+  DALI_TEST_CHECK(revealShader && sequenceBlurShader && multiRadiusShaderHandle);
+  DALI_TEST_CHECK(revealShader != sequenceBlurShader);
+  DALI_TEST_CHECK(sequenceBlurShader != multiRadiusShaderHandle);
+  DALI_TEST_CHECK(factory.GetShader(cache, blur) == sequenceBlurShader);
+  DALI_TEST_CHECK(factory.GetShader(cache, multiRadius) == multiRadiusShaderHandle);
+  END_TEST;
+}
+
+int UtcDaliTextRevealSequenceBlurResourceP(void)
+{
+  UiTestApplication application;
+  Dali::Ui::Label   label = Dali::Ui::Label::New("Sequence-aware Blur V2 resource test");
+  label.SetRequestedWidth(480.0f);
+  label.SetRequestedHeight(96.0f);
+
+  UiText::Reveal reveal;
+  reveal.SetUnit(UiText::Reveal::Unit::CHARACTER);
+  reveal.SetFadeDurationRatio(0.25f);
+  label.SetTextReveal(reveal);
+  label.SetTextRevealProgress(0.0f);
+  application.GetScene().Add(label);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+
+  DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+  Renderer renderer = label.GetRendererAt(0u);
+  DALI_TEST_CHECK(renderer.GetPropertyIndex("uTextRevealProgress") != Property::INVALID_INDEX);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurDuration"), Property::INVALID_INDEX, TEST_LOCATION);
+  const uint32_t revealTextureCount = renderer.GetTextures().GetTextureCount();
+  DALI_TEST_CHECK(revealTextureCount >= 2u);
+
+  TestGlAbstraction& gl = application.GetGlAbstraction();
+  gl.EnableTextureCallTrace(true);
+  gl.ResetTextureCallStack();
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    0.0f,
+    0.50f,
+    Dali::Ui::Integration::TextRevealBlurCurve::EASE_IN_QUADRATIC,
+    Dali::Ui::Integration::TextRevealBlurDebugView::NORMAL,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::CONSERVATIVE,
+    Dali::Ui::Integration::TextRevealBlurSpatialMode::MULTI_RADIUS);
+  application.SendNotification();
+  application.Render(16);
+  renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurDuration"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurCurve"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugView"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugTiming"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurStageSplit"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount, TEST_LOCATION);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::SOFT,
+    Dali::Ui::Integration::TextRevealBlurDebugView::BLUR_ONLY,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::COMMON);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+
+  renderer                                = label.GetRendererAt(0u);
+  const Property::Index blurDurationIndex = renderer.GetPropertyIndex("uTextRevealSequenceBlurDuration");
+  const Property::Index blurCurveIndex    = renderer.GetPropertyIndex("uTextRevealSequenceBlurCurve");
+  const Property::Index blurViewIndex     = renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugView");
+  const Property::Index blurTimingIndex   = renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugTiming");
+  DALI_TEST_CHECK(blurDurationIndex != Property::INVALID_INDEX);
+  DALI_TEST_CHECK(blurCurveIndex != Property::INVALID_INDEX);
+  DALI_TEST_CHECK(blurViewIndex != Property::INVALID_INDEX);
+  DALI_TEST_CHECK(blurTimingIndex != Property::INVALID_INDEX);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(blurDurationIndex), 0.35f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(blurCurveIndex), 0.5f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(blurViewIndex), 1.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(blurTimingIndex), 1.0f, EPSILON, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetPropertyIndex("uTextRevealSequenceBlurStageSplit"), Property::INVALID_INDEX, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount + 1u, TEST_LOCATION);
+
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::LINEAR);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+  renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uTextRevealSequenceBlurCurve")),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugView")),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugTiming")),
+                   0.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount + 1u, TEST_LOCATION);
+
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::SOFT,
+    Dali::Ui::Integration::TextRevealBlurDebugView::NORMAL,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::CONSERVATIVE,
+    Dali::Ui::Integration::TextRevealBlurSpatialMode::MULTI_RADIUS,
+    Dali::Ui::Integration::TextRevealBlurPreprocessingMode::CURRENT_SCALE);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+  renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount + 2u, TEST_LOCATION);
+  const Property::Index blurStageSplitIndex = renderer.GetPropertyIndex("uTextRevealSequenceBlurStageSplit");
+  DALI_TEST_CHECK(blurStageSplitIndex != Property::INVALID_INDEX);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(blurStageSplitIndex), 0.5f, EPSILON, TEST_LOCATION);
+
+  gl.ResetTextureCallStack();
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::SOFT,
+    Dali::Ui::Integration::TextRevealBlurDebugView::NORMAL,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::CONSERVATIVE,
+    Dali::Ui::Integration::TextRevealBlurSpatialMode::MULTI_RADIUS,
+    Dali::Ui::Integration::TextRevealBlurPreprocessingMode::MULTI_RADIUS_QUALITY_SCALE,
+    Dali::Ui::Integration::TextRevealBlurStageSplit::EARLY);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+  renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount + 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uTextRevealSequenceBlurStageSplit")),
+                   0.4f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_CHECK(gl.GetTextureTrace().CountMethod("TexImage2D") > 0);
+
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::SOFT,
+    Dali::Ui::Integration::TextRevealBlurDebugView::NORMAL,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::VISIBLE_COVERAGE_ORACLE,
+    Dali::Ui::Integration::TextRevealBlurSpatialMode::MULTI_RADIUS,
+    Dali::Ui::Integration::TextRevealBlurPreprocessingMode::MULTI_RADIUS_QUALITY_SCALE,
+    Dali::Ui::Integration::TextRevealBlurStageSplit::EARLY,
+    0.4f);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+  renderer = label.GetRendererAt(0u);
+  DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uTextRevealSequenceBlurDebugTiming")),
+                   2.0f,
+                   EPSILON,
+                   TEST_LOCATION);
+  DALI_TEST_EQUALS(renderer.GetTextures().GetTextureCount(), revealTextureCount + 2u, TEST_LOCATION);
+
+  Dali::Ui::Integration::SetTextRevealBlurForPrototype(
+    label,
+    1.0f,
+    0.35f,
+    Dali::Ui::Integration::TextRevealBlurCurve::SOFT,
+    Dali::Ui::Integration::TextRevealBlurDebugView::NORMAL,
+    Dali::Ui::Integration::TextRevealBlurDebugTiming::CONSERVATIVE,
+    Dali::Ui::Integration::TextRevealBlurSpatialMode::MULTI_RADIUS,
+    Dali::Ui::Integration::TextRevealBlurPreprocessingMode::MULTI_RADIUS_QUALITY_SCALE,
+    Dali::Ui::Integration::TextRevealBlurStageSplit::EARLY);
+  application.SendNotification();
+  application.Render(16);
+  application.SendNotification();
+  application.Render(16);
+
+  gl.ResetTextureCallStack();
+  for(uint32_t update = 0u; update <= 100u; ++update)
+  {
+    label.SetTextRevealProgress(static_cast<float>(update) * 0.01f);
+  }
+  application.SendNotification();
+  application.Render(16);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexImage2D"), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(gl.GetTextureTrace().CountMethod("TexSubImage2D"), 0, TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliTextRevealShaderCacheSeparatesEffectiveVariantsP(void)
+{
+  UiTestApplication                    application;
   UiInternal::VisualFactoryCache     cache(false);
   UiInternal::TextVisualShaderFactory factory;
   std::vector<Shader>                  revealShaders;

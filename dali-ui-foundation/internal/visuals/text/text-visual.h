@@ -142,15 +142,33 @@ public:
     float                                fadeDurationRatio,
     Property::Index                      progressPropertyIndex,
     uint64_t                             revision,
-    Ui::Text::Internal::Reveal::Sequence sequence             = Ui::Text::Internal::Reveal::Sequence::WHOLE_TEXT,
-    float                                sequenceStaggerRatio = 0.0f)
+    Ui::Text::Internal::Reveal::Sequence sequence                             = Ui::Text::Internal::Reveal::Sequence::WHOLE_TEXT,
+    float                                sequenceStaggerRatio                 = 0.0f,
+    float                                prototypeBlurStrength                = 0.0f,
+    float                                prototypeBlurDurationRatio           = Ui::Text::Internal::Reveal::DEFAULT_SEQUENCE_BLUR_DURATION,
+    float                                prototypeBlurCurve                   = 0.0f,
+    float                                prototypeBlurDebugView               = 0.0f,
+    float                                prototypeBlurDebugTiming             = 0.0f,
+    float                                prototypeBlurSpatialMode             = 0.0f,
+    float                                prototypeBlurPreprocessingMode       = 0.0f,
+    float                                prototypeBlurStageSplit              = 0.5f,
+    float                                prototypeBlurOwnershipOracleProgress = -1.0f)
   {
     GetVisualObject(visual).ConfigureTextReveal(unit,
                                                 fadeDurationRatio,
                                                 progressPropertyIndex,
                                                 revision,
                                                 sequence,
-                                                sequenceStaggerRatio);
+                                                sequenceStaggerRatio,
+                                                prototypeBlurStrength,
+                                                prototypeBlurDurationRatio,
+                                                prototypeBlurCurve,
+                                                prototypeBlurDebugView,
+                                                prototypeBlurDebugTiming,
+                                                prototypeBlurSpatialMode,
+                                                prototypeBlurPreprocessingMode,
+                                                prototypeBlurStageSplit,
+                                                prototypeBlurOwnershipOracleProgress);
   }
 
   /**
@@ -607,8 +625,17 @@ private:
                            float                                fadeDurationRatio,
                            Property::Index                      progressPropertyIndex,
                            uint64_t                             revision,
-                           Ui::Text::Internal::Reveal::Sequence sequence             = Ui::Text::Internal::Reveal::Sequence::WHOLE_TEXT,
-                           float                                sequenceStaggerRatio = 0.0f);
+                           Ui::Text::Internal::Reveal::Sequence sequence                             = Ui::Text::Internal::Reveal::Sequence::WHOLE_TEXT,
+                           float                                sequenceStaggerRatio                 = 0.0f,
+                           float                                prototypeBlurStrength                = 0.0f,
+                           float                                prototypeBlurDurationRatio           = Ui::Text::Internal::Reveal::DEFAULT_SEQUENCE_BLUR_DURATION,
+                           float                                prototypeBlurCurve                   = 0.0f,
+                           float                                prototypeBlurDebugView               = 0.0f,
+                           float                                prototypeBlurDebugTiming             = 0.0f,
+                           float                                prototypeBlurSpatialMode             = 0.0f,
+                           float                                prototypeBlurPreprocessingMode       = 0.0f,
+                           float                                prototypeBlurStageSplit              = 0.5f,
+                           float                                prototypeBlurOwnershipOracleProgress = -1.0f);
 
   /**
    * @brief Removes all constraints that bind reveal progress to renderers.

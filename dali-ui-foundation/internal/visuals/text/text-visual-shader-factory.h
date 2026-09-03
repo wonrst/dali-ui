@@ -132,6 +132,24 @@ enum Type
 };
 } // namespace TextReveal
 
+namespace TextRevealSequenceBlur
+{
+enum Type
+{
+  NO_TEXT_REVEAL_SEQUENCE_BLUR = 0,
+  HAS_TEXT_REVEAL_SEQUENCE_BLUR
+};
+} // namespace TextRevealSequenceBlur
+
+namespace TextRevealMultiRadiusBlur
+{
+enum Type
+{
+  NO_TEXT_REVEAL_MULTI_RADIUS_BLUR = 0,
+  HAS_TEXT_REVEAL_MULTI_RADIUS_BLUR
+};
+} // namespace TextRevealMultiRadiusBlur
+
 /**
  * @brief Collection of current text visual feature.
  */
@@ -148,6 +166,8 @@ public:
   FeatureBuilder& EnableTextGradientMixed(bool enableTextGradientMixed);
   FeatureBuilder& EnableTextGradientOverlay(bool enableTextGradientOverlay);
   FeatureBuilder& EnableTextReveal(bool enableTextReveal);
+  FeatureBuilder& EnableTextRevealSequenceBlur(bool enableTextRevealSequenceBlur);
+  FeatureBuilder& EnableTextRevealMultiRadiusBlur(bool enableTextRevealMultiRadiusBlur);
 
   VisualFactoryCache::ShaderType GetShaderType() const;
   void                           GetVertexShaderPrefixList(std::string& vertexShaderPrefixList) const;
@@ -199,6 +219,16 @@ public:
   {
     return mTextReveal == TextReveal::HAS_TEXT_REVEAL;
   }
+  bool IsEnabledTextRevealSequenceBlur() const
+  {
+    return IsEnabledTextReveal() &&
+           mTextRevealSequenceBlur == TextRevealSequenceBlur::HAS_TEXT_REVEAL_SEQUENCE_BLUR;
+  }
+  bool IsEnabledTextRevealMultiRadiusBlur() const
+  {
+    return IsEnabledTextRevealSequenceBlur() &&
+           mTextRevealMultiRadiusBlur == TextRevealMultiRadiusBlur::HAS_TEXT_REVEAL_MULTI_RADIUS_BLUR;
+  }
 
 private:
   TextMultiColor::Type
@@ -210,8 +240,10 @@ private:
   TextGradient::Type
     mTextGradient : 2; ///< Whether text uses TextGradient fill, or not. default as TextGradient::NO_TEXT_GRADIENT
   TextGradientOverlay::Type
-    mTextGradientOverlay : 2; ///< Whether text uses TextGradientOverlay, or not. default as TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY
-  TextReveal::Type mTextReveal : 2;          ///< Sequential foreground reveal shader variant. (2 bits to avoid signed 1-bit bitfield issue on MSVC)
+                                  mTextGradientOverlay : 2;       ///< Whether text uses TextGradientOverlay, or not. default as TextGradientOverlay::NO_TEXT_GRADIENT_OVERLAY
+  TextReveal::Type                mTextReveal : 2;                ///< Sequential foreground reveal shader variant. (2 bits to avoid signed 1-bit bitfield issue on MSVC)
+  TextRevealSequenceBlur::Type    mTextRevealSequenceBlur : 2;    ///< Sequence-aware Blur V2 prototype variant.
+  TextRevealMultiRadiusBlur::Type mTextRevealMultiRadiusBlur : 2; ///< Multi-radius Blur V2 prototype variant.
 };
 
 } // namespace TextVisualShaderFeature

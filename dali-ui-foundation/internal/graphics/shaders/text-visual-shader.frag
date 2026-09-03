@@ -33,6 +33,12 @@ UNIFORM sampler2D sOverlayStyle;
 #ifdef IS_REQUIRED_TEXT_REVEAL
 UNIFORM sampler2D sTextRevealMetadata;
 #endif
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+UNIFORM sampler2D sTextRevealSequenceMetadata;
+#endif
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+UNIFORM sampler2D sTextRevealMediumBlur;
+#endif
 
 UNIFORM_BLOCK FragBlock
 {
@@ -84,6 +90,15 @@ UNIFORM_BLOCK FragBlock
   #ifdef IS_REQUIRED_TEXT_REVEAL
   UNIFORM highp float uTextRevealProgress;
   UNIFORM highp float uTextRevealFadeDuration;
+  #endif
+  #ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  UNIFORM highp float uTextRevealSequenceBlurDuration;
+  UNIFORM highp float uTextRevealSequenceBlurCurve;
+  UNIFORM highp float uTextRevealSequenceBlurDebugView;
+  UNIFORM highp float uTextRevealSequenceBlurDebugTiming;
+  #ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+  UNIFORM highp float uTextRevealSequenceBlurStageSplit;
+  #endif
   #endif
 };
 
@@ -181,7 +196,7 @@ highp float ResolveTextRevealOpacity(highp vec2 texCoord)
   {
     localOpacity = clamp((revealProgress - normalizedStart) / uTextRevealFadeDuration, 0.0, 1.0);
   }
-  localOpacity = mix(1.0, localOpacity, step(0.5, revealMetadata.b));
+  localOpacity = mix(1.0, localOpacity, step(0.5 / 255.0, revealMetadata.b));
   // Defensive global endpoint: malformed/missing metadata must not expose a
   // reveal-target foreground pixel at progress zero. FinalRevealPlan is still
   // responsible for assigning valid metadata to every rendered glyph.
@@ -193,8 +208,55 @@ highp float ResolveTextRevealOpacity(highp vec2 texCoord)
 }
 #endif
 
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+highp float ResolveTextRevealBlurOpacity(highp float encodedStartSample)
+{
+  // Prototype-only diagnostic: a common zero start deliberately permits
+  // future-content blur leakage so ownership artifacts can be isolated.
+  highp float useCommonTiming = step(0.5, uTextRevealSequenceBlurDebugTiming) *
+                                (1.0 - step(1.5, uTextRevealSequenceBlurDebugTiming));
+  encodedStartSample = mix(encodedStartSample, 1.0 / 255.0, useCommonTiming);
+  highp float encodedStart = floor(encodedStartSample * 255.0 + 0.5);
+  highp float normalizedStart = (max(1.0, encodedStart) - 1.0) / 254.0;
+  highp float revealProgress = clamp(uTextRevealProgress, 0.0, 1.0);
+  highp float localOpacity;
+  if(uTextRevealFadeDuration <= 0.000001)
+  {
+    localOpacity = step(normalizedStart, revealProgress) * step(0.000001, revealProgress);
+  }
+  else
+  {
+    localOpacity = clamp((revealProgress - normalizedStart) / uTextRevealFadeDuration, 0.0, 1.0);
+  }
+  localOpacity *= step(0.5, encodedStart);
+  return mix(localOpacity, step(0.5, encodedStart), step(1.0, revealProgress));
+}
+
+highp float ResolveTextRevealSequenceSharpness(highp float encodedStartSample)
+{
+  highp float encodedStart = floor(encodedStartSample * 255.0 + 0.5);
+  highp float normalizedStart = (max(1.0, encodedStart) - 1.0) / 254.0;
+  highp float revealProgress = clamp(uTextRevealProgress, 0.0, 1.0);
+  highp float sharpness = clamp((revealProgress - normalizedStart) /
+                                max(uTextRevealSequenceBlurDuration, 0.000001), 0.0, 1.0);
+  sharpness = mix(sharpness, sharpness * sharpness,
+                  clamp(uTextRevealSequenceBlurCurve, 0.0, 1.0));
+  sharpness = mix(1.0, sharpness, step(0.5, encodedStart));
+  return mix(sharpness, 1.0, step(1.0, revealProgress));
+}
+#endif
+
 void main()
 {
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  mediump vec4 textRevealBlurMetadata = TEXTURE(sTextRevealMetadata, vTexCoord);
+  mediump float textRevealBlurCoverage = textRevealBlurMetadata.a;
+  mediump vec4 textRevealBlurColor = uTextColorAnimatable * textRevealBlurCoverage;
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+  mediump float textRevealMediumBlurCoverage = TEXTURE(sTextRevealMediumBlur, vTexCoord).r;
+  mediump vec4 textRevealMediumBlurColor = uTextColorAnimatable * textRevealMediumBlurCoverage;
+#endif
+#endif
 #ifdef IS_REQUIRED_STYLE
   mediump vec4 styleTexture = TEXTURE( sStyle, vTexCoord );
 #endif
@@ -214,6 +276,14 @@ void main()
   mediump vec4 gradientFill = vec4(gradientColor.rgb * textTexture,
                                    gradientColor.a * textTexture * uTextColorAnimatable.a);
   textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  textRevealBlurColor = vec4(gradientColor.rgb * textRevealBlurCoverage,
+                             gradientColor.a * textRevealBlurCoverage * uTextColorAnimatable.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+  textRevealMediumBlurColor = vec4(gradientColor.rgb * textRevealMediumBlurCoverage,
+                                   gradientColor.a * textRevealMediumBlurCoverage * uTextColorAnimatable.a);
+#endif
+#endif
 #elif defined(IS_REQUIRED_TEXT_GRADIENT)
   mediump float textTexture = TEXTURE(sTexture, vTexCoord).r;
   highp vec2 textGradientCoord =
@@ -221,6 +291,14 @@ void main()
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
   textColor = vec4(gradientColor.rgb * textTexture, gradientColor.a * textTexture * uTextColorAnimatable.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  textRevealBlurColor = vec4(gradientColor.rgb * textRevealBlurCoverage,
+                             gradientColor.a * textRevealBlurCoverage * uTextColorAnimatable.a);
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+  textRevealMediumBlurColor = vec4(gradientColor.rgb * textRevealMediumBlurCoverage,
+                                   gradientColor.a * textRevealMediumBlurCoverage * uTextColorAnimatable.a);
+#endif
+#endif
 #elif defined(IS_REQUIRED_MULTI_COLOR) || defined(IS_REQUIRED_EMOJI)
   // Multiple color or use emoji.
   textColor = TEXTURE(sTexture, vTexCoord);
@@ -293,12 +371,63 @@ void main()
 
 #ifdef IS_REQUIRED_TEXT_GRADIENT_OVERLAY
   textColor = ApplyTextGradientOverlay(textColor, vTexCoord);
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  textRevealBlurColor = ApplyTextGradientOverlay(textRevealBlurColor, vTexCoord);
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+  textRevealMediumBlurColor = ApplyTextGradientOverlay(textRevealMediumBlurColor, vTexCoord);
+#endif
+#endif
 #endif
 
 #ifdef IS_REQUIRED_TEXT_REVEAL
+#ifdef IS_REQUIRED_TEXT_REVEAL_SEQUENCE_BLUR
+  highp float sharpOpacity = ResolveTextRevealOpacity(vTexCoord);
+  highp float blurOpacity = ResolveTextRevealBlurOpacity(textRevealBlurMetadata.b);
+  highp float sequenceSharpness = ResolveTextRevealSequenceSharpness(
+    TEXTURE(sTextRevealSequenceMetadata, vTexCoord).r);
+  if(uTextRevealSequenceBlurDebugView < 0.5)
+  {
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+    highp float stageSplit = clamp(uTextRevealSequenceBlurStageSplit, 0.000001, 0.999999);
+    highp float fullToMedium = smoothstep(0.0, 1.0, clamp(sequenceSharpness / stageSplit, 0.0, 1.0));
+    highp float mediumToSharp = smoothstep(0.0, 1.0,
+      clamp((sequenceSharpness - stageSplit) / (1.0 - stageSplit), 0.0, 1.0));
+    if(sequenceSharpness < stageSplit)
+    {
+      textColor = mix(textRevealBlurColor, textRevealMediumBlurColor, fullToMedium) * blurOpacity;
+    }
+    else
+    {
+      textColor = textRevealMediumBlurColor * (blurOpacity * (1.0 - mediumToSharp)) +
+                  textColor * (sharpOpacity * mediumToSharp);
+    }
+#else
+    textColor = textColor * (sharpOpacity * sequenceSharpness) +
+                textRevealBlurColor * (blurOpacity * (1.0 - sequenceSharpness));
+#endif
+  }
+  else if(uTextRevealSequenceBlurDebugView < 1.5)
+  {
+    // Prototype-only spatial inspection: bypass all Reveal timing and show
+    // the generated preblur coverage directly.
+    textColor = textRevealBlurColor;
+  }
+  else if(uTextRevealSequenceBlurDebugView >= 2.5)
+  {
+#ifdef IS_REQUIRED_TEXT_REVEAL_MULTI_RADIUS_BLUR
+    // Prototype-only spatial inspection of the intermediate radius.
+    textColor = textRevealMediumBlurColor;
+#else
+    textColor = textRevealBlurColor;
+#endif
+  }
+  // SHARP_ONLY (1.5 <= view < 2.5) intentionally leaves the fully visible
+  // sharp foreground as a timing-independent baseline.
+#else
 #ifndef TEXT_REVEAL_RESOLVED_IN_EMBOSS
   // textColor is premultiplied, so scale rgb and alpha together.
   textColor *= ResolveTextRevealOpacity(vTexCoord);
+#endif
 #endif
 #endif
 

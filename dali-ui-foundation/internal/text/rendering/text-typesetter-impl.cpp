@@ -37,6 +37,7 @@
 #include <dali-ui-foundation/internal/text/rendering/styles/character-spacing-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/strikethrough-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
+#include <dali-ui-foundation/internal/text/rendering/text-reveal-sequence-blur-processor.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-run-snapshot.h>
@@ -54,6 +55,7 @@ namespace Text
 struct RevealRasterContext
 {
   PixelBuffer                   metadata;
+  PixelBuffer                   sequenceMetadata;
   const Internal::Reveal::Plan* plan{nullptr};
   GlyphIndex                    currentGlyph{0u};
 };
@@ -64,6 +66,24 @@ DALI_INIT_TRACE_FILTER(gTraceFilter, DALI_TRACE_TEXT_PERFORMANCE_MARKER, false);
 
 const float HALF(0.5f);
 const float ONE_AND_A_HALF(1.5f);
+
+uint8_t EncodeRevealSequenceStart(const RevealRasterContext& context)
+{
+  if(!context.plan || context.currentGlyph >= context.plan->glyphToUnit.size())
+  {
+    return 0u;
+  }
+  const uint32_t unit = context.plan->glyphToUnit[context.currentGlyph];
+  if(unit == Internal::Reveal::NO_UNIT || unit >= context.plan->unitStart.size())
+  {
+    return 0u;
+  }
+  const float start = unit < context.plan->unitSequenceStart.size()
+                        ? context.plan->unitSequenceStart[unit]
+                        : 0.0f;
+  return static_cast<uint8_t>(1u + static_cast<uint32_t>(std::ceil(
+                                     std::max(0.0f, std::min(1.0f, start)) * 254.0f)));
+}
 
 void RecordRevealPixel(RevealRasterContext* context,
                        uint32_t             pixelIndex,
@@ -91,6 +111,10 @@ void RecordRevealPixel(RevealRasterContext* context,
     pixel[1] = static_cast<uint8_t>(encoded & 0xffu);
     pixel[2] = 255u;
     pixel[3] = coverage;
+    if(context->sequenceMetadata)
+    {
+      context->sequenceMetadata.GetBuffer()[pixelIndex] = EncodeRevealSequenceStart(*context);
+    }
   }
 }
 
@@ -129,6 +153,10 @@ void RecordPixelRevealPixel(RevealRasterContext* context,
     pixel[1] = static_cast<uint8_t>(encoded & 0xffu);
     pixel[2] = 255u;
     pixel[3] = coverage;
+    if(context->sequenceMetadata)
+    {
+      context->sequenceMetadata.GetBuffer()[pixelIndex] = EncodeRevealSequenceStart(*context);
+    }
   }
 }
 
@@ -1583,21 +1611,52 @@ void Internal::Reveal::ExpandMetadataOwnership(uint8_t* metadata, uint32_t width
   }
 }
 
-void Typesetter::Impl::BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan)
+void Typesetter::Impl::BeginRevealMetadata(uint32_t width, uint32_t height, const Internal::Reveal::Plan& plan, bool sequenceBlurEnabled)
 {
   DALI_ASSERT_ALWAYS(!mRevealRasterContext && "Nested reveal metadata raster is not supported");
   mRevealRasterContext           = std::make_unique<RevealRasterContext>();
   mRevealRasterContext->metadata = PixelBuffer::New(width, height, Pixel::RGBA8888);
-  mRevealRasterContext->plan     = &plan;
+  if(sequenceBlurEnabled)
+  {
+    mRevealRasterContext->sequenceMetadata = PixelBuffer::New(width, height, Pixel::L8);
+  }
+  mRevealRasterContext->plan = &plan;
   memset(mRevealRasterContext->metadata.GetBuffer(), 0u, static_cast<size_t>(width) * height * 4u);
+  if(mRevealRasterContext->sequenceMetadata)
+  {
+    memset(mRevealRasterContext->sequenceMetadata.GetBuffer(), 0u, static_cast<size_t>(width) * height);
+  }
 }
 
-PixelData Typesetter::Impl::EndRevealMetadata()
+PixelData Typesetter::Impl::EndRevealMetadata(float      referencePixelSize,
+                                              float      blurStrength,
+                                              PixelData* sequenceMetadata,
+                                              PixelData* mediumBlurMetadata,
+                                              bool       useMultiRadiusQualityScale,
+                                              float      ownershipOracleProgress)
 {
   DALI_ASSERT_ALWAYS(mRevealRasterContext && "Reveal metadata raster was not started");
   Internal::Reveal::ExpandMetadataOwnership(mRevealRasterContext->metadata.GetBuffer(),
                                             mRevealRasterContext->metadata.GetWidth(),
                                             mRevealRasterContext->metadata.GetHeight());
+  if(blurStrength > 0.0f && sequenceMetadata && mRevealRasterContext->sequenceMetadata)
+  {
+    const auto  parameters = Internal::Reveal::ResolveSequenceBlurParameters(referencePixelSize,
+                                                                             blurStrength,
+                                                                             useMultiRadiusQualityScale);
+    PixelBuffer mediumBlurCoverage;
+    const bool  prepared = Internal::Reveal::PrepareSequenceBlurMetadata(mRevealRasterContext->metadata,
+                                                                         mRevealRasterContext->sequenceMetadata,
+                                                                         parameters,
+                                                                        mediumBlurMetadata ? &mediumBlurCoverage : nullptr,
+                                                                         ownershipOracleProgress);
+    DALI_ASSERT_ALWAYS(prepared && "Failed to prepare Text::Reveal Blur V2 metadata");
+    *sequenceMetadata = PixelBuffer::Convert(mRevealRasterContext->sequenceMetadata);
+    if(mediumBlurMetadata)
+    {
+      *mediumBlurMetadata = PixelBuffer::Convert(mediumBlurCoverage);
+    }
+  }
   PixelData result = PixelBuffer::Convert(mRevealRasterContext->metadata);
   mRevealRasterContext.reset();
   return result;

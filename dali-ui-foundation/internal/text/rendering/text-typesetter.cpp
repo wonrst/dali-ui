@@ -816,7 +816,14 @@ PixelData Typesetter::RenderTextRevealMetadata(
   uint32_t                      tileOffsetY,
   const Vector2&                fullSize,
   bool                          ignoreHorizontalAlignment,
-  const Vector2&                originSize)
+  const Vector2&                originSize,
+  float                         blurStrength,
+  float                         referencePixelSize,
+  PixelData*                    sequenceMetadata,
+  float*                        sequenceBlurDuration,
+  PixelData*                    mediumBlurMetadata,
+  bool                          useMultiRadiusQualityScale,
+  float                         ownershipOracleProgress)
 {
   // Reuse the normal glyph traversal, but offset it into a tile-local target.
   // The caller projects one canonical final plan before visiting any tile.
@@ -858,15 +865,24 @@ PixelData Typesetter::RenderTextRevealMetadata(
   const auto startGlyph = viewModel.GetStartIndexOfElidedGlyphs();
   const auto endGlyph   = viewModel.GetEndIndexOfElidedGlyphs();
   fadeDuration          = plan.fadeDuration;
+  if(sequenceBlurDuration)
+  {
+    *sequenceBlurDuration = plan.sequenceBlurDuration;
+  }
 
   const uint32_t width  = static_cast<uint32_t>(tileSize.width);
   const uint32_t height = static_cast<uint32_t>(tileSize.height);
-  mImpl->BeginRevealMetadata(width, height, plan);
+  mImpl->BeginRevealMetadata(width, height, plan, blurStrength > 0.0f && sequenceMetadata);
   PixelBuffer traversal = mImpl->CreateImageBuffer(width, height, Typesetter::STYLE_NONE,
                                                    ignoreHorizontalAlignment, Pixel::RGBA8888,
                                                    penX, penY, startGlyph, endGlyph);
   (void)traversal;
-  return mImpl->EndRevealMetadata();
+  return mImpl->EndRevealMetadata(referencePixelSize,
+                                  blurStrength,
+                                  sequenceMetadata,
+                                  mediumBlurMetadata,
+                                  useMultiRadiusQualityScale,
+                                  ownershipOracleProgress);
 }
 
 PixelBuffer Typesetter::CreateFullBackgroundBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,

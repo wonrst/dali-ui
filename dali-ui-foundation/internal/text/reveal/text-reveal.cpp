@@ -137,6 +137,8 @@ void PopulateSchedule(Plan& plan, uint32_t unitCount, float authoredRatio)
 {
   plan.fadeDurationRatio = authoredRatio;
   plan.unitStart.resize(unitCount);
+  plan.unitSequenceStart.clear();
+  plan.sequenceBlurDuration = plan.sequenceBlurDurationRatio;
   if(unitCount == 0u)
   {
     plan.fadeDuration = 0.0f;
@@ -579,7 +581,8 @@ Plan ProjectToFinalGlyphs(const Plan&       sourcePlan,
                           Unit              unit)
 {
   Plan finalPlan;
-  finalPlan.fadeDurationRatio = sourcePlan.fadeDurationRatio;
+  finalPlan.fadeDurationRatio         = sourcePlan.fadeDurationRatio;
+  finalPlan.sequenceBlurDurationRatio = sourcePlan.sequenceBlurDurationRatio;
   finalPlan.glyphToUnit.assign(finalGlyphCount, NO_UNIT);
 
   const uint32_t    oldUnitCount = sourcePlan.GetUnitCount();
@@ -767,7 +770,8 @@ bool ApplyLineUnitSchedule(Plan&          plan,
   }
 
   Plan linePlan;
-  linePlan.fadeDurationRatio = plan.fadeDurationRatio;
+  linePlan.fadeDurationRatio         = plan.fadeDurationRatio;
+  linePlan.sequenceBlurDurationRatio = plan.sequenceBlurDurationRatio;
   linePlan.glyphToUnit.assign(glyphCount, NO_UNIT);
   if(!plan.imageReplacementUnitMask.empty())
   {
@@ -1302,7 +1306,12 @@ bool ApplyPixelSpatialSchedule(Plan&                       plan,
     return false;
   }
 
-  std::vector<float>           unitStart(unitCount, 0.0f);
+  std::vector<float> unitStart(unitCount, 0.0f);
+  std::vector<float> unitSequenceStart;
+  if(sequence == Sequence::PER_LINE)
+  {
+    unitSequenceStart.assign(unitCount, 0.0f);
+  }
   std::vector<PixelUnitTiming> pixelUnitTiming(unitCount);
   const float                  resolvedFadeDuration = fadeDuration / totalDuration;
 
@@ -1321,7 +1330,11 @@ bool ApplyPixelSpatialSchedule(Plan&                       plan,
     for(uint32_t unit : unitsByLine[line])
     {
       cursor += gapBefore[unit];
-      unitStart[unit]       = (offset + (1.0f - fadeDuration) * cursor / referenceScheduleWeight) / totalDuration;
+      unitStart[unit] = (offset + (1.0f - fadeDuration) * cursor / referenceScheduleWeight) / totalDuration;
+      if(!unitSequenceStart.empty())
+      {
+        unitSequenceStart[unit] = offset / totalDuration;
+      }
       pixelUnitTiming[unit] = {
         accumulators[unit].visualMinimum,
         accumulators[unit].visualMaximum,
@@ -1337,9 +1350,11 @@ bool ApplyPixelSpatialSchedule(Plan&                       plan,
 
   plan.glyphToUnit              = std::move(glyphToUnit);
   plan.unitStart                = std::move(unitStart);
+  plan.unitSequenceStart        = std::move(unitSequenceStart);
   plan.pixelUnitTiming          = std::move(pixelUnitTiming);
   plan.imageReplacementUnitMask = std::move(imageReplacementUnitMask);
   plan.fadeDuration             = resolvedFadeDuration;
+  plan.sequenceBlurDuration     = plan.sequenceBlurDurationRatio / totalDuration;
   return true;
 }
 
@@ -1560,6 +1575,7 @@ bool ApplyPerLineSequenceSchedule(Plan&          plan,
   }
 
   plan.unitStart.assign(orderedPairs.size(), 0.0f);
+  plan.unitSequenceStart.assign(orderedPairs.size(), 0.0f);
   std::vector<uint32_t> perLineSequenceIndex(lineCount, NO_UNIT);
   uint32_t              activeSequence = 0u;
   for(uint32_t lineIndex = 0u; lineIndex < lineCount; ++lineIndex)
@@ -1580,10 +1596,12 @@ bool ApplyPerLineSequenceSchedule(Plan&          plan,
       currentLine = pair.lineIndex;
       localRank   = 0u;
     }
-    const float offset      = static_cast<float>(perLineSequenceIndex[pair.lineIndex]) * sequenceStaggerRatio;
-    plan.unitStart[newUnit] = (offset + static_cast<float>(localRank++) * startInterval) / totalDuration;
+    const float offset              = static_cast<float>(perLineSequenceIndex[pair.lineIndex]) * sequenceStaggerRatio;
+    plan.unitStart[newUnit]         = (offset + static_cast<float>(localRank++) * startInterval) / totalDuration;
+    plan.unitSequenceStart[newUnit] = offset / totalDuration;
   }
-  plan.fadeDuration = fadeDuration / totalDuration;
+  plan.fadeDuration         = fadeDuration / totalDuration;
+  plan.sequenceBlurDuration = plan.sequenceBlurDurationRatio / totalDuration;
 
   for(uint32_t glyph = 0u; glyph < glyphCount; ++glyph)
   {

@@ -303,6 +303,13 @@ public:
    * @param[in] fullSize The full rendered text size, or Size::ZERO for a non-tiled render.
    * @param[in] ignoreHorizontalAlignment Whether horizontal alignment is ignored.
    * @param[in] originSize The original size used to resolve vertical alignment.
+   * @param[in] blurStrength The temporary sequence blur strength.
+   * @param[in] referencePixelSize The reference font size used to resolve the blur radius.
+   * @param[out] sequenceMetadata Optional conservative sequence-start metadata.
+   * @param[out] sequenceBlurDuration Optional resolved sequence blur duration.
+   * @param[out] mediumBlurMetadata Optional half-radius blur coverage for the multi-radius prototype.
+   * @param[in] useMultiRadiusQualityScale Whether the medium radius should retain at least two preprocessing pixels when feasible.
+   * @param[in] ownershipOracleProgress Fixed progress used to gate source coverage before diagnostic blur, or a negative value to disable it.
    * @return RGBA8888 reveal metadata for the requested full texture or tile.
    */
   PixelData RenderTextRevealMetadata(
@@ -310,10 +317,17 @@ public:
     Direction                     textDirection,
     const Internal::Reveal::Plan& plan,
     float&                        fadeDuration,
-    uint32_t                      tileOffsetY               = 0u,
-    const Vector2&                fullSize                  = Size::ZERO,
-    bool                          ignoreHorizontalAlignment = false,
-    const Vector2&                originSize                = Size::ZERO);
+    uint32_t                      tileOffsetY                = 0u,
+    const Vector2&                fullSize                   = Size::ZERO,
+    bool                          ignoreHorizontalAlignment  = false,
+    const Vector2&                originSize                 = Size::ZERO,
+    float                         blurStrength               = 0.0f,
+    float                         referencePixelSize         = 0.0f,
+    PixelData*                    sequenceMetadata           = nullptr,
+    float*                        sequenceBlurDuration       = nullptr,
+    PixelData*                    mediumBlurMetadata         = nullptr,
+    bool                          useMultiRadiusQualityScale = false,
+    float                         ownershipOracleProgress    = -1.0f);
 
   /**
    * @brief Create & draw the image buffer of single background color.
