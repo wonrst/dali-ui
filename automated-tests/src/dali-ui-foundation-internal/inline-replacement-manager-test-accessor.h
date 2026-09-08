@@ -27,6 +27,15 @@ namespace DALI_NAMESPACE::Ui::Internal::Text
 class InlineReplacementManagerTestAccessor
 {
 public:
+  static Ui::Integration::Visual::Base GetEntryVisual(const InlineReplacementManager& manager, uint64_t occurrenceIdentity)
+  {
+    const auto found = std::find_if(manager.mEntries.begin(), manager.mEntries.end(), [&](const auto& entry)
+    {
+      return entry.occurrenceIdentity == occurrenceIdentity;
+    });
+    return found == manager.mEntries.end() ? Ui::Integration::Visual::Base{} : found->visual;
+  }
+
   static std::size_t GetRevealConstraintCount(const InlineReplacementManager& manager)
   {
     return static_cast<std::size_t>(std::count_if(manager.mEntries.begin(),

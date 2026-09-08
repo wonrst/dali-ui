@@ -113,15 +113,16 @@ private:
     mRoot.Add(mGaussianImage);
     mRoot.Add(mBackgroundImage);
 
+    // Include each label in the same blur capture and strength animation as its image.
+    AddCardLabel("GaussianBlurEffect", mGaussianImage);
+    AddCardLabel("BackgroundBlurEffect", mBackgroundImage);
+
     // Everything below this stopper is captured by BackgroundBlurEffect.
     mStopper = View::New();
     mRoot.Add(mStopper);
 
     mBackgroundPane = NewView(RIGHT_X + 12.0f, CARD_TOP + 12.0f, CARD_WIDTH - 24.0f, CARD_HEIGHT - 24.0f);
     mRoot.Add(mBackgroundPane);
-
-    AddCardLabel("GaussianBlurEffect", LEFT_X);
-    AddCardLabel("BackgroundBlurEffect", RIGHT_X);
 
     View status = NewView(40.0f, 590.0f, 1200.0f, 92.0f, UiColor(0x111C2E));
     status.SetCornerRadius(16.0f);
@@ -144,12 +145,12 @@ private:
     mRoot.Add(card);
   }
 
-  void AddCardLabel(const char* text, float x)
+  void AddCardLabel(const char* text, ImageView image)
   {
-    Label label = NewLabel(text, x + 12.0f, CARD_TOP + 12.0f, CARD_WIDTH - 24.0f, 52.0f, 21.0f, UiColor(0xFFFFFF));
+    Label label = NewLabel(text, 0.0f, 0.0f, CARD_WIDTH - 24.0f, 52.0f, 21.0f, UiColor(0xFFFFFF));
     label.SetBackgroundColor(Vector4(0.02f, 0.04f, 0.08f, 0.76f));
     label.SetHorizontalTextAlignment(Text::Alignment::CENTER);
-    mRoot.Add(label);
+    image.Add(label);
   }
 
   void OnGaussianImageReady(View)

@@ -43,6 +43,8 @@ public:
     mSequence(Sequence::WHOLE_TEXT),
     mFadeDurationRatio(AUTO_FADE_DURATION_RATIO),
     mSequenceStaggerRatio(0.0f),
+    mBlurRadius(0.0f),
+    mBlurDurationRatio(1.0f),
     mIsNone(false)
   {
   }
@@ -51,6 +53,8 @@ public:
   Sequence mSequence;
   float    mFadeDurationRatio;
   float    mSequenceStaggerRatio;
+  float    mBlurRadius;
+  float    mBlurDurationRatio;
   bool     mIsNone;
 };
 
@@ -122,7 +126,9 @@ bool Reveal::operator==(const Reveal& rhs) const
   return mImpl->mUnit == rhs.mImpl->mUnit &&
          mImpl->mSequence == rhs.mImpl->mSequence &&
          Dali::Equals(mImpl->mFadeDurationRatio, rhs.mImpl->mFadeDurationRatio) &&
-         Dali::Equals(mImpl->mSequenceStaggerRatio, rhs.mImpl->mSequenceStaggerRatio);
+         Dali::Equals(mImpl->mSequenceStaggerRatio, rhs.mImpl->mSequenceStaggerRatio) &&
+         Dali::Equals(mImpl->mBlurRadius, rhs.mImpl->mBlurRadius) &&
+         Dali::Equals(mImpl->mBlurDurationRatio, rhs.mImpl->mBlurDurationRatio);
 }
 
 bool Reveal::operator!=(const Reveal& rhs) const
@@ -195,6 +201,34 @@ float Reveal::GetFadeDurationRatio() const
   DALI_ASSERT_VALID_REVEAL(mImpl);
   DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
   return mImpl->mFadeDurationRatio;
+}
+
+void Reveal::SetBlurRadius(float radius)
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
+  mImpl->mBlurRadius = std::isnan(radius) ? 0.0f : std::max(0.0f, std::min(64.0f, radius));
+}
+
+float Reveal::GetBlurRadius() const
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
+  return mImpl->mBlurRadius;
+}
+
+void Reveal::SetBlurDurationRatio(float ratio)
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot modify Text::Reveal::None().");
+  mImpl->mBlurDurationRatio = std::isnan(ratio) ? 0.0f : std::max(0.0f, std::min(1.0f, ratio));
+}
+
+float Reveal::GetBlurDurationRatio() const
+{
+  DALI_ASSERT_VALID_REVEAL(mImpl);
+  DALI_ASSERT_REVEAL_NOT_NONE(mImpl, "Cannot access Text::Reveal::None() properties.");
+  return mImpl->mBlurDurationRatio;
 }
 
 } // namespace Text

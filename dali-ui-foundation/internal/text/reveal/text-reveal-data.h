@@ -47,6 +47,8 @@ struct TextRevealData
   Ui::Text::Reveal::Sequence sequence{Ui::Text::Reveal::Sequence::WHOLE_TEXT};
   float                      fadeDurationRatio{Ui::Text::Reveal::AUTO_FADE_DURATION_RATIO};
   float                      sequenceStaggerRatio{0.0f};
+  float                      blurRadius{0.0f};
+  float                      blurDurationRatio{1.0f};
   Property::Index            progressPropertyIndex{Property::INVALID_INDEX};
   uint64_t                   revision{0u};
   float                      progress{0.0f};

@@ -17,7 +17,9 @@
 
 #include <dali-ui-foundation/dali-ui-foundation.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
@@ -29,17 +31,19 @@ using namespace Dali::Ui;
 
 namespace
 {
-constexpr float       CONTROLS_PANEL_HEIGHT       = 448.0f;
+constexpr float       CONTROLS_PANEL_HEIGHT       = 612.0f;
 constexpr float       CONTROL_HEIGHT              = 34.0f;
 constexpr float       CONTROL_SPACING             = 6.0f;
 constexpr float       MENU_TITLE_WIDTH            = 86.0f;
-constexpr float       STATUS_HEIGHT               = 104.0f;
+constexpr float       STATUS_HEIGHT               = 148.0f;
 constexpr std::size_t ALPHA_CASE_COUNT            = 7u;
 constexpr std::size_t FADE_CASE_COUNT             = 7u;
 constexpr std::size_t DURATION_CASE_COUNT         = 5u;
-constexpr std::size_t TEXT_CASE_COUNT             = 7u;
+constexpr std::size_t TEXT_CASE_COUNT             = 8u;
 constexpr std::size_t SEQUENCE_CASE_COUNT         = 2u;
 constexpr std::size_t STAGGER_CASE_COUNT          = 8u;
+constexpr std::size_t BLUR_RADIUS_CASE_COUNT      = 8u;
+constexpr std::size_t BLUR_END_CASE_COUNT         = 9u;
 constexpr std::size_t DEFAULT_DURATION_CASE_INDEX = 3u;
 constexpr std::size_t DEFAULT_TEXT_CASE_INDEX     = 1u;
 constexpr std::size_t LOCAL_IMAGE_CASE_INDEX      = 5u;
@@ -55,6 +59,7 @@ constexpr const char* REMOTE_IMAGE_URL =
 enum class FillMode : uint8_t
 {
   SOLID,
+  WHITE_ON_BLACK,
   TEXT_GRADIENT,
   GRADIENT_SPAN
 };
@@ -64,6 +69,14 @@ enum class SpanGradientKind : uint8_t
   LINEAR,
   RADIAL,
   CONIC
+};
+
+enum class UxPlaybackPhase : uint8_t
+{
+  NONE,
+  ENTERING,
+  WAITING,
+  EXITING
 };
 
 // FadeDurationRatio controls the unit transition duration;
@@ -135,7 +148,8 @@ const char* const TEXT_BUTTON_LABELS[TEXT_CASE_COUNT] = {
   "Emoji",
   "Long",
   "Image Local",
-  "Image Remote"};
+  "Image Remote",
+  "Short Tail"};
 
 const Text::Reveal::Sequence SEQUENCES[SEQUENCE_CASE_COUNT] = {
   Text::Reveal::Sequence::WHOLE_TEXT,
@@ -169,6 +183,15 @@ const char* const STAGGER_BUTTON_LABELS[STAGGER_CASE_COUNT] = {
   "0.75",
   "1.00"};
 
+// Every sequence gets the same blur interval relative to the common sequence reference.
+// Its actual final end is fitted to DURATION, without reserving an idle tail.
+const uint32_t    BLUR_RADII[BLUR_RADIUS_CASE_COUNT]         = {4u, 8u, 12u, 16u, 24u, 32u, 48u, 64u};
+const char* const BLUR_RADIUS_LABELS[BLUR_RADIUS_CASE_COUNT] = {
+  "4 px", "8 px", "12 px", "16 px", "24 px", "32 px", "48 px", "64 px"};
+const float       BLUR_END_PROGRESS[BLUR_END_CASE_COUNT] = {0.0f, 0.05f, 0.10f, 0.20f, 0.25f, 0.40f, 0.50f, 0.75f, 1.0f};
+const char* const BLUR_END_LABELS[BLUR_END_CASE_COUNT]   = {
+  "0", "0.05", "0.10", "0.20", "0.25", "0.40", "0.50", "0.75", "1.00"};
+
 const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
   "Good morning. Start the day with cafe\u0301 by the window, "
   "a design review at 11:00, and a quiet walk by the river before sunset.",
@@ -185,7 +208,10 @@ const char* const TEXT_CASES[TEXT_CASE_COUNT] = {
   "토요일은 천천히 즐겨보세요. 오전 11시 30분 브런치로 시작해 오후 2시 "
   "전시를 보고, 해 질 무렵에는 강변을 걸어보세요.",
   "Tonight in Seoul: warm lights, late cafés, and a quiet walk along the Han River.",
-  "Next stop, San Francisco: morning coffee, cool fog, and a sunset walk along the waterfront."};
+  "Next stop, San Francisco: morning coffee, cool fog, and a sunset walk along the waterfront.",
+  "A quiet morning brings warm coffee and a little time to breathe.\n"
+  "The afternoon is yours to explore, one small discovery at a time.\n"
+  "Go."};
 
 // Each GradientSpan fill keeps the ordinary foreground color outside these
 // words, and applies Linear, Radial and Conic SPAN_BOUND gradients in order.
@@ -196,7 +222,8 @@ const char* const GRADIENT_SPAN_WORDS[TEXT_CASE_COUNT][3u] = {
   {"Build", "Dinner", "city"},
   {"Saturday", "museum", "강변"},
   {"Seoul", "cafés", "Han River"},
-  {"San Francisco", "coffee", "waterfront"}};
+  {"San Francisco", "coffee", "waterfront"},
+  {"morning", "afternoon", "Go"}};
 
 Gradient::Base CreateGradientSpanGradient(SpanGradientKind kind)
 {
@@ -306,12 +333,21 @@ public:
     mApplication.InitSignal().Connect(this, &TextRevealController::OnInit);
   }
 
+  ~TextRevealController()
+  {
+    StopAnimation();
+  }
+
 private:
   void OnInit(Application application)
   {
     Window window = application.GetWindow();
     window.SetBackgroundColor(UiColor(0xF8FAFC));
     window.KeyEventSignal().Connect(this, &TextRevealController::OnKeyEvent);
+    window.ResizedSignal().Connect(this, [this](Window, Window::WindowSize)
+    {
+      UpdateControlsViewport();
+    });
     UiScaleManager::Get().SetScale(mUiScale);
 
     StackLayout root = StackLayout::New(StackOrientation::VERTICAL);
@@ -347,6 +383,20 @@ private:
     configurationControls.Add(mAsyncButton);
     configurationControls.Add(mFillButton);
     configurationControls.Add(mRevealButton);
+
+    StackLayout uxControls = NewMenuRow("PRESET");
+    Label       firstUx    = NewButton("Preset 1");
+    Label       secondUx   = NewButton("Preset 2");
+    uxControls.Add(firstUx);
+    uxControls.Add(secondUx);
+    firstUx.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
+    {
+      PlayUxTest(false);
+    });
+    secondUx.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
+    {
+      PlayUxTest(true);
+    });
 
     StackLayout textControls = NewMenuRow("TEXT");
     for(std::size_t textIndex = 0u; textIndex < TEXT_CASE_COUNT; ++textIndex)
@@ -421,6 +471,41 @@ private:
       });
     }
 
+    StackLayout blurRadiusControls = NewMenuRow("BLUR px");
+    mBlurButton                    = NewButton("Blur: Off");
+    blurRadiusControls.Add(mBlurButton);
+    mBlurButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
+    {
+      mBlurEnabled = !mBlurEnabled;
+      UpdateBlurButtons();
+      Replay();
+    });
+    for(std::size_t index = 0u; index < BLUR_RADIUS_CASE_COUNT; ++index)
+    {
+      mBlurRadiusButtons[index] = NewButton(BLUR_RADIUS_LABELS[index]);
+      blurRadiusControls.Add(mBlurRadiusButtons[index]);
+      mBlurRadiusButtons[index].AsInteractive().ClickedSignal().Connect(this, [this, index](View, InputEvent)
+      {
+        mBlurRadiusIndex = index;
+        mBlurEnabled     = true;
+        UpdateBlurButtons();
+        Replay();
+      });
+    }
+
+    StackLayout blurEndControls = NewMenuRow("BLUR TIME");
+    for(std::size_t index = 0u; index < BLUR_END_CASE_COUNT; ++index)
+    {
+      mBlurEndButtons[index] = NewButton(BLUR_END_LABELS[index]);
+      blurEndControls.Add(mBlurEndButtons[index]);
+      mBlurEndButtons[index].AsInteractive().ClickedSignal().Connect(this, [this, index](View, InputEvent)
+      {
+        mBlurEndIndex = index;
+        UpdateBlurButtons();
+        Replay();
+      });
+    }
+
     StackLayout playbackControls = NewMenuRow("PLAYBACK");
     Label       replayButton     = NewButton("Replay");
     mStopPlayButton              = NewButton("Stop");
@@ -428,6 +513,24 @@ private:
     playbackControls.Add(replayButton);
     playbackControls.Add(mStopPlayButton);
     playbackControls.Add(reverseButton);
+    const std::array<float, 5u>       fixedProgress{{0.0f, 0.25f, 0.50f, 0.75f, 1.0f}};
+    const std::array<const char*, 5u> progressLabels{{"p 0", "p .25", "p .50", "p .75", "p 1"}};
+    for(std::size_t index = 0u; index < fixedProgress.size(); ++index)
+    {
+      Label button = NewButton(progressLabels[index]);
+      playbackControls.Add(button);
+      button.AsInteractive().ClickedSignal().Connect(this, [this, progress = fixedProgress[index]](View, InputEvent)
+      {
+        StopAnimation();
+        mPreview.SetTextRevealProgress(progress);
+        RestoreUxPreview();
+        mStopPlayButton.SetText("Play");
+        std::ostringstream playback;
+        playback << "Fixed progress " << std::fixed << std::setprecision(2) << progress << ".";
+        mPlaybackStatus = playback.str();
+        UpdateStatus();
+      });
+    }
 
     mStatus = NewLabel("", 12.0f, 0xCBD5E1);
     mStatus.SetBackgroundColor(UiColor(0x1E293B));
@@ -435,27 +538,38 @@ private:
     mStatus.SetBorderlineOffset(-1.0f);
     mStatus.SetBorderlineColor(UiColor(BUTTON_BORDER_COLOR));
     mStatus.SetPadding(Insets(10.0f, 10.0f, 6.0f, 6.0f));
-    mStatus.SetRequestedHeight(STATUS_HEIGHT);
+    mStatus.SetRequestedHeight(WRAP_CONTENT);
+    mStatus.SetMinimumHeight(STATUS_HEIGHT);
     mStatus.SetCornerRadius(7.0f);
 
     StackLayout controlsPanel = StackLayout::New(StackOrientation::VERTICAL);
     controlsPanel.SetRequestedWidth(MATCH_PARENT);
-    controlsPanel.SetRequestedHeight(CONTROLS_PANEL_HEIGHT);
+    controlsPanel.SetRequestedHeight(WRAP_CONTENT);
     controlsPanel.SetBackgroundColor(UiColor(PANEL_COLOR));
     controlsPanel.SetPadding(Insets(12.0f, 12.0f, 12.0f, 12.0f));
     controlsPanel.SetSpacing(CONTROL_SPACING);
     controlsPanel.Add(configurationControls);
+    controlsPanel.Add(uxControls);
     controlsPanel.Add(textControls);
     controlsPanel.Add(sequenceControls);
     controlsPanel.Add(fadeControls);
     controlsPanel.Add(staggerControls);
     controlsPanel.Add(durationControls);
     controlsPanel.Add(alphaFunctionControls);
+    controlsPanel.Add(blurRadiusControls);
+    controlsPanel.Add(blurEndControls);
     controlsPanel.Add(playbackControls);
     controlsPanel.Add(mStatus);
 
+    mControlsViewport = ScrollView::New();
+    mControlsViewport.SetScrollDirection(ScrollDirection::Vertical);
+    mControlsViewport.SetRequestedWidth(MATCH_PARENT);
+    mControlsViewport.SetBackgroundColor(UiColor(PANEL_COLOR));
+    mControlsViewport.SetContent(controlsPanel);
+    UpdateControlsViewport();
+
     root.Add(content);
-    root.Add(controlsPanel);
+    root.Add(mControlsViewport);
     window.Add(root);
 
     mUnitButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
@@ -494,6 +608,9 @@ private:
           mFillMode = FillMode::SOLID;
           break;
         case FillMode::SOLID:
+          mFillMode = FillMode::WHITE_ON_BLACK;
+          break;
+        case FillMode::WHITE_ON_BLACK:
           mFillMode = FillMode::TEXT_GRADIENT;
           break;
       }
@@ -501,8 +618,19 @@ private:
     });
     mRevealButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
     {
+      if(mUxPhase != UxPlaybackPhase::NONE)
+      {
+        StopAnimation();
+        mStopPlayButton.SetText("Play");
+        mPlaybackStatus = "UX playback cancelled by Reveal configuration.";
+      }
       mRevealEnabled = !mRevealEnabled;
       ApplyRevealConfiguration();
+      if(mUxPreviewHidden)
+      {
+        mUxPreviewHidden = false;
+        mPreview.SetProperty(Actor::Property::VISIBLE, true);
+      }
       mRevealButton.SetText(mRevealEnabled ? "Reveal: On" : "Reveal: Off");
       SetButtonSelected(mRevealButton, mRevealEnabled);
       UpdateStatus();
@@ -542,6 +670,7 @@ private:
     UpdateFadeButtons();
     UpdateDurationButtons();
     UpdateAlphaFunctionButtons();
+    UpdateBlurButtons();
     Replay();
   }
 
@@ -591,6 +720,8 @@ private:
     {
       case FillMode::SOLID:
         return "Fill: Solid";
+      case FillMode::WHITE_ON_BLACK:
+        return "Fill: White/Black";
       case FillMode::GRADIENT_SPAN:
         return "Fill: Span";
       case FillMode::TEXT_GRADIENT:
@@ -605,6 +736,8 @@ private:
     {
       case FillMode::SOLID:
         return "Solid";
+      case FillMode::WHITE_ON_BLACK:
+        return "White on black";
       case FillMode::GRADIENT_SPAN:
         return "GradientSpan (Linear/Radial/Conic, SPAN_BOUND)";
       case FillMode::TEXT_GRADIENT:
@@ -627,6 +760,8 @@ private:
     reveal.SetSequence(SEQUENCES[mSequenceIndex]);
     reveal.SetSequenceStaggerRatio(STAGGER_RATIOS[mStaggerIndex]);
     reveal.SetFadeDurationRatio(FADE_DURATION_RATIOS[mFadeDurationRatioIndex]);
+    reveal.SetBlurRadius(mBlurEnabled ? static_cast<float>(BLUR_RADII[mBlurRadiusIndex]) : 0.0f);
+    reveal.SetBlurDurationRatio(BLUR_END_PROGRESS[mBlurEndIndex]);
     mPreview.SetTextReveal(reveal);
   }
 
@@ -635,6 +770,33 @@ private:
     for(std::size_t fadeIndex = 0u; fadeIndex < FADE_CASE_COUNT; ++fadeIndex)
     {
       SetButtonSelected(mFadeButtons[fadeIndex], fadeIndex == mFadeDurationRatioIndex);
+    }
+  }
+
+  const char* GetBlurBypassReason() const
+  {
+    if(BLUR_END_PROGRESS[mBlurEndIndex] == 0.0f)
+    {
+      return "blur duration is zero";
+    }
+    if(!mRevealEnabled)
+    {
+      return "Reveal is Off";
+    }
+    return nullptr;
+  }
+
+  void UpdateBlurButtons()
+  {
+    mBlurButton.SetText(mBlurEnabled ? "Blur: On" : "Blur: Off");
+    SetButtonSelected(mBlurButton, mBlurEnabled);
+    for(std::size_t index = 0u; index < BLUR_RADIUS_CASE_COUNT; ++index)
+    {
+      SetButtonSelected(mBlurRadiusButtons[index], mBlurEnabled && index == mBlurRadiusIndex);
+    }
+    for(std::size_t index = 0u; index < BLUR_END_CASE_COUNT; ++index)
+    {
+      SetButtonSelected(mBlurEndButtons[index], index == mBlurEndIndex);
     }
   }
 
@@ -680,7 +842,9 @@ private:
 
   void ApplyFill()
   {
-    mPreview.SetTextColor(UiColor(0x0F172A));
+    const bool whiteOnBlack = mFillMode == FillMode::WHITE_ON_BLACK;
+    mPreview.SetBackgroundColor(UiColor(whiteOnBlack ? 0x000000 : 0xFFFFFF));
+    mPreview.SetTextColor(UiColor(whiteOnBlack ? 0xFFFFFF : 0x0F172A));
     mPreview.SetTextGradient(Gradient::Base::None());
 
     const bool isImageText = mTextCaseIndex == LOCAL_IMAGE_CASE_INDEX ||
@@ -761,10 +925,104 @@ private:
     return DURATION_SECONDS[mDurationCaseIndex];
   }
 
+  void ApplyPreset(bool exiting, bool secondEntrance)
+  {
+    // Preserve the selected text, fill, Unit and render path. The status still
+    // reports configurations where this prototype cannot apply runtime blur.
+    mRevealEnabled          = true;
+    mBlurEnabled            = true;
+    mSequenceIndex          = exiting ? 0u : 1u;                     // WHOLE_TEXT / PER_LINE
+    mFadeDurationRatioIndex = exiting ? 6u : 1u;                     // Fade 1 / 0
+    mStaggerIndex           = exiting || secondEntrance ? 0u : 4u;  // 0 / 0.25
+    mDurationCaseIndex      = exiting || secondEntrance ? 1u : 2u;  // 1 s / 2 s
+    mAlphaFunctionIndex     = exiting ? 0u : 2u;                     // LINEAR / EASE_OUT_SQUARE
+    mBlurRadiusIndex        = exiting ? 6u : 4u;                     // 48 px / 24 px
+    mBlurEndIndex           = exiting || secondEntrance ? 8u : 6u;  // 1.0 / 0.5
+    ApplyRevealConfiguration();
+    mRevealButton.SetText("Reveal: On");
+    SetButtonSelected(mRevealButton, true);
+    UpdateSequenceButtons();
+    UpdateFadeButtons();
+    UpdateStaggerButtons();
+    UpdateDurationButtons();
+    UpdateAlphaFunctionButtons();
+    UpdateBlurButtons();
+  }
+
+  void PlayUxTest(bool secondEntrance)
+  {
+    StopAnimation();
+    mUxSecondEntrance = secondEntrance;
+    ApplyPreset(false, secondEntrance);
+    mPreview.SetTextRevealProgress(0.0f);
+    RestoreUxPreview();
+    mUxPhase        = UxPlaybackPhase::ENTERING;
+    mPlaybackStatus = secondEntrance ? "Preset 2: entering for 1 s (Out Square), then wait 1 s."
+                                      : "Preset 1: entering for 2 s (Out Square), then wait 1 s.";
+    StartAnimation(1.0f, GetAnimationDuration());
+  }
+
+  void RestoreUxPreview()
+  {
+    if(mUxPreviewHidden)
+    {
+      mUxPreviewHidden = false;
+      mRevealEnabled  = true;
+      ApplyRevealConfiguration();
+      mRevealButton.SetText("Reveal: On");
+      SetButtonSelected(mRevealButton, true);
+      mPreview.SetProperty(Actor::Property::VISIBLE, true);
+    }
+  }
+
+  void WaitForUxExit()
+  {
+    // Start the hold after actual animation completion, not an estimated
+    // creation timestamp. A cancelled run must never start a delayed exit.
+    mUxPhase        = UxPlaybackPhase::WAITING;
+    mPlaybackStatus = "Preset: fully visible; waiting 1 s before changing to the exit settings.";
+    mStopPlayButton.SetText("Stop");
+    const uint32_t run = mUxRun;
+    mUxWaitTimer       = Timer::New(1000u);
+    mUxWaitTimer.TickSignal().Connect(this, [this, run]() -> bool
+    {
+      if(run != mUxRun || mUxPhase != UxPlaybackPhase::WAITING)
+      {
+        return false;
+      }
+      mUxPhase = UxPlaybackPhase::EXITING;
+      ApplyPreset(true, mUxSecondEntrance);
+      mPlaybackStatus = "Preset: exiting for 1 s (Linear), Whole Text, fade 1.0, blur 48 px / time 1.0.";
+      StartAnimation(0.0f, 1.0f);
+      return false;
+    });
+    mUxWaitTimer.Start();
+    UpdateStatus();
+  }
+
+  void FinishUxTest()
+  {
+    mUxPhase = UxPlaybackPhase::NONE;
+    mUxWaitTimer.Stop();
+    mUxWaitTimer.Reset();
+    // None restores ordinary text. Hide the preview first so cleanup does not
+    // make the text reappear; Replay or a manual progress change restores it.
+    mPreview.SetProperty(Actor::Property::VISIBLE, false);
+    mUxPreviewHidden = true;
+    mRevealEnabled   = false;
+    ApplyRevealConfiguration();
+    mRevealButton.SetText("Reveal: Off");
+    SetButtonSelected(mRevealButton, false);
+    mPlaybackStatus = "Preset finished: preview hidden and Reveal::None() applied. Replay or PRESET restores it.";
+    UpdateStatus();
+  }
+
   void Replay()
   {
     StopAnimation();
+    ApplyRevealConfiguration();
     mPreview.SetTextRevealProgress(0.0f);
+    RestoreUxPreview();
     const float duration = GetAnimationDuration();
 
     std::ostringstream playback;
@@ -776,7 +1034,7 @@ private:
 
   void StopOrPlay()
   {
-    if(mAnimationRunning)
+    if(mAnimationRunning || mUxPhase == UxPlaybackPhase::WAITING)
     {
       const float progress = mPreview.GetTextRevealProgress();
       StopAnimation();
@@ -798,6 +1056,7 @@ private:
     }
 
     // Scale the resume duration by the remaining progress.
+    RestoreUxPreview();
     const float        remainingDuration = GetAnimationDuration() * (1.0f - progress);
     std::ostringstream playback;
     playback << "Play: progress " << std::fixed << std::setprecision(2) << progress
@@ -811,6 +1070,7 @@ private:
     const float progress = mPreview.GetTextRevealProgress();
     StopAnimation();
     mPreview.SetTextRevealProgress(progress);
+    RestoreUxPreview();
 
     if(progress <= 0.0f)
     {
@@ -845,6 +1105,16 @@ private:
       mAnimationRunning = false;
       mAnimation.Reset();
       mStopPlayButton.SetText("Play");
+      if(mUxPhase == UxPlaybackPhase::ENTERING)
+      {
+        WaitForUxExit();
+        return;
+      }
+      if(mUxPhase == UxPlaybackPhase::EXITING)
+      {
+        FinishUxTest();
+        return;
+      }
       mPlaybackStatus = mAnimationTarget > 0.5f ? "Finished at progress 1.00."
                                                 : "Reverse finished at progress 0.00.";
       UpdateStatus();
@@ -855,6 +1125,13 @@ private:
 
   void StopAnimation()
   {
+    ++mUxRun;
+    mUxPhase = UxPlaybackPhase::NONE;
+    if(mUxWaitTimer)
+    {
+      mUxWaitTimer.Stop();
+      mUxWaitTimer.Reset();
+    }
     if(mAnimation)
     {
       mAnimation.Stop();
@@ -922,15 +1199,52 @@ private:
            << revealDescription
            << "\n"
            << mPlaybackStatus
-           << "\nVIEW  Q/W/E/R/T: scale 0.8/1.0/1.2/1.4/2.0 | ESC: Exit";
+           << "\nBLUR " << (mBlurEnabled ? "On" : "Off")
+           << " | RADIUS " << BLUR_RADII[mBlurRadiusIndex] << " px"
+           << " | TIME ratio " << BLUR_END_LABELS[mBlurEndIndex];
+    if(mBlurEnabled && GetBlurBypassReason())
+    {
+      status << " | BYPASSED: " << GetBlurBypassReason();
+    }
+    else if(mBlurEnabled)
+    {
+      status << " | Shared sequence-relative blur interval"
+             << " | TOTAL " << std::setprecision(2) << GetAnimationDuration() << " s";
+    }
+    status << "\nDURATION includes Reveal + blur. Their actual final end is fitted to this time; no extra tail is reserved.";
+    status << "\nBLUR TIME is relative to one common sequence interval, not the full Animation. ALPHA affects both Reveal and blur.";
+    status << "\np=1 is fully sharp. Reverse retraces the combined progress. Later units can enter sharp; reflow remaps the current clock to the new layout.";
+    if(mTextCaseIndex == LOCAL_IMAGE_CASE_INDEX || mTextCaseIndex == REMOTE_IMAGE_CASE_INDEX)
+    {
+      status << " ImageSpan shares its sequence's Reveal and blur timing.";
+    }
+    status << "\nVIEW  Q/W/E/R/T: scale 0.8/1.0/1.2/1.4/2.0 | Scroll controls if clipped | ESC: Exit";
     mStatus.SetText(status.str().c_str());
+  }
+
+  void UpdateControlsViewport()
+  {
+    if(mControlsViewport)
+    {
+      // Keep a visible preview on small windows and at larger UI scales.
+      const float height = static_cast<float>(mApplication.GetWindow().GetPositionSize().height);
+      mControlsViewport.SetRequestedHeight(std::min(CONTROLS_PANEL_HEIGHT, height * 0.60f / mUiScale));
+    }
   }
 
   void SetUiScale(float scale)
   {
     mUiScale = scale;
     UiScaleManager::Get().SetScale(scale);
-    UpdateStatus();
+    UpdateControlsViewport();
+    if(mBlurEnabled)
+    {
+      Replay();
+    }
+    else
+    {
+      UpdateStatus();
+    }
   }
 
   void OnKeyEvent(Window /*window*/, KeyEvent event)
@@ -942,6 +1256,7 @@ private:
 
     if(IsKey(event, Dali::DALI_KEY_ESCAPE) || IsKey(event, Dali::DALI_KEY_BACK))
     {
+      StopAnimation();
       mApplication.Quit();
       return;
     }
@@ -970,35 +1285,47 @@ private:
   }
 
 private:
-  Application&                           mApplication;
-  Label                                  mPreview;
-  Label                                  mUnitButton;
-  std::array<Label, TEXT_CASE_COUNT>     mTextButtons;
-  std::array<Label, SEQUENCE_CASE_COUNT> mSequenceButtons;
-  std::array<Label, STAGGER_CASE_COUNT>  mStaggerButtons;
-  std::array<Label, FADE_CASE_COUNT>     mFadeButtons;
-  std::array<Label, DURATION_CASE_COUNT> mDurationButtons;
-  std::array<Label, ALPHA_CASE_COUNT>    mAlphaButtons;
-  Label                                  mAsyncButton;
-  Label                                  mFillButton;
-  Label                                  mRevealButton;
-  Label                                  mStopPlayButton;
-  Label                                  mStatus;
-  Animation                              mAnimation;
-  std::string                            mPlaybackStatus;
-  Text::Reveal::Unit                     mUnit{Text::Reveal::Unit::CHARACTER};
-  std::size_t                            mSequenceIndex{0u};
-  std::size_t                            mStaggerIndex{0u};
-  std::size_t                            mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
-  std::size_t                            mFadeDurationRatioIndex{0u};
-  std::size_t                            mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
-  std::size_t                            mAlphaFunctionIndex{0u};
-  bool                                   mAsync{false};
-  FillMode                               mFillMode{FillMode::TEXT_GRADIENT};
-  bool                                   mRevealEnabled{true};
-  bool                                   mAnimationRunning{false};
-  float                                  mAnimationTarget{1.0f};
-  float                                  mUiScale{1.0f};
+  Application&                              mApplication;
+  Label                                     mPreview;
+  Label                                     mUnitButton;
+  std::array<Label, TEXT_CASE_COUNT>        mTextButtons;
+  std::array<Label, SEQUENCE_CASE_COUNT>    mSequenceButtons;
+  std::array<Label, STAGGER_CASE_COUNT>     mStaggerButtons;
+  std::array<Label, FADE_CASE_COUNT>        mFadeButtons;
+  std::array<Label, DURATION_CASE_COUNT>    mDurationButtons;
+  std::array<Label, ALPHA_CASE_COUNT>       mAlphaButtons;
+  std::array<Label, BLUR_RADIUS_CASE_COUNT> mBlurRadiusButtons;
+  std::array<Label, BLUR_END_CASE_COUNT>    mBlurEndButtons;
+  Label                                     mBlurButton;
+  ScrollView                                mControlsViewport;
+  Label                                     mAsyncButton;
+  Label                                     mFillButton;
+  Label                                     mRevealButton;
+  Label                                     mStopPlayButton;
+  Label                                     mStatus;
+  Animation                                 mAnimation;
+  Timer                                     mUxWaitTimer;
+  UxPlaybackPhase                           mUxPhase{UxPlaybackPhase::NONE};
+  uint32_t                                  mUxRun{0u};
+  bool                                      mUxSecondEntrance{false};
+  bool                                      mUxPreviewHidden{false};
+  std::string                               mPlaybackStatus;
+  Text::Reveal::Unit                        mUnit{Text::Reveal::Unit::CHARACTER};
+  std::size_t                               mSequenceIndex{0u};
+  std::size_t                               mStaggerIndex{0u};
+  std::size_t                               mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
+  std::size_t                               mFadeDurationRatioIndex{0u};
+  std::size_t                               mDurationCaseIndex{DEFAULT_DURATION_CASE_INDEX};
+  std::size_t                               mAlphaFunctionIndex{0u};
+  std::size_t                               mBlurRadiusIndex{5u};
+  std::size_t                               mBlurEndIndex{8u};
+  bool                                      mBlurEnabled{false};
+  bool                                      mAsync{false};
+  FillMode                                  mFillMode{FillMode::TEXT_GRADIENT};
+  bool                                      mRevealEnabled{true};
+  bool                                      mAnimationRunning{false};
+  float                                     mAnimationTarget{1.0f};
+  float                                     mUiScale{1.0f};
 };
 
 int DALI_EXPORT_API main(int argc, char** argv)
