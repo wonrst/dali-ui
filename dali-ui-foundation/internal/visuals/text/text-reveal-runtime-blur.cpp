@@ -1416,7 +1416,8 @@ protected:
         pass.tasks[i].SetFrameBuffer(pass.buffers[i]);
         pass.tasks[i].SetClearEnabled(true);
         pass.tasks[i].SetClearColor(Color::TRANSPARENT);
-        pass.tasks[i].SetRefreshRate(RenderTask::REFRESH_ALWAYS);
+        // TODO(PROTOTYPE): Evaluate half-rate Source/H/V updates together.
+        pass.tasks[i].SetRefreshRate(2u);
       }
     }
     if(mDecorations)
