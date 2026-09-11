@@ -928,15 +928,21 @@ public:
     }
     std::vector<Vector2> lineSizes;
     std::vector<Vector2> lineOffsets;
+    std::vector<Vector2> horizontalBands;
     lineSizes.reserve(mSequences.size());
     lineOffsets.reserve(mSequences.size());
+    if(batched)
+    {
+      horizontalBands.reserve(mSequences.size());
+    }
     for(const auto& timing : mSequences)
     {
       const auto sourceTexture = mSourceTextures.GetTexture(0u);
-      auto       bounds        = batched
-                                   ? ResolveRuntimeRevealBlurTarget(mForeground, mContentSize,
-                                                                    Vector2(static_cast<float>(sourceTexture.GetWidth()), static_cast<float>(sourceTexture.GetHeight())), timing.coverage, mRadius)
-                                   : Rect<int32_t>(0, 0, static_cast<int32_t>(mTargetSize.x), static_cast<int32_t>(mTargetSize.y));
+      Vector2    horizontalBand;
+      auto       bounds = batched
+                            ? ResolveRuntimeRevealBlurTarget(mForeground, mContentSize,
+                                                             Vector2(static_cast<float>(sourceTexture.GetWidth()), static_cast<float>(sourceTexture.GetHeight())), timing.coverage, mRadius, &horizontalBand)
+                            : Rect<int32_t>(0, 0, static_cast<int32_t>(mTargetSize.x), static_cast<int32_t>(mTargetSize.y));
       if(batched && mImages)
       {
         bool hasBounds = timing.hasTextForeground;
@@ -946,13 +952,15 @@ public:
           {
             continue;
           }
+          Vector2    imageBand;
           const auto area = ResolveRuntimeRevealBlurTarget(mForeground, mContentSize,
                                                            Vector2(static_cast<float>(sourceTexture.GetWidth()), static_cast<float>(sourceTexture.GetHeight())),
-                                                           image.placement.coverage, mRadius);
+                                                           image.placement.coverage, mRadius, &imageBand);
           if(!hasBounds)
           {
-            bounds    = area;
-            hasBounds = true;
+            bounds         = area;
+            hasBounds      = true;
+            horizontalBand = imageBand;
           }
           else
           {
@@ -960,10 +968,25 @@ public:
             const int32_t top  = std::min(bounds.y, area.y);
             bounds             = Rect<int32_t>(left, top, std::max(bounds.x + bounds.width, area.x + area.width) - left,
                                                std::max(bounds.y + bounds.height, area.y + area.height) - top);
+            horizontalBand.x   = std::min(horizontalBand.x, imageBand.x);
+            horizontalBand.y   = std::max(horizontalBand.y, imageBand.y);
           }
         }
       }
       const Vector2 size(static_cast<float>(bounds.width), static_cast<float>(bounds.height));
+      if(batched)
+      {
+        // Include every reserved image slot, even before its renderer is READY.
+        // Normalize only after the text/image union and original target clamp.
+        horizontalBand   = (horizontalBand - Vector2(static_cast<float>(bounds.y), static_cast<float>(bounds.y))) / size.y;
+        horizontalBand.x = std::clamp(horizontalBand.x, 0.0f, 1.0f);
+        horizontalBand.y = std::clamp(horizontalBand.y, 0.0f, 1.0f);
+        if(!std::isfinite(horizontalBand.x) || !std::isfinite(horizontalBand.y) || horizontalBand.x >= horizontalBand.y)
+        {
+          horizontalBand = Vector2(0.0f, 1.0f);
+        }
+        horizontalBands.push_back(horizontalBand);
+      }
       lineSizes.push_back(size);
       lineOffsets.emplace_back(static_cast<float>(bounds.x) + (size.x - mTargetSize.x) * 0.5f,
                                static_cast<float>(bounds.y) + (size.y - mTargetSize.y) * 0.5f);
@@ -1062,11 +1085,13 @@ public:
         }
       }
       std::vector<BlurBatchVertex>       vertices;
+      std::vector<BlurBatchVertex>       horizontalVertices;
       std::vector<BlurBatchOutputVertex> outputVertices;
       Actor                              sharedForeground;
       if(batched)
       {
         vertices.reserve(batch.count * 4u);
+        horizontalVertices.reserve(batch.count * 4u);
         outputVertices.reserve(batch.count * 4u);
         // Keep the text shader's original uSize and origin reference. Only
         // page placement moves into each renderer; textures and timing remain
@@ -1094,6 +1119,10 @@ public:
           {
             vertices.push_back({center + (uv - Vector2(0.5f, 0.5f)) * size, uv, rectangle,
                                 Vector2(1.0f / size.x, 1.0f / size.y), line});
+            const auto&   band = horizontalBands[sequence];
+            const Vector2 horizontalUv(uv.x, uv.y == 0.0f ? band.x : band.y);
+            horizontalVertices.push_back({center + (horizontalUv - Vector2(0.5f, 0.5f)) * size, horizontalUv, rectangle,
+                                          Vector2(1.0f / size.x, 1.0f / size.y), line});
             // Retain line order and the original owner-local position. Halos
             // may overlap at output and must keep the same source-over order.
             outputVertices.push_back({offset + (uv - Vector2(0.5f, 0.5f)) * size, uv, rectangle});
@@ -1221,9 +1250,30 @@ public:
           {
             return;
           }
+          // H changes X support only: it cannot populate a transparent source
+          // row. Draw just its filtered Y coverage; V retains the full padded
+          // quads and creates the vertical halo. The full H task clear below
+          // remains essential, including when pages share scratch storage.
+          Geometry   horizontalGeometry = geometry;
+          const auto bandFirst          = horizontalBands.begin() + static_cast<std::vector<Vector2>::difference_type>(batch.first + first);
+          if(std::any_of(bandFirst, bandFirst + count, [](const Vector2& band)
+          {
+            return band.x > 0.0f || band.y < 1.0f;
+          }))
+          {
+            auto candidate = CreateBlurBatchGeometry(horizontalVertices.data() + first * 4u, count);
+            if(!Dali::Adaptor::IsAvailable())
+            {
+              return;
+            }
+            if(candidate)
+            {
+              horizontalGeometry = candidate;
+            }
+          }
           for(uint32_t i = 0u; i < 2u; ++i)
           {
-            Renderer renderer = TextRevealBlurRenderer::CreateBatch(mRadius, geometry);
+            Renderer renderer = TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1637,11 +1687,15 @@ std::vector<RuntimeRevealBlurBatch> BuildRuntimeRevealBlurBatches(const std::vec
 
 Rect<int32_t> ResolveRuntimeRevealBlurTarget(Renderer foreground, const Vector2& controlSize,
                                              const Vector2& textureSize, const Rect<uint32_t>& coverage,
-                                             uint32_t radius)
+                                             uint32_t radius, Vector2* horizontalBand)
 {
   const int32_t       fullWidth  = static_cast<int32_t>(std::ceil(controlSize.x)) + 2 * static_cast<int32_t>(radius + 2u);
   const int32_t       fullHeight = static_cast<int32_t>(std::ceil(controlSize.y)) + 2 * static_cast<int32_t>(radius + 2u);
   const Rect<int32_t> full(0, 0, fullWidth, fullHeight);
+  if(horizontalBand)
+  {
+    *horizontalBand = Vector2(0.0f, static_cast<float>(fullHeight));
+  }
   if(coverage.width == 0u || coverage.height == 0u || textureSize.x <= 0.0f || textureSize.y <= 0.0f)
   {
     return full;
@@ -1676,6 +1730,30 @@ Rect<int32_t> ResolveRuntimeRevealBlurTarget(Renderer foreground, const Vector2&
   const int32_t top    = bound(std::floor(start.y + first.y * extent.y / textureSize.y) - guard, fullHeight);
   const int32_t right  = bound(std::ceil(start.x + last.x * extent.x / textureSize.x) + guard, fullWidth);
   const int32_t bottom = bound(std::ceil(start.y + last.y * extent.y / textureSize.y) + guard, fullHeight);
+  if(horizontalBand && right > left && bottom > top &&
+     std::isfinite(textureSize.x) && std::isfinite(textureSize.y) &&
+     static_cast<double>(coverage.x) + coverage.width <= textureSize.x &&
+     static_cast<double>(coverage.y) + coverage.height <= textureSize.y)
+  {
+    // LINEAR source sampling extends half a source texel beyond the covered
+    // pixel cells. Map that support through UI/render scale, then round out.
+    // One capture texel also covers H's LINEAR footprint/texel-center rounding.
+    // At 1:1 this retains two rows beyond coverage, like the source crop guard;
+    // unlike a fixed pixel margin it remains conservative when magnified.
+    constexpr float HORIZONTAL_PASS_FILTER_GUARD = 1.0f;
+    const float     filterGuard                  = 0.5f * extent.y / textureSize.y + HORIZONTAL_PASS_FILTER_GUARD;
+    const float     bandTop                      = std::floor(start.y + first.y * extent.y / textureSize.y - filterGuard);
+    const float     bandBottom                   = std::ceil(start.y + last.y * extent.y / textureSize.y + filterGuard);
+    if(std::isfinite(bandTop) && std::isfinite(bandBottom) && bandTop < bandBottom)
+    {
+      const int32_t clippedTop    = std::clamp(bound(bandTop, fullHeight), top, bottom);
+      const int32_t clippedBottom = std::clamp(bound(bandBottom, fullHeight), top, bottom);
+      if(clippedTop < clippedBottom)
+      {
+        *horizontalBand = Vector2(static_cast<float>(clippedTop), static_cast<float>(clippedBottom));
+      }
+    }
+  }
   return right > left && bottom > top ? Rect<int32_t>(left, top, right - left, bottom - top) : full;
 }
 

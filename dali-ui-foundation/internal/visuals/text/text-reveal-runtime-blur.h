@@ -94,10 +94,12 @@ std::vector<RuntimeRevealBlurBatch> BuildRuntimeRevealBlurBatches(const std::vec
  *
  * Coverage uses the original full-size foreground coordinates. A transparent
  * guard includes the Gaussian support and bilinear/pixel-snap margins.
+ * horizontalBand optionally receives the source's filtered Y coverage in the
+ * same full-target coordinates. Unusable coverage returns the full Y extent.
  */
 Rect<int32_t> ResolveRuntimeRevealBlurTarget(Renderer foreground, const Vector2& controlSize,
                                              const Vector2& textureSize, const Rect<uint32_t>& coverage,
-                                             uint32_t radius);
+                                             uint32_t radius, Vector2* horizontalBand = nullptr);
 
 /**
  * @brief Moves the resolved foreground renderer into exclusive source/H/V tasks.

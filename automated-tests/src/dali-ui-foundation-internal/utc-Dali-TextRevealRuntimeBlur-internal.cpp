@@ -193,7 +193,7 @@ bool HasUploadedBatchVertices(UiTestApplication& application, const std::vector<
 // use a smaller format without these blur-only attributes.
 // Read the latest matching draw to inspect placement without requiring actors
 // or additional production properties for individual lines.
-std::vector<float> UploadedCaptureVertices(UiTestApplication& application, uint32_t lines)
+std::vector<float> UploadedCaptureVertices(UiTestApplication& application, uint32_t lines, bool horizontal = false)
 {
   const size_t count   = static_cast<size_t>(lines) * 4u * 11u;
   const auto&  buffers = application.GetGraphicsController().mAllocatedBuffers;
@@ -209,7 +209,11 @@ std::vector<float> UploadedCaptureVertices(UiTestApplication& application, uint3
     std::memcpy(values.data(), buffer->memory.data(), buffer->memory.size());
     if(count != 0u && values[8u] > 0.0f && values[9u] > 0.0f)
     {
-      return values;
+      const bool cropped = values[3u] > 0.0f || values[25u] < 1.0f;
+      if(cropped == horizontal)
+      {
+        return values;
+      }
     }
   }
   return {};
@@ -844,8 +848,8 @@ int UtcDaliTextRevealRuntimeGaussianDrawBatchBoundaryP(void)
   DALI_TEST_EQUALS(horizontal.size(), static_cast<size_t>(2u), TEST_LOCATION);
   DALI_TEST_EQUALS(vertical.size(), horizontal.size(), TEST_LOCATION);
   DALI_TEST_EQUALS(Passes(label, "RevealGaussianOutput").size(), horizontal.size(), TEST_LOCATION);
-  DALI_TEST_CHECK(horizontal[0].GetGeometry() == vertical[0].GetGeometry());
-  DALI_TEST_CHECK(horizontal[1].GetGeometry() == vertical[1].GetGeometry());
+  DALI_TEST_CHECK(horizontal[0].GetGeometry() != vertical[0].GetGeometry());
+  DALI_TEST_CHECK(horizontal[1].GetGeometry() != vertical[1].GetGeometry());
   const auto lines         = BlurLines(label);
   const auto verticalLines = BlurLines(label, false);
   DALI_TEST_EQUALS(lines.size(), static_cast<size_t>(limit + 1u), TEST_LOCATION);
@@ -1563,6 +1567,184 @@ int UtcDaliTextRevealRuntimeGaussianCoverageP(void)
   DALI_TEST_CHECK(target == Rect<int32_t>(20, 26, 65, 51));
   DALI_TEST_CHECK(Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, Vector2(400.0f, 200.0f), Vector2(64.0f, 48.0f), {}, 16u) ==
                   Rect<int32_t>(0, 0, 436, 236));
+  END_TEST;
+}
+
+int UtcDaliTextRevealRuntimeGaussianHorizontalCoverageP(void)
+{
+  UiTestApplication application;
+  Label             label    = MakeLabel(application);
+  Renderer          renderer = label.GetRendererAt(0u);
+  using P                    = VisualRenderer::Property;
+  renderer.SetProperty(P::EXTRA_SIZE, Vector2::ZERO);
+  renderer.SetProperty(P::TRANSFORM_ORIGIN, Vector2(-0.5f, -0.5f));
+  renderer.SetProperty(P::TRANSFORM_PIVOT, Vector2(0.5f, 0.5f));
+  renderer.SetProperty(P::TRANSFORM_OFFSET_SIZE_MODE, Vector4::ONE);
+  const Vector2        control(400.0f, 200.0f);
+  const Vector2        texture(64.0f, 48.0f);
+  const Rect<uint32_t> coverage(12u, 8u, 25u, 11u);
+  for(float scale : {0.5f, 1.0f, 1.25f, 1.5f, 4.0f})
+  {
+    renderer.SetProperty(P::TRANSFORM_SIZE, texture * scale);
+    renderer.SetProperty(P::TRANSFORM_OFFSET, Vector2(10.35f, 20.65f));
+    Vector2    band;
+    const auto target = Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, control, texture, coverage, 24u, &band);
+    DALI_TEST_CHECK(target == Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, control, texture, coverage, 24u));
+    // Include the half-source-texel LINEAR support at this scale, plus a
+    // capture texel; test actual pixel cells, not a nominal font line box.
+    const float top    = 26.0f + 20.65f + (8.0f - 0.5f) * scale;
+    const float bottom = 26.0f + 20.65f + (19.0f + 0.5f) * scale;
+    DALI_TEST_CHECK(band.x <= std::floor(top - 1.0f));
+    DALI_TEST_CHECK(band.y >= std::ceil(bottom + 1.0f));
+    DALI_TEST_CHECK(band.x >= static_cast<float>(target.y));
+    DALI_TEST_CHECK(band.y <= static_cast<float>(target.y + target.height));
+    DALI_TEST_CHECK(band.y - band.x < static_cast<float>(target.height));
+  }
+  Vector2 band;
+  Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, control, texture, {}, 24u, &band);
+  DALI_TEST_EQUALS(band, Vector2(0.0f, 252.0f), TEST_LOCATION);
+  Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, control, texture, Rect<uint32_t>(60u, 8u, 20u, 11u), 24u, &band);
+  DALI_TEST_EQUALS(band, Vector2(0.0f, 252.0f), TEST_LOCATION);
+  renderer.SetProperty(P::TRANSFORM_OFFSET, Vector2(0.0f, std::numeric_limits<float>::quiet_NaN()));
+  Ui::Internal::ResolveRuntimeRevealBlurTarget(renderer, control, texture, coverage, 24u, &band);
+  DALI_TEST_EQUALS(band, Vector2(0.0f, 252.0f), TEST_LOCATION);
+  END_TEST;
+}
+
+int UtcDaliTextRevealRuntimeGaussianHorizontalGeometryP(void)
+{
+  UiTestApplication application;
+  Label             label      = MakeLabel(application);
+  Renderer          foreground = label.GetRendererAt(0u);
+  using P                      = VisualRenderer::Property;
+  foreground.SetProperty(P::TRANSFORM_SIZE, Vector2(100.0f, 100.0f));
+  foreground.SetProperty(P::TRANSFORM_OFFSET, Vector2::ZERO);
+  foreground.SetProperty(P::EXTRA_SIZE, Vector2::ZERO);
+  foreground.SetProperty(P::TRANSFORM_ORIGIN, Vector2(-0.5f, -0.5f));
+  foreground.SetProperty(P::TRANSFORM_PIVOT, Vector2(0.5f, 0.5f));
+  foreground.SetProperty(P::TRANSFORM_OFFSET_SIZE_MODE, Vector4::ONE);
+  TextureSet textures = TextureSet::New();
+  textures.SetTexture(0u, Texture::New(TextureType::TEXTURE_2D, Pixel::L8, 100u, 100u));
+  foreground.SetTextures(textures);
+  std::vector<Ui::Internal::RuntimeRevealBlurSequence> sequences(2u);
+  for(uint32_t line = 0u; line < 2u; ++line)
+  {
+    sequences[line].textures    = textures;
+    sequences[line].textureRect = Vector4(0.0f, 0.0f, 1.0f, 1.0f);
+    sequences[line].lineIndex   = line;
+    sequences[line].start       = static_cast<float>(line) * 0.25f;
+  }
+  sequences[0u].coverage          = Rect<uint32_t>(20u, 30u, 20u, 10u);
+  sequences[1u].hasTextForeground = false;
+  auto images                     = std::make_unique<Ui::Internal::RuntimeRevealBlurImages>();
+  for(uint32_t line = 0u; line < 2u; ++line)
+  {
+    Ui::Internal::RevealBlurImage image;
+    image.lineIndex = line;
+    // Extend both above and below the text; the second line is image-only.
+    image.coverage = Rect<uint32_t>(25u, 15u, 15u, 50u);
+    images->placements.push_back(image);
+  }
+  Actor companion = Ui::Internal::CreateRuntimeRevealBlur(label, foreground, Vector2(100.0f, 100.0f),
+                                                          label.GetPropertyIndex("uTextRevealProgress"), 24u, 0.5f, std::move(sequences), false, {}, std::move(images));
+  DALI_TEST_CHECK(companion);
+  Settle(application);
+  auto horizontal = Passes(companion, "RevealGaussianBatchH");
+  auto vertical   = Passes(companion, "RevealGaussianBatchV");
+  DALI_TEST_EQUALS(horizontal.size(), static_cast<size_t>(1u), TEST_LOCATION);
+  DALI_TEST_CHECK(horizontal[0u].GetGeometry() != vertical[0u].GetGeometry());
+  const auto h = UploadedCaptureVertices(application, 2u, true);
+  const auto v = UploadedCaptureVertices(application, 2u);
+  DALI_TEST_EQUALS(h.size(), static_cast<size_t>(88u), TEST_LOCATION);
+  DALI_TEST_EQUALS(v.size(), h.size(), TEST_LOCATION);
+  for(size_t line = 0u; line < 2u; ++line)
+  {
+    const auto* a = h.data() + line * 44u;
+    const auto* b = v.data() + line * 44u;
+    // Full-target image coverage [41,91] with two filter rows becomes [39,93].
+    const float height = b[23u] - b[1u];
+    DALI_TEST_EQUALS((a[25u] - a[3u]) * height, 54.0f, 0.001f, TEST_LOCATION);
+    DALI_TEST_CHECK(a[3u] >= 0.0f && a[25u] <= 1.0f && a[3u] < a[25u]);
+    DALI_TEST_CHECK(a[1u] >= b[1u] && a[23u] <= b[23u]);
+    for(uint32_t corner = 0u; corner < 4u; ++corner)
+    {
+      // X, atlas rectangle, inverse size and line identity are unchanged.
+      DALI_TEST_EQUALS(a[corner * 11u], b[corner * 11u], TEST_LOCATION);
+      for(uint32_t field = 4u; field < 11u; ++field)
+      {
+        DALI_TEST_EQUALS(a[corner * 11u + field], b[corner * 11u + field], TEST_LOCATION);
+      }
+    }
+  }
+  const auto tasks = application.GetScene().GetRenderTaskList();
+  DALI_TEST_EQUALS(tasks.GetTaskCount(), 4u, TEST_LOCATION);
+  for(uint32_t task = 1u; task < tasks.GetTaskCount(); ++task)
+  {
+    DALI_TEST_CHECK(tasks.GetTask(task).GetClearEnabled());
+    DALI_TEST_EQUALS(tasks.GetTask(task).GetClearColor(), Color::TRANSPARENT, TEST_LOCATION);
+  }
+  auto           geometryHandle = horizontal[0u].GetGeometry();
+  WeakHandleBase geometry(geometryHandle);
+  geometryHandle.Reset();
+  for(float progress : {0.4f, 1.0f, 0.2f, 0.0f})
+  {
+    label.SetTextRevealProgress(progress);
+    Settle(application);
+    DALI_TEST_CHECK(Passes(companion, "RevealGaussianBatchH")[0u].GetGeometry() == geometry.GetBaseHandle());
+  }
+  Ui::Internal::RemoveRuntimeRevealBlur(companion, label);
+  horizontal.clear();
+  vertical.clear();
+  Settle(application);
+  DALI_TEST_CHECK(!geometry.GetBaseHandle());
+  DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+  Ui::Internal::RuntimeRevealBlurSequence unknown;
+  unknown.textures = textures;
+  companion        = Ui::Internal::CreateRuntimeRevealBlur(label, foreground, Vector2(100.0f, 100.0f),
+                                                           label.GetPropertyIndex("uTextRevealProgress"), 24u, 0.5f, {unknown});
+  DALI_TEST_CHECK(companion);
+  Settle(application);
+  // Unknown/empty coverage must preserve blur and share the original full quad.
+  DALI_TEST_CHECK(Passes(companion, "RevealGaussianBatchH")[0u].GetGeometry() ==
+                  Passes(companion, "RevealGaussianBatchV")[0u].GetGeometry());
+  Ui::Internal::RemoveRuntimeRevealBlur(companion, label);
+  Settle(application);
+  END_TEST;
+}
+
+int UtcDaliTextRevealRuntimeGaussianHorizontalConstructionShutdownP(void)
+{
+  UiTestApplication                       application;
+  Label                                   label      = MakeLabel(application);
+  Renderer                                foreground = label.GetRendererAt(0u);
+  Ui::Internal::RuntimeRevealBlurSequence sequence;
+  sequence.textures             = foreground.GetTextures();
+  sequence.coverage             = Rect<uint32_t>(1u, 2u, 5u, 4u);
+  const auto        tasks       = application.GetScene().GetRenderTaskList();
+  uint32_t          allocations = 0u;
+  uint32_t          afterStop   = 0u;
+  bool              stopped     = false;
+  ConnectionTracker tracker;
+  application.GetCore().GetObjectRegistry().ObjectCreatedSignal().Connect(&tracker, [&](BaseHandle object)
+  {
+    if(stopped)
+    {
+      ++afterStop;
+    }
+    else if(Renderer::DownCast(object) && ++allocations == 2u)
+    {
+      // Clone, then H renderer: cancel after both geometries exist.
+      application.GetAdaptor().Stop();
+      stopped = true;
+    }
+  });
+  Actor companion = Ui::Internal::CreateRuntimeRevealBlur(label, foreground, Vector2(360.0f, 72.0f),
+                                                          label.GetPropertyIndex("uTextRevealProgress"), 24u, 0.5f, {sequence});
+  tracker.DisconnectAll();
+  DALI_TEST_CHECK(stopped && !companion);
+  DALI_TEST_EQUALS(afterStop, 0u, TEST_LOCATION);
+  DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+  DALI_TEST_CHECK(label.GetRendererAt(0u) == foreground);
   END_TEST;
 }
 
@@ -2833,6 +3015,16 @@ int CheckImageBlurCapture(UiTestApplication& application, bool async, bool image
   const uint32_t maximumTasks = imageOnly || sequence == Text::Reveal::Sequence::WHOLE_TEXT ? 3u : 6u;
   DALI_TEST_CHECK(tasks.GetTaskCount() > baseline && tasks.GetTaskCount() <= baseline + maximumTasks);
   auto                 companion = Find(label, "TextRevealRuntimeGaussian");
+  std::vector<Geometry> horizontalGeometries;
+  for(auto renderer : Passes(companion, "RevealGaussianBatchH"))
+  {
+    auto geometry = renderer.GetGeometry();
+    horizontalGeometries.push_back(geometry);
+    if(resources)
+    {
+      resources->emplace_back(geometry);
+    }
+  }
   std::vector<Texture> targets;
   for(uint32_t i = baseline; i < tasks.GetTaskCount(); ++i)
   {
@@ -2871,6 +3063,12 @@ int CheckImageBlurCapture(UiTestApplication& application, bool async, bool image
     label.ResourceReadySignal().Emit(label);
     Settle(application);
     DALI_TEST_CHECK(Find(label, "TextRevealRuntimeGaussian") == companion);
+    const auto horizontal = Passes(companion, "RevealGaussianBatchH");
+    DALI_TEST_EQUALS(horizontal.size(), horizontalGeometries.size(), TEST_LOCATION);
+    for(size_t draw = 0u; draw < horizontal.size(); ++draw)
+    {
+      DALI_TEST_CHECK(horizontal[draw].GetGeometry() == horizontalGeometries[draw]);
+    }
     auto       original      = imageVisual.GetRenderer();
     const auto imageProgress = original.GetPropertyIndex("uInlineReplacementRevealProgress");
     if(imageProgress != Property::INVALID_INDEX)
@@ -3001,7 +3199,8 @@ int UtcDaliTextRevealBlurImageCaptureLifecycleStressP(void)
   ConnectionTracker           tracker;
   application.GetCore().GetObjectRegistry().ObjectCreatedSignal().Connect(&tracker, [&](BaseHandle object)
   {
-    if(Actor::DownCast(object) || Renderer::DownCast(object) || FrameBuffer::DownCast(object) || Constraint::DownCast(object))
+    if(Actor::DownCast(object) || Renderer::DownCast(object) || FrameBuffer::DownCast(object) || Constraint::DownCast(object) ||
+       Geometry::DownCast(object) || VertexBuffer::DownCast(object))
     {
       objects.emplace_back(object);
     }
