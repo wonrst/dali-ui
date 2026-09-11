@@ -28,6 +28,7 @@
 #include <dali/devel-api/object/type-registry.h>
 #include <dali/integration-api/adaptor-framework/adaptor.h>
 #include <dali/integration-api/adaptor-framework/scene-holder.h>
+#include <dali/integration-api/debug.h>
 #include <dali/integration-api/pixel-data-integ.h>
 #include <dali/integration-api/rendering/visual-renderer.h>
 #include <dali/integration-api/string-utils.h>
@@ -47,6 +48,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -57,6 +59,10 @@ namespace DALI_NAMESPACE::Ui::Internal
 {
 namespace
 {
+// H preserves Y until the vertical filter runs. Source remains full resolution
+// for the final sharp handoff; this policy does not change the Reveal schedule.
+constexpr float QUARTER_BLUR_SCALE = 0.25f;
+
 struct BlurStrength
 {
   float start;
@@ -348,14 +354,15 @@ void main()
   return shader;
 }
 
-Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly, bool batched)
+Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly, bool batched, bool quarterSource = false)
 {
   if(!Dali::Adaptor::IsAvailable() || !geometry)
   {
     return {};
   }
   thread_local Shader shaders[2][2];
-  auto&               shader = shaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u];
+  thread_local Shader quarterShaders[2][2];
+  auto&               shader = quarterSource ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u] : shaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u];
   if(!shader)
   {
     const std::string vertex   = R"SHADER(
@@ -378,6 +385,32 @@ void main()
 }
 )SHADER";
     std::string       fragment = alphaOnly ? "#define ALPHA_ONLY\n" : "";
+    if(quarterSource)
+    {
+      fragment += "#define QUARTER_BLUR_SHARP_TAKEOVER\n";
+      // TODO(PROTOTYPE): Launch-time curve comparison; never read per frame.
+      // Default to the radius-based candidate; keep CURRENT/Soft as references.
+      const char* handoff        = std::getenv("DALI_REVEAL_QUARTER_HANDOFF");
+      const bool  currentHandoff = handoff && std::strcmp(handoff, "0") == 0;
+      if(!currentHandoff)
+      {
+        fragment += "#define QUARTER_BLUR_EFFECTIVE_RADIUS\n";
+        if(handoff && std::strcmp(handoff, "2") == 0)
+        {
+          fragment += "#define QUARTER_BLUR_BINARY_HANDOFF\n";
+        }
+      }
+      const char* softTakeover = std::getenv("DALI_REVEAL_QUARTER_SOFT_TAKEOVER");
+      if(currentHandoff && softTakeover && std::strcmp(softTakeover, "1") == 0)
+      {
+        fragment += "#define QUARTER_BLUR_DELAYED_SHARP\n";
+      }
+      const char* blurOnly = std::getenv("DALI_REVEAL_QUARTER_BLUR_ONLY");
+      if(blurOnly && std::strcmp(blurOnly, "1") == 0)
+      {
+        fragment += "#define QUARTER_BLUR_ONLY\n";
+      }
+    }
     if(!batched)
     {
       fragment += "#define WHOLE_TEXT_OUTPUT\n";
@@ -390,6 +423,14 @@ INPUT highp vec2 vTexCoord;
 INPUT highp vec4 vRevealRectangle;
 #endif
 UNIFORM sampler2D sTexture;
+#ifdef QUARTER_BLUR_SHARP_TAKEOVER
+UNIFORM sampler2D sSharpSource;
+UNIFORM_BLOCK QuarterBlurPrototype
+{
+  UNIFORM highp float uAnimationRatio;
+  UNIFORM highp float uQuarterAuthoredRadius;
+};
+#endif
 UNIFORM_BLOCK FragColor
 {
   UNIFORM vec4 uColor;
@@ -397,12 +438,51 @@ UNIFORM_BLOCK FragColor
   UNIFORM vec4 uTextColorAnimatable;
 #endif
 };
+#ifdef QUARTER_BLUR_SHARP_TAKEOVER
+highp float SmootherStep(highp float t)
+{
+  t = clamp(t, 0.0, 1.0);
+  return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+#endif
 void main()
 {
 #ifdef WHOLE_TEXT_OUTPUT
   highp vec4 color = TEXTURE(sTexture, vTexCoord);
 #else
   highp vec4 color = TEXTURE(sTexture, vRevealRectangle.xy + vTexCoord * vRevealRectangle.zw);
+#endif
+#if defined(QUARTER_BLUR_SHARP_TAKEOVER) && !defined(QUARTER_BLUR_ONLY)
+  // TODO(PROTOTYPE): Variable-strength quarter blur, not fixed-blur crossfade.
+#ifdef WHOLE_TEXT_OUTPUT
+  highp vec4 sharpColor = TEXTURE(sSharpSource, vTexCoord);
+#else
+  highp vec4 sharpColor = TEXTURE(sSharpSource, vRevealRectangle.xy + vTexCoord * vRevealRectangle.zw);
+#endif
+#ifdef QUARTER_BLUR_EFFECTIVE_RADIUS
+  // The existing output constraint supplies this line's actual blur strength.
+  // Only handoff uses authored radius; H/V sampling and timing stay unchanged.
+  const highp float SHARP_ONLY_EFFECTIVE_RADIUS = 2.0;
+  const highp float BLUR_ONLY_EFFECTIVE_RADIUS = 8.0;
+  highp float effectiveRadius = uQuarterAuthoredRadius * uAnimationRatio;
+  highp float t = (effectiveRadius - SHARP_ONLY_EFFECTIVE_RADIUS) / (BLUR_ONLY_EFFECTIVE_RADIUS - SHARP_ONLY_EFFECTIVE_RADIUS);
+#else
+  const highp float SHARP_ONLY_STRENGTH = 0.02;
+  const highp float BLUR_ONLY_STRENGTH = 0.40;
+  highp float t = (uAnimationRatio - SHARP_ONLY_STRENGTH) / (BLUR_ONLY_STRENGTH - SHARP_ONLY_STRENGTH);
+#endif
+  highp float blurMix = SmootherStep(t);
+#ifdef QUARTER_BLUR_BINARY_HANDOFF
+  blurMix = SmootherStep(blurMix);
+#endif
+#ifdef QUARTER_BLUR_DELAYED_SHARP
+  // Square the sharp weight: reveal less sharp detail while blur is broad,
+  // preserving the same smooth endpoints and forward/reverse progress mapping.
+  blurMix = blurMix * (2.0 - blurMix);
+#endif
+  // RGBA captures are premultiplied: interpolate color and coverage together.
+  // The alpha-only path reconstructs text color from the mixed red channel.
+  color = t <= 0.0 ? sharpColor : mix(sharpColor, color, blurMix);
 #endif
 #ifdef ALPHA_ONLY
   highp vec3 rgb = uTextColorAnimatable.a > 0.0 ? uTextColorAnimatable.rgb / uTextColorAnimatable.a : vec3(0.0);
@@ -412,8 +492,9 @@ void main()
 }
 )SHADER";
     shader = Shader::New(Dali::Integration::ToDaliStringView(batched ? std::string_view(vertex) : BASIC_VERTEX_SOURCE), Dali::Integration::ToDaliStringView(fragment),
-                         Shader::Hint::NONE, !batched ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT" : alphaOnly ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
-                                                                                                          : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
+                         Shader::Hint::NONE, quarterSource ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_LINE_PROTOTYPE" : "TEXT_REVEAL_QUARTER_BLUR_PROTOTYPE") : !batched  ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
+                                                                                                                                                          : alphaOnly ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
+                                                                                                                                                                      : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
     shader.RegisterProperty("viewEffectiveScale", 1.0f);
   }
   if(!Dali::Adaptor::IsAvailable())
@@ -557,7 +638,8 @@ public:
                    Property::Index progressIndex, uint32_t radius, float blurDuration,
                    std::vector<RuntimeRevealBlurSequence> sequences, bool singleColor,
                    std::unique_ptr<RuntimeRevealBlurDecorations> decorations,
-                   std::unique_ptr<RuntimeRevealBlurImages>      images)
+                   std::unique_ptr<RuntimeRevealBlurImages>      images,
+                   RuntimeRevealBlurSettings                     settings)
   : mForeground(foreground),
     mSourceTextures(foreground.GetTextures()),
     mSourceShader(foreground.GetShader()),
@@ -566,6 +648,7 @@ public:
                 std::ceil(size.y) + 2.0f * static_cast<float>(radius + 2u)),
     mRadius(radius),
     mBlurDuration(blurDuration),
+    mSettings(settings),
     mSingleColor(singleColor),
     mProgressIndex(progressIndex),
     mOwner(owner),
@@ -1019,6 +1102,12 @@ public:
         batches.push_back({index, 1u, lineSizes[index]});
       }
     }
+    const bool  quarterBlur           = mSettings.path == RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+    const float quarterAuthoredRadius = mSettings.authoredRadius;
+    // TODO(PROTOTYPE): Compare early 2D downsample with axis-aware downsample.
+    // Read only at creation. B retains Y until V can filter before decimation.
+    const char*                           axisAwareOption  = std::getenv("DALI_REVEAL_QUARTER_AXIS_AWARE");
+    const bool                            axisAwareQuarter = !axisAwareOption || std::strcmp(axisAwareOption, "0") != 0;
     ForegroundProperties                  foregroundProperties;
     std::vector<std::pair<size_t, Actor>> orderedOutputs;
     mPasses.resize(batches.size());
@@ -1052,26 +1141,39 @@ public:
       }
       if(batched)
       {
-        // Each page consumes source/H scratch before the next page overwrites
-        // it. Only V survives until composition. Never share across companions.
+        // Full resolution consumes source/H before the next page overwrites it.
+        // Late Smooth also samples source at composition, so only H is scratch
+        // in that path. Never share textures across companions or formats.
         for(size_t previous = 0u; previous < batchIndex; ++previous)
         {
           if(mPasses[previous].size == pass.size &&
              mPasses[previous].buffers[0u].GetColorTexture().GetPixelFormat() == targetFormat)
           {
-            pass.buffers[0u] = mPasses[previous].buffers[0u];
+            if(!quarterBlur)
+            {
+              pass.buffers[0u] = mPasses[previous].buffers[0u];
+            }
             pass.buffers[1u] = mPasses[previous].buffers[1u];
             break;
           }
         }
       }
-      for(auto& buffer : pass.buffers)
+      for(size_t bufferIndex = 0u; bufferIndex < pass.buffers.size(); ++bufferIndex)
       {
+        auto& buffer = pass.buffers[bufferIndex];
         if(!buffer)
         {
-          const auto width  = static_cast<uint32_t>(pass.size.x);
-          const auto height = static_cast<uint32_t>(pass.size.y);
-          buffer            = FrameBuffer::New(width, height, FrameBuffer::Attachment::NONE);
+          auto width  = static_cast<uint32_t>(pass.size.x);
+          auto height = static_cast<uint32_t>(pass.size.y);
+          if(quarterBlur && bufferIndex > 0u)
+          {
+            width = std::max(1u, static_cast<uint32_t>(std::ceil(pass.size.x * QUARTER_BLUR_SCALE)));
+            if(!axisAwareQuarter || bufferIndex == 2u)
+            {
+              height = std::max(1u, static_cast<uint32_t>(std::ceil(pass.size.y * QUARTER_BLUR_SCALE)));
+            }
+          }
+          buffer = FrameBuffer::New(width, height, FrameBuffer::Attachment::NONE);
           if(!Dali::Adaptor::IsAvailable())
           {
             return;
@@ -1187,6 +1289,15 @@ public:
             renderer.RegisterProperty("uOpacity", 1.0f);
             renderer.RegisterProperty("uOffsetDirection", i == 0u ? Vector2(1.0f / size.x, 0.0f)
                                                                   : Vector2(0.0f, 1.0f / size.y));
+            if(quarterBlur)
+            {
+              // Keep full-size camera/quads and normalized Gaussian offsets:
+              // H reads full Source; V reads reduced H but still offsets by
+              // sample/fullHeight, NOT sample/quarterHeight. Kernel unchanged.
+              const auto input = pass.buffers[i].GetColorTexture();
+              renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"),
+                                   Vector2(1.0f / input.GetWidth(), 1.0f / input.GetHeight()));
+            }
             renderer.RegisterProperty("uRevealSequenceStart", timing.start);
             // Use the same update-side progress as the source and blur strength.
             // Do not gate tasks: their clears and shared-scratch ordering remain
@@ -1216,13 +1327,25 @@ public:
         }
         if(!batched)
         {
-          Renderer output = alphaOnly ? CreateBlurOutput(mForeground, mForeground.GetGeometry(), true, false)
-                                      : CreatePlainOutput();
+          Renderer output = alphaOnly || quarterBlur ? CreateBlurOutput(mForeground, mForeground.GetGeometry(), alphaOnly, false, quarterBlur)
+                                                     : CreatePlainOutput();
           if(!Dali::Adaptor::IsAvailable() || !output)
           {
             return;
           }
           BindTexture(output, pass.buffers[2].GetColorTexture());
+          if(quarterBlur)
+          {
+            output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+            auto textures = output.GetTextures();
+            textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
+            textures.SetSampler(1u, textures.GetSampler(0u));
+            BlurStrength strength{timing.start, mBlurDuration};
+            const auto   index      = output.RegisterProperty("uAnimationRatio", strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
+            auto         constraint = Constraint::New<float>(output, index, strength);
+            constraint.AddSource(Source(owner, mProgressIndex));
+            constraint.Apply();
+          }
           output.SetProperty(Renderer::Property::BLEND_PRE_MULTIPLIED_ALPHA, true);
           output.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
           if(!Dali::Adaptor::IsAvailable())
@@ -1283,6 +1406,14 @@ public:
             renderer.RegisterProperty("uOpacity", 1.0f);
             renderer.RegisterProperty("uOffsetDirection", i == 0u ? Vector2(1.0f, 0.0f) : Vector2(0.0f, 1.0f));
             renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"), Vector2(1.0f / pass.size.x, 1.0f / pass.size.y));
+            if(quarterBlur)
+            {
+              // Vertex offsets still use each full-resolution line extent;
+              // only the input tile's half-texel clamp follows its resolution.
+              const auto input = pass.buffers[i].GetColorTexture();
+              renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"),
+                                   Vector2(1.0f / input.GetWidth(), 1.0f / input.GetHeight()));
+            }
             const float progressValue = owner.GetCurrentProperty<float>(mProgressIndex);
             const auto  progress      = renderer.RegisterProperty("uTextRevealBlurProgress", progressValue);
             if(!Dali::Adaptor::IsAvailable())
@@ -1320,17 +1451,32 @@ public:
           while(outputFirst < first + count)
           {
             size_t outputEnd = outputFirst + 1u;
-            while(outputEnd < first + count &&
+            // TODO(PROTOTYPE): One output draw per line is the smallest way to
+            // give the final mix exactly the same line-local strength as H/V.
+            while(!quarterBlur && outputEnd < first + count &&
                   (sequenceOrder.empty() || sequenceOrder[batch.first + outputEnd] == sequenceOrder[batch.first + outputEnd - 1u] + 1u))
             {
               ++outputEnd;
             }
-            Renderer output = CreateBlurOutput(mForeground, CreateBlurBatchGeometry(outputVertices.data() + outputFirst * 4u, static_cast<uint32_t>(outputEnd - outputFirst)), alphaOnly, true);
+            Renderer output = CreateBlurOutput(mForeground, CreateBlurBatchGeometry(outputVertices.data() + outputFirst * 4u, static_cast<uint32_t>(outputEnd - outputFirst)), alphaOnly, true, quarterBlur);
             if(!Dali::Adaptor::IsAvailable() || !output)
             {
               return;
             }
             BindTexture(output, pass.buffers[2].GetColorTexture());
+            if(quarterBlur)
+            {
+              output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+              auto textures = output.GetTextures();
+              textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
+              textures.SetSampler(1u, textures.GetSampler(0u));
+              const auto&  timing = mSequences[batch.first + outputFirst];
+              BlurStrength strength{timing.start, mBlurDuration};
+              const auto   index      = output.RegisterProperty("uAnimationRatio", strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
+              auto         constraint = Constraint::New<float>(output, index, strength);
+              constraint.AddSource(Source(owner, mProgressIndex));
+              constraint.Apply();
+            }
             output.SetProperty(Renderer::Property::BLEND_PRE_MULTIPLIED_ALPHA, true);
             output.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
             if(!Dali::Adaptor::IsAvailable())
@@ -1416,8 +1562,7 @@ protected:
         pass.tasks[i].SetFrameBuffer(pass.buffers[i]);
         pass.tasks[i].SetClearEnabled(true);
         pass.tasks[i].SetClearColor(Color::TRANSPARENT);
-        // TODO(PROTOTYPE): Evaluate half-rate Source/H/V updates together.
-        pass.tasks[i].SetRefreshRate(2u);
+        pass.tasks[i].SetRefreshRate(RenderTask::REFRESH_ALWAYS);
       }
     }
     if(mDecorations)
@@ -1468,22 +1613,23 @@ protected:
   }
 
 private:
-  Renderer          mForeground;
-  TextureSet        mSourceTextures;
-  Shader            mSourceShader;
-  Shader            mForegroundShader;
-  Shader            mCaptureShader;
-  bool              mForegroundBorrowed{false};
-  bool              mReleased{false};
-  bool              mPerLine{false};
-  Vector2           mContentSize;
-  Vector2           mTargetSize;
-  uint32_t          mRadius;
-  float             mBlurDuration;
-  bool              mSingleColor;
-  Property::Index   mProgressIndex;
-  WeakHandle<Actor> mOwner;
-  Actor             mForegroundActor;
+  Renderer                  mForeground;
+  TextureSet                mSourceTextures;
+  Shader                    mSourceShader;
+  Shader                    mForegroundShader;
+  Shader                    mCaptureShader;
+  bool                      mForegroundBorrowed{false};
+  bool                      mReleased{false};
+  bool                      mPerLine{false};
+  Vector2                   mContentSize;
+  Vector2                   mTargetSize;
+  uint32_t                  mRadius;
+  float                     mBlurDuration;
+  RuntimeRevealBlurSettings mSettings;
+  bool                      mSingleColor;
+  Property::Index           mProgressIndex;
+  WeakHandle<Actor>         mOwner;
+  Actor                     mForegroundActor;
   struct Pass
   {
     Vector2                     size;
@@ -1758,11 +1904,23 @@ Rect<int32_t> ResolveRuntimeRevealBlurTarget(Renderer foreground, const Vector2&
   return right > left && bottom > top ? Rect<int32_t>(left, top, right - left, bottom - top) : full;
 }
 
+RuntimeRevealBlurSettings ResolveRuntimeRevealBlurSettings(float authoredRadius)
+{
+  const char* path = std::getenv("DALI_REVEAL_BLUR_PATH");
+  // Below Late Smooth's blur-only anchor the effect would start partly sharp
+  // (or be entirely sharp at <= 2px). Preserve small-radius blur with the
+  // original path instead of changing the selected handoff curve.
+  const bool fullResolution = (path && std::strcmp(path, "full") == 0) || !(authoredRadius >= 8.0f);
+  return {fullResolution ? RuntimeRevealBlurPath::FULL_RESOLUTION : RuntimeRevealBlurPath::AXIS_AWARE_QUARTER,
+          authoredRadius};
+}
+
 Actor PrepareRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& size,
                                Property::Index progressIndex, uint32_t radius, float blurDuration,
                                std::vector<RuntimeRevealBlurSequence> sequences, bool singleColor,
                                std::unique_ptr<RuntimeRevealBlurDecorations> decorations,
-                               std::unique_ptr<RuntimeRevealBlurImages>      images)
+                               std::unique_ptr<RuntimeRevealBlurImages>      images,
+                               RuntimeRevealBlurSettings                     settings)
 {
   if(!Dali::Adaptor::IsAvailable() || !Ui::View::DownCast(owner) || !foreground || !Dali::Integration::SceneHolder::Get(owner) ||
      !foreground.GetTextures() || foreground.GetTextures().GetTextureCount() == 0u || !foreground.GetTextures().GetTexture(0u) ||
@@ -1800,7 +1958,11 @@ Actor PrepareRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& 
       return {};
     }
   }
-  auto*       impl = new RuntimeBlurActor(owner, foreground, size, progressIndex, radius, blurDuration, std::move(sequences), singleColor, std::move(decorations), std::move(images));
+  if(!(settings.authoredRadius > 0.0f) || !std::isfinite(settings.authoredRadius))
+  {
+    settings.authoredRadius = static_cast<float>(radius);
+  }
+  auto*       impl = new RuntimeBlurActor(owner, foreground, size, progressIndex, radius, blurDuration, std::move(sequences), singleColor, std::move(decorations), std::move(images), settings);
   CustomActor companion(*impl);
   if(!Dali::Adaptor::IsAvailable() || !Dali::Integration::SceneHolder::Get(owner))
   {
@@ -1841,10 +2003,11 @@ Actor CreateRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& s
                               Property::Index progressIndex, uint32_t radius, float blurDuration,
                               std::vector<RuntimeRevealBlurSequence> sequences, bool singleColor,
                               std::unique_ptr<RuntimeRevealBlurDecorations> decorations,
-                              std::unique_ptr<RuntimeRevealBlurImages>      images)
+                              std::unique_ptr<RuntimeRevealBlurImages>      images,
+                              RuntimeRevealBlurSettings                     settings)
 {
   auto companion = PrepareRuntimeRevealBlur(owner, foreground, size, progressIndex, radius, blurDuration,
-                                            std::move(sequences), singleColor, std::move(decorations), std::move(images));
+                                            std::move(sequences), singleColor, std::move(decorations), std::move(images), settings);
   if(!ActivateRuntimeRevealBlur(companion, owner))
   {
     RemoveRuntimeRevealBlur(companion, owner);

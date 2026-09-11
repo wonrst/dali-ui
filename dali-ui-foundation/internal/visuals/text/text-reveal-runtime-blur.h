@@ -31,6 +31,34 @@
 namespace DALI_NAMESPACE::Ui::Internal
 {
 /**
+ * @brief Selects the runtime sampling path independently of Reveal timing.
+ *
+ * FULL_RESOLUTION retains the original source/H/V pipeline. AXIS_AWARE_QUARTER
+ * reduces X in H, then Y in V, and blends back to the full-resolution source.
+ * This is an internal choice, not a public quality-level contract.
+ */
+enum class RuntimeRevealBlurPath
+{
+  FULL_RESOLUTION,
+  AXIS_AWARE_QUARTER
+};
+
+struct RuntimeRevealBlurSettings
+{
+  RuntimeRevealBlurPath path{RuntimeRevealBlurPath::FULL_RESOLUTION};
+  float                 authoredRadius{0.0f}; ///< Display-pixel radius from the validated publication, before kernel rounding.
+};
+
+/**
+ * @brief Resolves the creation-time sampling policy for a validated publication.
+ *
+ * DALI_REVEAL_BLUR_PATH=full keeps the original path available for comparison.
+ * The default is axis-aware quarter resolution with Late Smooth handoff.
+ * Display radii below its 8px blur-only anchor retain full resolution.
+ */
+RuntimeRevealBlurSettings ResolveRuntimeRevealBlurSettings(float authoredRadius);
+
+/**
  * @brief Keeps one final line's source textures, rectangle and sequence start.
  *
  * The start comes from the final Reveal plan, including PIXEL progression.
@@ -118,7 +146,8 @@ Actor CreateRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& s
                               std::vector<RuntimeRevealBlurSequence>        sequences   = {},
                               bool                                          singleColor = false,
                               std::unique_ptr<RuntimeRevealBlurDecorations> decorations = {},
-                              std::unique_ptr<RuntimeRevealBlurImages>      images      = {});
+                              std::unique_ptr<RuntimeRevealBlurImages>      images      = {},
+                              RuntimeRevealBlurSettings                     settings    = {});
 
 /**
  * @brief Builds detached resources without borrowing the published renderer.
@@ -130,7 +159,8 @@ Actor PrepareRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& 
                                Property::Index progressIndex, uint32_t radius, float blurDuration,
                                std::vector<RuntimeRevealBlurSequence> sequences, bool singleColor,
                                std::unique_ptr<RuntimeRevealBlurDecorations> decorations,
-                               std::unique_ptr<RuntimeRevealBlurImages>      images);
+                               std::unique_ptr<RuntimeRevealBlurImages>      images,
+                               RuntimeRevealBlurSettings                     settings = {});
 
 /**
  * @brief Borrows the foreground and connects a previously validated candidate.

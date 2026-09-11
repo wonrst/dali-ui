@@ -3155,11 +3155,14 @@ bool TextVisual::PublishPreparedRevealBlur(Actor actor, const PreparedRevealBlur
   {
     return false;
   }
-  const auto  padding        = ownerView.GetPadding();
-  const auto  effectiveScale = GetImpl(ownerView).GetEffectiveScale();
-  const auto& options        = prepared.options;
-  const auto  maximum        = Dali::GetMaxTextureSize();
-  const float halo           = 2.0f * static_cast<float>(options.radius + 2u);
+  const auto padding        = ownerView.GetPadding();
+  const auto effectiveScale = GetImpl(ownerView).GetEffectiveScale();
+  // Capture the authored display radius from this revision, not a later Label
+  // getter during runtime allocation (which can reenter or publish asynchronously).
+  const auto  blurSettings = ResolveRuntimeRevealBlurSettings(data->blurRadius * effectiveScale);
+  const auto& options      = prepared.options;
+  const auto  maximum      = Dali::GetMaxTextureSize();
+  const float halo         = 2.0f * static_cast<float>(options.radius + 2u);
   // Async text constraints may be ceil-rounded before fractional UI padding
   // is restored. Capture uses the actual owner's uSize, as the text vertex
   // shader does, rather than that rounded layout constraint.
@@ -3366,7 +3369,7 @@ bool TextVisual::PublishPreparedRevealBlur(Actor actor, const PreparedRevealBlur
                                               !mTextShaderFeatureCache.IsEnabledMultiColor() && !mTextShaderFeatureCache.IsEnabledEmoji() &&
                                                 !mTextShaderFeatureCache.IsEnabledAnyTextGradient() && !mTextShaderFeatureCache.IsEnabledTextGradientOverlay() &&
                                                 !mController->IsTextCutout(),
-                                              std::move(decorations), std::move(images));
+                                              std::move(decorations), std::move(images), blurSettings);
   if(!runtimeBlur)
   {
     return false;

@@ -263,6 +263,111 @@ std::vector<Ui::Internal::RuntimeRevealBlurBatch> FourLineBatches(const std::vec
 }
 } // unnamed namespace
 
+int UtcDaliTextRevealRuntimeGaussianSamplingPathsP(void)
+{
+  using Ui::Internal::RuntimeRevealBlurPath;
+  UiTestApplication application;
+  const auto tasks = application.GetScene().GetRenderTaskList();
+  for(bool perLine : {false, true})
+  {
+    for(bool alphaOnly : {true, false, true})
+    {
+      Label label = MakeLabel(application);
+      const auto foreground = label.GetRendererAt(0u);
+      for(auto path : {RuntimeRevealBlurPath::FULL_RESOLUTION, RuntimeRevealBlurPath::AXIS_AWARE_QUARTER})
+      {
+        std::vector<Ui::Internal::RuntimeRevealBlurSequence> sequences;
+        if(perLine)
+        {
+          sequences.resize(2u);
+          for(uint32_t index = 0u; index < 2u; ++index)
+          {
+            sequences[index].textures = foreground.GetTextures();
+            sequences[index].textureRect = Vector4(0.0f, 0.0f, 1.0f, 1.0f);
+            sequences[index].lineIndex = index;
+            sequences[index].start = static_cast<float>(index) * 0.25f;
+          }
+        }
+        const bool reduced = path == RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+        auto companion = Ui::Internal::CreateRuntimeRevealBlur(label, foreground, Vector2(360.0f, 72.0f),
+                                                               label.GetPropertyIndex("uTextRevealProgress"), 16u, 0.5f,
+                                                               std::move(sequences), alphaOnly, {}, {}, {path, 15.5f});
+        DALI_TEST_CHECK(companion);
+        Settle(application);
+        DALI_TEST_EQUALS(tasks.GetTaskCount(), 4u, TEST_LOCATION);
+        Texture source, horizontal, vertical;
+        for(uint32_t index = 1u; index < tasks.GetTaskCount(); ++index)
+        {
+          const auto task = tasks.GetTask(index);
+          const auto name = task.GetSourceActor().GetProperty<Dali::String>(Actor::Property::NAME);
+          const auto texture = task.GetFrameBuffer().GetColorTexture();
+          DALI_TEST_EQUALS(texture.GetPixelFormat(), alphaOnly ? Pixel::A8 : Pixel::RGBA8888, TEST_LOCATION);
+          DALI_TEST_EQUALS(task.GetRefreshRate(), static_cast<uint32_t>(RenderTask::REFRESH_ALWAYS), TEST_LOCATION);
+          if(name == (perLine ? "RevealGaussianBatchSource" : "RevealGaussianSource"))
+          {
+            source = texture;
+          }
+          if(name == (perLine ? "RevealGaussianBatchH" : "RevealGaussianH"))
+          {
+            horizontal = texture;
+          }
+          if(name == (perLine ? "RevealGaussianBatchV" : "RevealGaussianV"))
+          {
+            vertical = texture;
+          }
+        }
+        DALI_TEST_CHECK(source && horizontal && vertical);
+        DALI_TEST_EQUALS(horizontal.GetWidth(), reduced ? (source.GetWidth() + 3u) / 4u : source.GetWidth(), TEST_LOCATION);
+        DALI_TEST_EQUALS(horizontal.GetHeight(), source.GetHeight(), TEST_LOCATION);
+        DALI_TEST_EQUALS(vertical.GetWidth(), horizontal.GetWidth(), TEST_LOCATION);
+        DALI_TEST_EQUALS(vertical.GetHeight(), reduced ? (source.GetHeight() + 3u) / 4u : source.GetHeight(), TEST_LOCATION);
+        const auto outputs = Passes(companion, "RevealGaussianOutput");
+        DALI_TEST_EQUALS(outputs.size(), static_cast<size_t>(reduced && perLine ? 2u : 1u), TEST_LOCATION);
+        for(auto output : outputs)
+        {
+          DALI_TEST_EQUALS(output.GetTextures().GetTexture(0u), vertical, TEST_LOCATION);
+          DALI_TEST_EQUALS(output.GetTextures().GetTextureCount(), reduced ? 2u : 1u, TEST_LOCATION);
+          if(reduced)
+          {
+            DALI_TEST_EQUALS(output.GetTextures().GetTexture(1u), source, TEST_LOCATION);
+            DALI_TEST_EQUALS(output.GetProperty<float>(output.GetPropertyIndex("uQuarterAuthoredRadius")), 15.5f, TEST_LOCATION);
+            const auto program = output.GetShader().GetProperty(Shader::Property::PROGRAM);
+            Dali::String fragment;
+            DALI_TEST_CHECK(program.GetMap()->Find("fragment")->Get(fragment));
+            const std::string code(fragment.CStr());
+            DALI_TEST_CHECK((code.find("#define ALPHA_ONLY\n") != std::string::npos) == alphaOnly);
+            DALI_TEST_CHECK(code.find("mix(sharpColor, color, blurMix)") != std::string::npos);
+          }
+        }
+        for(float progress : {0.0f, 0.2f, 0.4f, 0.6f, 1.0f, 0.4f, 0.0f})
+        {
+          label.SetTextRevealProgress(progress);
+          Settle(application);
+          if(reduced)
+          {
+            const auto lines = BlurLines(companion);
+            DALI_TEST_EQUALS(lines.size(), outputs.size(), TEST_LOCATION);
+            for(size_t index = 0u; index < outputs.size(); ++index)
+            {
+              DALI_TEST_EQUALS(outputs[index].GetCurrentProperty<float>(outputs[index].GetPropertyIndex("uAnimationRatio")),
+                               lines[index].Strength(), 0.0001f, TEST_LOCATION);
+            }
+          }
+        }
+        // The output binds the existing Source, not a copied sharp texture.
+        // Remove returns the original foreground regardless of the chosen path.
+        Ui::Internal::RemoveRuntimeRevealBlur(companion, label);
+        Settle(application);
+        DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+        DALI_TEST_EQUALS(label.GetRendererAt(0u), foreground, TEST_LOCATION);
+      }
+      label.Unparent();
+      Settle(application);
+    }
+  }
+  END_TEST;
+}
+
 int UtcDaliTextRevealRuntimeGaussianBatchLimitsP(void)
 {
   using Ui::Internal::BuildRuntimeRevealBlurBatches;
@@ -465,7 +570,8 @@ int UtcDaliTextRevealRuntimeGaussianBatchFormatLifecycleP(void)
   DALI_TEST_EQUALS(BlurLines(label).size(), static_cast<size_t>(12u), TEST_LOCATION);
   DALI_TEST_EQUALS(Passes(label, "RevealGaussianBatchH").size(), static_cast<size_t>(1u), TEST_LOCATION);
   DALI_TEST_EQUALS(Passes(label, "RevealGaussianBatchV").size(), static_cast<size_t>(1u), TEST_LOCATION);
-  DALI_TEST_EQUALS(Passes(label, "RevealGaussianOutput").size(), static_cast<size_t>(1u), TEST_LOCATION);
+  const bool lateSmooth = Ui::Internal::ResolveRuntimeRevealBlurSettings(16.0f).path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+  DALI_TEST_EQUALS(Passes(label, "RevealGaussianOutput").size(), static_cast<size_t>(lateSmooth ? 12u : 1u), TEST_LOCATION);
   DALI_TEST_EQUALS(tasks.GetTaskCount(), 4u, TEST_LOCATION);
   auto checkFormat = [&](Pixel::Format format)
   {
@@ -794,11 +900,13 @@ int UtcDaliTextRevealRuntimeGaussianSharedForegroundP(void)
           }
         };
         visit(visit, host);
-        // One page has constant actor overhead, including three built-in
-        // cameras. Independent line renderers and their timing are retained.
-        DALI_TEST_EQUALS(actors - cameras, 7u, TEST_LOCATION);
+        // Full resolution batches output. Late Smooth currently uses one output
+        // per line to bind the same line-local strength as the H/V draws.
+        const bool lateSmooth = Ui::Internal::ResolveRuntimeRevealBlurSettings(16.0f).path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+        const auto extraOutputs = lateSmooth ? count - 1u : 0u;
+        DALI_TEST_EQUALS(actors - cameras, 7u + extraOutputs, TEST_LOCATION);
         DALI_TEST_EQUALS(cameras, 3u, TEST_LOCATION);
-        DALI_TEST_EQUALS(renderers, count + 4u, TEST_LOCATION);
+        DALI_TEST_EQUALS(renderers, count + 4u + extraOutputs, TEST_LOCATION);
         DALI_TEST_EQUALS(BlurLines(host).size(), static_cast<size_t>(count), TEST_LOCATION);
         application.GetScene().Remove(label);
         Settle(application);
@@ -847,7 +955,8 @@ int UtcDaliTextRevealRuntimeGaussianDrawBatchBoundaryP(void)
   const auto vertical   = Passes(label, "RevealGaussianBatchV");
   DALI_TEST_EQUALS(horizontal.size(), static_cast<size_t>(2u), TEST_LOCATION);
   DALI_TEST_EQUALS(vertical.size(), horizontal.size(), TEST_LOCATION);
-  DALI_TEST_EQUALS(Passes(label, "RevealGaussianOutput").size(), horizontal.size(), TEST_LOCATION);
+  const bool lateSmooth = Ui::Internal::ResolveRuntimeRevealBlurSettings(2.0f).path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+  DALI_TEST_EQUALS(Passes(label, "RevealGaussianOutput").size(), lateSmooth ? static_cast<size_t>(limit + 1u) : horizontal.size(), TEST_LOCATION);
   DALI_TEST_CHECK(horizontal[0].GetGeometry() != vertical[0].GetGeometry());
   DALI_TEST_CHECK(horizontal[1].GetGeometry() != vertical[1].GetGeometry());
   const auto lines         = BlurLines(label);
@@ -1813,14 +1922,20 @@ int UtcDaliTextRevealRuntimeGaussianCroppedGeometryP(void)
         }
       }
       size_t outputIndex = 0u;
+      const bool lateSmooth = Ui::Internal::ResolveRuntimeRevealBlurSettings(32.0f).path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
       for(uint32_t taskIndex = 1u; taskIndex < tasks.GetTaskCount(); ++taskIndex)
       {
         auto task    = tasks.GetTask(taskIndex);
         auto source  = task.GetSourceActor();
         auto texture = task.GetFrameBuffer().GetColorTexture();
         actualArea += static_cast<uint64_t>(texture.GetWidth()) * texture.GetHeight();
-        DALI_TEST_EQUALS(source.GetCurrentProperty<Vector3>(Actor::Property::SIZE).x, static_cast<float>(texture.GetWidth()), TEST_LOCATION);
-        DALI_TEST_EQUALS(source.GetCurrentProperty<Vector3>(Actor::Property::SIZE).y, static_cast<float>(texture.GetHeight()), TEST_LOCATION);
+        // The camera and geometry retain full coordinates even when H/V render
+        // into smaller targets. Only Source's pixel dimensions must match here.
+        if(!lateSmooth || source.GetProperty<Dali::String>(Actor::Property::NAME) == "RevealGaussianBatchSource")
+        {
+          DALI_TEST_EQUALS(source.GetCurrentProperty<Vector3>(Actor::Property::SIZE).x, static_cast<float>(texture.GetWidth()), TEST_LOCATION);
+          DALI_TEST_EQUALS(source.GetCurrentProperty<Vector3>(Actor::Property::SIZE).y, static_cast<float>(texture.GetHeight()), TEST_LOCATION);
+        }
         Actor foreground = Find(source, "RevealGaussianLineForeground");
         if(foreground)
         {
@@ -1857,9 +1972,18 @@ int UtcDaliTextRevealRuntimeGaussianCroppedGeometryP(void)
               expectedVertices.insert(expectedVertices.end(), {position.x, position.y, uv.x, uv.y,
                                                                rectangle.x, rectangle.y, rectangle.z, rectangle.w});
             }
+            if(lateSmooth)
+            {
+              DALI_TEST_CHECK(HasUploadedBatchVertices(application, expectedVertices));
+              DALI_TEST_EQUALS(outputs[outputIndex++].GetCurrentProperty<Vector3>(Actor::Property::POSITION), Vector3::ZERO, 0.0001f, TEST_LOCATION);
+              expectedVertices.clear();
+            }
           }
-          DALI_TEST_CHECK(HasUploadedBatchVertices(application, expectedVertices));
-          DALI_TEST_EQUALS(outputs[outputIndex++].GetCurrentProperty<Vector3>(Actor::Property::POSITION), Vector3::ZERO, 0.0001f, TEST_LOCATION);
+          if(!lateSmooth)
+          {
+            DALI_TEST_CHECK(HasUploadedBatchVertices(application, expectedVertices));
+            DALI_TEST_EQUALS(outputs[outputIndex++].GetCurrentProperty<Vector3>(Actor::Property::POSITION), Vector3::ZERO, 0.0001f, TEST_LOCATION);
+          }
         }
       }
       DALI_TEST_EQUALS(outputIndex, outputs.size(), TEST_LOCATION);
@@ -1926,6 +2050,7 @@ int UtcDaliTextRevealRuntimeGaussianSharedScratchP(void)
   reveal.SetBlurRadius(32.0f);
   label.SetTextReveal(reveal);
   const auto tasks = application.GetScene().GetRenderTaskList();
+  const bool lateSmooth = Ui::Internal::ResolveRuntimeRevealBlurSettings(32.0f).path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
   for(int connection = 0; connection < 2; ++connection)
   {
     Settle(application);
@@ -1964,7 +2089,9 @@ int UtcDaliTextRevealRuntimeGaussianSharedScratchP(void)
         const bool equal = a.GetWidth() == b.GetWidth() && a.GetHeight() == b.GetHeight();
         shared |= equal;
         differentSize |= !equal;
-        DALI_TEST_CHECK((a == b) == equal);
+        // Late Smooth retains each page's sharp source through composition;
+        // the original full-resolution path can reuse source as scratch.
+        DALI_TEST_CHECK((a == b) == (equal && !lateSmooth));
         DALI_TEST_CHECK((ordered[index + 1u].GetFrameBuffer() == ordered[previous + 1u].GetFrameBuffer()) == equal);
         DALI_TEST_CHECK(ordered[index + 2u].GetFrameBuffer() != ordered[previous + 2u].GetFrameBuffer());
         // The previous sequence has consumed its scratch before any overwrite.
@@ -1973,6 +2100,22 @@ int UtcDaliTextRevealRuntimeGaussianSharedScratchP(void)
     }
     DALI_TEST_CHECK(shared);
     DALI_TEST_CHECK(differentSize);
+    if(lateSmooth)
+    {
+      for(auto output : Passes(label, "RevealGaussianOutput"))
+      {
+        bool matched = false;
+        for(size_t index = 0u; index < ordered.size(); index += 3u)
+        {
+          if(output.GetTextures().GetTexture(0u) == ordered[index + 2u].GetFrameBuffer().GetColorTexture())
+          {
+            DALI_TEST_EQUALS(output.GetTextures().GetTexture(1u), ordered[index].GetFrameBuffer().GetColorTexture(), TEST_LOCATION);
+            matched = true;
+          }
+        }
+        DALI_TEST_CHECK(matched);
+      }
+    }
     application.GetScene().Remove(label);
     Settle(application);
     DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
@@ -2221,6 +2364,12 @@ int UtcDaliTextRevealRuntimeGaussianMinimumRadiusP(void)
       }
       DALI_TEST_CHECK(host);
       const uint32_t kernelRadius = radius > 4.0f ? 6u : 4u;
+      // Small authored radii must still blur, not disappear inside the sharp
+      // handoff interval of the downsampled path.
+      for(auto output : Passes(label, "RevealGaussianOutput"))
+      {
+        DALI_TEST_EQUALS(output.GetPropertyIndex("uQuarterAuthoredRadius"), Property::INVALID_INDEX, TEST_LOCATION);
+      }
       const auto     contentSize  = label.GetCurrentProperty<Vector3>(Actor::Property::SIZE);
       const Vector3  targetSize(std::ceil(contentSize.x) + 2.0f * static_cast<float>(kernelRadius + 2u),
                                 std::ceil(contentSize.y) + 2.0f * static_cast<float>(kernelRadius + 2u), 0.0f);
@@ -3671,6 +3820,15 @@ int UtcDaliTextRevealRuntimeGaussianScaleP(void)
         DALI_TEST_EQUALS(foreground.GetCurrentProperty<Vector3>(Actor::Property::SIZE),
                          label.GetCurrentProperty<Vector3>(Actor::Property::SIZE), 0.0001f, TEST_LOCATION);
         DALI_TEST_EQUALS(tasks.GetTaskCount(), baseline + 3u, TEST_LOCATION);
+        for(auto output : Passes(label, "RevealGaussianOutput"))
+        {
+          const auto radiusIndex = output.GetPropertyIndex("uQuarterAuthoredRadius");
+          if(radiusIndex != Property::INVALID_INDEX)
+          {
+            // Render scale changes raster density, not the display-pixel handoff.
+            DALI_TEST_EQUALS(output.GetProperty<float>(radiusIndex), 16.0f * scale, 0.0001f, TEST_LOCATION);
+          }
+        }
         for(float progress : {0.0f, 0.4f, 1.0f, 0.4f, 0.0f})
         {
           label.SetTextRevealProgress(progress);

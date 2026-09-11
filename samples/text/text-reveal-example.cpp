@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -295,6 +296,18 @@ public:
 private:
   void OnInit(Application application)
   {
+    // TODO(PROTOTYPE): Match the creation-time choice used by Runtime Blur.
+    const char* axisAwareOption = std::getenv("DALI_REVEAL_QUARTER_AXIS_AWARE");
+    mQuarterAxisAware = !axisAwareOption || std::string(axisAwareOption) != "0";
+    const char* blurPath = std::getenv("DALI_REVEAL_BLUR_PATH");
+    mFullResolutionBlur = blurPath && std::string(blurPath) == "full";
+    const char* softTakeoverOption = std::getenv("DALI_REVEAL_QUARTER_SOFT_TAKEOVER");
+    mQuarterSoftTakeover = softTakeoverOption && std::string(softTakeoverOption) == "1";
+    const char* handoffOption = std::getenv("DALI_REVEAL_QUARTER_HANDOFF");
+    mQuarterHandoff = handoffOption && std::string(handoffOption) == "0" ? 0
+                     : handoffOption && std::string(handoffOption) == "2" ? 2 : 1;
+    const char* blurOnlyOption = std::getenv("DALI_REVEAL_QUARTER_BLUR_ONLY");
+    mQuarterBlurOnly = blurOnlyOption && std::string(blurOnlyOption) == "1";
     Window window = application.GetWindow();
     window.SetBackgroundColor(UiColor(0xF8FAFC));
     window.KeyEventSignal().Connect(this, &TextRevealController::OnKeyEvent);
@@ -1282,7 +1295,25 @@ private:
                                              ? GetFadeDescription()
                                              : "Reveal is unset with Text::Reveal::None(); progress is preserved.";
     std::ostringstream status;
-    status << std::fixed << std::setprecision(0)
+    const char* handoffDescription = mQuarterBlurOnly ? "BLUR ONLY diagnostic (no sharp endpoint)"
+                                    : mQuarterHandoff == 2 ? "Late Binary 8px -> 2px"
+                                    : mQuarterHandoff == 1 ? "Late Smooth 8px -> 2px"
+                                    : mQuarterSoftTakeover ? "Current Soft .40 -> .02"
+                                                           : "Current .40 -> .02";
+    // TODO(PROTOTYPE): Keep this experiment identifiable without another panel.
+    if(mFullResolutionBlur || mBlurRadius * mUiScale < 8.0f)
+    {
+      status << "FULL RESOLUTION | Source / H / V 1.0x"
+             << (mFullResolutionBlur ? "\n" : " (small radius)\n");
+    }
+    else
+    {
+      status << "QUARTER BLUR | Source 1.0x / V 0.25x\n"
+           << (mQuarterAxisAware ? "B: H 0.25x / 1.00y\n" : "A: H 0.25x / 0.25y\n")
+           << "Handoff: " << handoffDescription << "\n";
+    }
+    status << SEQUENCE_STATUS_LABELS[mSequenceIndex] << "\n"
+           << std::fixed << std::setprecision(0)
            << "Label " << mPreviewWidth << " x " << mPreviewHeight
            << " | Scale " << std::setprecision(1) << mUiScale
            << " | " << (mAsync ? "Async" : "Sync")
@@ -1296,7 +1327,9 @@ private:
              << " / " << GetFillStatusLabel() << "\n"
              << revealDescription
              << "\nDuration includes Reveal + blur; there is no extra tail. Blur Time is relative to one common sequence interval. Alpha affects both effects."
-             << "\np=1 is sharp. Reverse retraces progress. Reflow remaps the current clock. ImageSpan shares its sequence timing.";
+             << (mQuarterBlurOnly ? "\nBlur-only diagnostic: p=1 is quarter reconstruction, not full-resolution sharp."
+                                  : "\np=1 is sharp.")
+             << " Reverse retraces progress. Reflow remaps the current clock. ImageSpan shares its sequence timing.";
       if(mBlurEnabled && GetBlurBypassReason())
       {
         status << "\nBlur bypassed: " << GetBlurBypassReason();
@@ -1403,27 +1436,32 @@ private:
   bool                                   mUxSecondEntrance{false};
   bool                                   mUxPreviewHidden{false};
   std::string                            mPlaybackStatus;
-  Text::Reveal::Unit                     mUnit{Text::Reveal::Unit::CHARACTER};
-  std::size_t                            mSequenceIndex{0u};
+  Text::Reveal::Unit                     mUnit{Text::Reveal::Unit::PIXEL};
+  std::size_t                            mSequenceIndex{1u};
   std::size_t                            mTextCaseIndex{DEFAULT_TEXT_CASE_INDEX};
   std::size_t                            mAlphaFunctionIndex{0u};
-  float                                  mManualFade{0.25f};
-  float                                  mStaggerRatio{0.0f};
+  float                                  mManualFade{0.0f};
+  float                                  mStaggerRatio{0.25f};
   float                                  mDurationSeconds{4.0f};
-  float                                  mBlurRadius{32.0f};
+  float                                  mBlurRadius{40.0f};
   float                                  mBlurDurationRatio{1.0f};
   float                                  mPreviewWidth{550.0f};
   float                                  mPreviewHeight{300.0f};
-  bool                                   mAutoFade{true};
+  bool                                   mAutoFade{false};
   bool                                   mFitPreview{true};
   bool                                   mShowDetails{false};
-  bool                                   mBlurEnabled{false};
+  bool                                   mBlurEnabled{true};
   bool                                   mAsync{false};
-  FillMode                               mFillMode{FillMode::TEXT_GRADIENT};
+  FillMode                               mFillMode{FillMode::WHITE_ON_BLACK};
   bool                                   mRevealEnabled{true};
   bool                                   mAnimationRunning{false};
   float                                  mAnimationTarget{1.0f};
   float                                  mUiScale{1.0f};
+  bool                                   mFullResolutionBlur{false};
+  bool                                   mQuarterAxisAware{true};
+  bool                                   mQuarterSoftTakeover{false};
+  int                                    mQuarterHandoff{1};
+  bool                                   mQuarterBlurOnly{false};
 };
 
 int DALI_EXPORT_API main(int argc, char** argv)
