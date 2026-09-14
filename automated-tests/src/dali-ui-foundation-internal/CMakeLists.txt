@@ -17,6 +17,7 @@ SET(TC_SOURCES
     utc-Dali-LayoutDependencyScope-internal.cpp
     utc-Dali-GradientFactory-internal.cpp
     utc-Dali-GradientVisualSemantics-internal.cpp
+    utc-Dali-TextAbstractionOwnership-internal.cpp
     utc-Dali-TextGradientBaseline-internal.cpp
     utc-Dali-TextGradientGlyphClassification-internal.cpp
     utc-Dali-MarkupToStyledText-internal.cpp
@@ -32,6 +33,7 @@ SET(TC_SOURCES
     utc-Dali-TextGradientShaderComposition-internal.cpp
     utc-Dali-TextGradientTypesetterMask-internal.cpp
     utc-Dali-TextReveal-internal.cpp
+    utc-Dali-TextRevealRuntimeBlur-internal.cpp
     utc-Dali-TextGradientPropertyData-internal.cpp
     utc-Dali-TextGradientVisualMaskPlumbing-internal.cpp
     utc-Dali-TextVisualAsyncPublication-internal.cpp

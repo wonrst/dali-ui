@@ -31,13 +31,12 @@ namespace Text
 /**
  * @brief Describes how visible text and inline ImageSpan content are revealed.
  *
- * Reveal controls how content becomes visible as TextRevealProgress advances
- * from 0.0 to 1.0. Applications control playback duration by animating
- * TextRevealProgress.
+ * TextRevealProgress controls visibility from 0.0 (hidden) to 1.0 (visible).
+ * Applications control playback by animating this property.
  *
- * Unit selects the reveal granularity, while Sequence selects whether reveal
- * units share one timeline across the whole visible content or use an
- * independent timeline for each final visible line.
+ * Unit selects CHARACTER, WORD, LINE, or continuous PIXEL progression.
+ * Sequence selects one WHOLE_TEXT timeline or independent PER_LINE timelines
+ * for the final visible layout lines.
  *
  * Reveal affects the text foreground and inline ImageSpan content. ImageSpan
  * content reveals as an atomic item in CHARACTER, WORD, and LINE modes, and
@@ -49,7 +48,20 @@ namespace Text
  * and the visible ellipsis participates in the reveal progression.
  *
  * By default, Reveal uses CHARACTER with WHOLE_TEXT sequencing, no sequence
- * stagger, and an automatically resolved fade duration.
+ * stagger, an automatically resolved fade duration, and no blur.
+ *
+ * Blur uses the same TextRevealProgress. Reveal and blur timing are normalized
+ * together to finish at progress 1.0. Animation alpha functions affect both;
+ * Reveal does not create or extend an Animation.
+ *
+ * @note Blur is substantially more expensive than Reveal without blur. Setup
+ * and rendering require additional offscreen processing and resources. Cost
+ * depends on rendered area, radius, quality, and the number of active Labels
+ * and sequences.
+ *
+ * @note Reaching an endpoint or holding progress still does not automatically
+ * stop blur processing or release its resources. Disable blur or Reveal when
+ * no longer needed.
  */
 class DALI_UI_API Reveal
 {
@@ -85,8 +97,7 @@ public:
     /**
      * @brief Reveals one final visible layout line as a unit.
      *
-     * Lines are determined after shaping, wrapping, maximum-line limiting,
-     * ellipsis, bidirectional layout, and ImageSpan placement. Lines without
+     * Lines are determined after wrapping and overflow handling. Lines without
      * revealable visible content do not consume a reveal unit.
      */
     LINE,
@@ -123,6 +134,22 @@ public:
      * sequence contains one whole-line reveal unit.
      */
     PER_LINE
+  };
+
+  /**
+   * @brief Selects the quality and processing cost of reveal blur.
+   */
+  enum class BlurQuality : uint8_t
+  {
+    /**
+     * @brief Prioritizes blur quality using full-resolution filtering, with higher processing cost.
+     */
+    HIGH,
+
+    /**
+     * @brief Prioritizes performance using reduced-resolution blur processing.
+     */
+    PERFORMANCE
   };
 
 public:
@@ -168,6 +195,8 @@ public:
    * @brief Returns the value that disables text reveal.
    *
    * Pass this value to Label::SetTextReveal() to remove reveal rendering.
+   * It can be copied or compared, but its configuration getters and setters
+   * must not be called.
    *
    * @return A shared immutable none value.
    */
@@ -223,6 +252,8 @@ public:
    *
    * AUTO_FADE_DURATION_RATIO selects the duration automatically. Values from
    * 0.0 to 1.0 specify the normalized fade duration; zero disables the fade.
+   * The duration depends on the unit and sequence schedule and optional blur;
+   * it is not generally a fraction of the total Animation duration.
    *
    * Values outside [0.0, 1.0] are clamped, except AUTO_FADE_DURATION_RATIO.
    * NaN is normalized to 0.0.
@@ -233,9 +264,6 @@ public:
 
   /**
    * @brief Gets the authored fade duration ratio.
-   *
-   * When automatic duration is selected, this returns
-   * AUTO_FADE_DURATION_RATIO rather than the resolved duration.
    *
    * @return AUTO_FADE_DURATION_RATIO or the authored ratio in [0.0, 1.0].
    */
@@ -265,6 +293,83 @@ public:
    * @return The authored ratio in [0.0, 1.0].
    */
   float GetSequenceStaggerRatio() const;
+
+  /**
+   * @brief Sets the blur radius in logical pixels.
+   *
+   * Zero disables blur. Values outside [0.0, 64.0] are clamped, and NaN is
+   * normalized to 0.0. The default is 0.0. GetBlurRadius() returns the authored
+   * logical-pixel value.
+   *
+   * Blur affects synchronous and asynchronous text foreground. Each sequence
+   * shares one blur strength; it is not a separate blur for each reveal unit.
+   *
+   * Inline ImageSpan content shares its sequence's blur and reveal timing.
+   * Image loading does not delay or restart the timeline; a ready image uses
+   * the current progress.
+   *
+   * @note Blur is not applied to embossed text or height-tiled text textures.
+   * These configurations, or those exceeding supported size limits, retain
+   * Reveal without blur. The authored blur settings are preserved.
+   *
+   * @note Blur can extend outside the Label bounds; use Label clipping to
+   * restrict it. ImageSpan edge antialiasing may differ from rendering without
+   * blur, including at progress 1.0.
+   *
+   * @param[in] radius The blur radius in [0.0, 64.0].
+   */
+  void SetBlurRadius(float radius);
+
+  /**
+   * @brief Gets the authored blur radius.
+   *
+   * @return The blur radius in logical pixels.
+   */
+  float GetBlurRadius() const;
+
+  /**
+   * @brief Selects the blur quality and performance trade-off.
+   *
+   * The default is PERFORMANCE. Quality does not change the reveal or blur
+   * timeline, and has no visual effect when blur is disabled.
+   *
+   * @param[in] quality The blur quality.
+   */
+  void SetBlurQuality(BlurQuality quality);
+
+  /**
+   * @brief Gets the authored blur quality.
+   *
+   * @return The blur quality.
+   */
+  BlurQuality GetBlurQuality() const;
+
+  /**
+   * @brief Sets the blur duration relative to the common sequence interval.
+   *
+   * All active sequences share the reference interval used for staggering.
+   * The ratio is not directly a fraction of the total Animation duration or
+   * each individual line's reveal span.
+   *
+   * Zero disables blur. A value of 1.0 uses the complete reference interval.
+   * The blur strength decreases from its maximum at each sequence start to
+   * zero at the end of its blur interval. Units revealed later in the sequence
+   * can therefore appear after its blur has ended.
+   * Reveal and blur timing are normalized together to finish at progress 1.0.
+   *
+   * Values outside [0.0, 1.0] are clamped, and NaN is normalized to 0.0.
+   * The default is 1.0. A nonzero blur radius is also required to enable blur.
+   *
+   * @param[in] ratio The blur duration ratio in [0.0, 1.0].
+   */
+  void SetBlurDurationRatio(float ratio);
+
+  /**
+   * @brief Gets the authored blur duration ratio.
+   *
+   * @return The blur duration ratio in [0.0, 1.0].
+   */
+  float GetBlurDurationRatio() const;
 
 private:
   class Impl;

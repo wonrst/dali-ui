@@ -800,6 +800,9 @@ public: // Setters for chaining
    * Marquee and cutout do not apply reveal rendering; the authored configuration
    * is retained and takes effect again when the unsupported mode is disabled.
    *
+   * @note Optional blur adds offscreen rendering and memory cost, and has
+   * additional fallback conditions. See Text::Reveal::SetBlurRadius().
+   *
    * @param[in] reveal The reveal configuration.
    */
   void SetTextReveal(const Text::Reveal& reveal);
@@ -814,9 +817,10 @@ public: // Setters for chaining
   /**
    * @brief Sets the normalized reveal timeline position.
    *
-   * Values are clamped to [0, 1]; NaN is normalized to zero. Zero hides the
-   * reveal-target foreground and one restores its normal appearance. Text or
-   * layout changes preserve the current progress. The initial progress is zero.
+   * Values are clamped to [0, 1]; NaN is normalized to zero. When reveal is
+   * applied, zero hides its target foreground and one makes it fully visible,
+   * with no remaining blur strength. Text or layout changes preserve the
+   * current progress. The initial progress is zero.
    *
    * Animating backwards hides units in reverse reveal order.
    *

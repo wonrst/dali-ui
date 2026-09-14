@@ -2861,6 +2861,30 @@ int UtcDaliInlineReplacementManagerPixelBindingOrderingP(void)
                    0.01f,
                    TEST_LOCATION);
 
+  // Async publication applies timing before placement. Authored PIXEL with
+  // fade ratio 1 resolves to scalar opacity; the later placement update must
+  // preserve the shader paired with that binding, not reinstall a spatial one.
+  timings[0u].progressionSpan = 0.0f;
+  DALI_TEST_CHECK(manager.ApplyRevealTimings(timings, source.sourceRevision, progressIndex));
+  Constraint scalarConstraint = Accessor::GetRevealConstraint(manager, run.occurrenceIdentity);
+  DALI_TEST_CHECK(!Ui::GetImplementation(visual).IsUsingCustomShader());
+  DALI_TEST_CHECK(manager.Update(host,
+                                 source,
+                                 placements,
+                                 Vector2::ZERO,
+                                 Vector2(120.0f, 60.0f),
+                                 Vector2(120.0f, 60.0f),
+                                 1.0f,
+                                 source.sourceRevision,
+                                 true));
+  manager.Refresh();
+  DALI_TEST_CHECK(visual.GetRenderer() == renderer);
+  DALI_TEST_CHECK(Accessor::GetRevealConstraint(manager, run.occurrenceIdentity) == scalarConstraint);
+  DALI_TEST_CHECK(!Ui::GetImplementation(visual).IsUsingCustomShader());
+  timings[0u].progressionSpan = 0.3f;
+  DALI_TEST_CHECK(manager.ApplyRevealTimings(timings, source.sourceRevision, progressIndex));
+  DALI_TEST_CHECK(Ui::GetImplementation(visual).IsUsingCustomShader());
+
   // Atomic and spatial modes own mutually exclusive targets. None removes
   // both the binding and replacement-owned shader without hiding a READY image.
   for(uint32_t cycle = 0u; cycle < 100u; ++cycle)

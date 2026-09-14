@@ -2175,6 +2175,11 @@ void Controller::RequestRelayout()
   mImpl->RequestRelayout();
 }
 
+uint64_t Controller::GetRenderRevision() const
+{
+  return mImpl->mRenderRevision;
+}
+
 void Controller::InvalidateMeasure()
 {
   mImpl->InvalidateMeasure();
