@@ -33,6 +33,7 @@ DALI_ADD_SAMPLE(text-image-span-simple.example text-image-span-simple-example.cp
 DALI_ADD_SAMPLE(text-gradient-simple.example text-gradient-simple-example.cpp)
 DALI_ADD_SAMPLE(text-gradient-perf.example text-gradient-perf-example.cpp)
 DALI_ADD_SAMPLE(text-reveal.example text-reveal-example.cpp)
+DALI_ADD_SAMPLE(text-reveal-perf.example text-reveal-perf-example.cpp)
 DALI_ADD_SAMPLE(text-ellipsis.example text-ellipsis-example.cpp)
 DALI_ADD_SAMPLE(text-colrv1.example text-colrv1-example.cpp)
 DALI_ADD_SAMPLE(text-emoji.example text-emoji-example.cpp)

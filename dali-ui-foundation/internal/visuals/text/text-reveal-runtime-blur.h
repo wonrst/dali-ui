@@ -20,7 +20,6 @@
 #include <dali-ui-foundation/internal/text/reveal/text-reveal-blur-preparation.h>
 #include <dali-ui-foundation/public-api/text/style/reveal.h>
 #include <dali/public-api/actors/actor.h>
-#include <dali/public-api/images/pixel-data.h>
 #include <dali/public-api/math/rect.h>
 #include <dali/public-api/rendering/renderer.h>
 #include <dali/public-api/rendering/shader.h>
@@ -69,6 +68,8 @@ RuntimeRevealBlurSettings ResolveRuntimeRevealBlurSettings(Ui::Text::Reveal::Blu
 struct RuntimeRevealBlurSequence : RevealBlurSequence
 {
   TextureSet textures;
+  Shader     atlasShader;    ///< Empty for the isolated-texture source path.
+  Vector4    atlasRectangle; ///< Normalized interior UV, excluding replicated edges.
 };
 
 /**
