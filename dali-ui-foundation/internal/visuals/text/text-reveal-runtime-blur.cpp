@@ -59,6 +59,11 @@ namespace
 // for the final sharp handoff; this policy does not change the Reveal schedule.
 constexpr float QUARTER_BLUR_SCALE = 0.25f;
 
+// Temporary target diagnostic: bypass only PERFORMANCE's final Source binding
+// and Late Smooth composition. Keep all tasks, FBOs and strength constraints.
+// Set false to restore the existing PERFORMANCE output without other changes.
+constexpr bool USE_PERFORMANCE_V_ONLY_POC = true;
+
 struct BlurStrength
 {
   float start;
@@ -409,13 +414,25 @@ Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly
   {
     return {};
   }
-  const bool          batchStrength = quarterSource && batched;
+  const bool          batchStrength   = quarterSource && batched;
+  const bool          vOnlyDiagnostic = quarterSource && USE_PERFORMANCE_V_ONLY_POC;
   thread_local Shader wholeAlphaShader;
   thread_local Shader batchShaders[2];
   thread_local Shader quarterShaders[2][2];
-  auto&               shader = quarterSource ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
-                               : batched     ? batchShaders[alphaOnly ? 1u : 0u]
-                                             : wholeAlphaShader;
+  thread_local Shader vOnlyShaders[2][2];
+  auto&               shader = vOnlyDiagnostic ? vOnlyShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : quarterSource ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : batched       ? batchShaders[alphaOnly ? 1u : 0u]
+                                               : wholeAlphaShader;
+  if(vOnlyDiagnostic)
+  {
+    static const bool logged = []
+    {
+      DALI_LOG_RELEASE_INFO("[TEXT-REVEAL-VONLY-POC] PERFORMANCE output uses V only; Source/H/V and constraints unchanged\n");
+      return true;
+    }();
+    (void)logged;
+  }
   if(!shader)
   {
     std::string vertex;
@@ -456,7 +473,10 @@ void main()
     std::string fragment = alphaOnly ? "#define ALPHA_ONLY\n" : "";
     if(quarterSource)
     {
-      fragment += "#define QUARTER_BLUR_SHARP_TAKEOVER\n";
+      // Compile out the Source sampler/read and handoff ALU only. Keep the
+      // original fragment body, vertex inputs and update-side timing intact.
+      fragment += vOnlyDiagnostic ? "#define TEXT_REVEAL_V_ONLY_DIAGNOSTIC\n"
+                                  : "#define QUARTER_BLUR_SHARP_TAKEOVER\n";
     }
     if(batchStrength)
     {
@@ -536,9 +556,10 @@ void main()
 }
 )SHADER";
     shader = Shader::New(Dali::Integration::ToDaliStringView(batched ? std::string_view(vertex) : BASIC_VERTEX_SOURCE), Dali::Integration::ToDaliStringView(fragment),
-                         Shader::Hint::NONE, quarterSource ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT") : !batched  ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
-                                                                                                                                                     : alphaOnly ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
-                                                                                                                                                                 : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
+                         Shader::Hint::NONE, vOnlyDiagnostic ? (batched ? "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_BATCH_OUTPUT" : "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_OUTPUT") : quarterSource ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT")
+                                                                                                                                                                 : !batched      ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
+                                                                                                                                                                 : alphaOnly     ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
+                                                                                                                                                                                 : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
     shader.RegisterProperty("viewEffectiveScale", 1.0f);
   }
   if(!Dali::Adaptor::IsAvailable())
@@ -1481,9 +1502,12 @@ public:
           if(quarterBlur)
           {
             output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
-            auto textures = output.GetTextures();
-            textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
-            textures.SetSampler(1u, textures.GetSampler(0u));
+            if(!USE_PERFORMANCE_V_ONLY_POC)
+            {
+              auto textures = output.GetTextures();
+              textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
+              textures.SetSampler(1u, textures.GetSampler(0u));
+            }
             BlurStrength strength{timing.start, mBlurDuration};
             const auto   index      = output.RegisterProperty("uAnimationRatio", strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
             auto         constraint = Constraint::New<float>(output, index, strength);
@@ -1618,9 +1642,12 @@ public:
             if(quarterBlur)
             {
               output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
-              auto textures = output.GetTextures();
-              textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
-              textures.SetSampler(1u, textures.GetSampler(0u));
+              if(!USE_PERFORMANCE_V_ONLY_POC)
+              {
+                auto textures = output.GetTextures();
+                textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
+                textures.SetSampler(1u, textures.GetSampler(0u));
+              }
               for(size_t line = outputFirst; line < outputEnd; ++line)
               {
                 const auto&        timing = mSequences[batch.first + line];
