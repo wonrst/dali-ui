@@ -64,9 +64,9 @@ constexpr float QUARTER_BLUR_SCALE = 0.25f;
 // Set false to restore the existing PERFORMANCE output without other changes.
 constexpr bool USE_PERFORMANCE_V_ONLY_POC = true;
 
-// Independent filtering diagnostic. False keeps the current V-only Output but
-// restores Gaussian H/V. Radius, geometry, allocations and timing stay intact.
-constexpr bool USE_PERFORMANCE_ONE_TAP_FILTER_POC = true;
+// Temporary target diagnostic: keep Source capture, but do not create H/V
+// pipelines. False returns to the preserved Gaussian/V-only path above.
+constexpr bool USE_PERFORMANCE_SOURCE_ONLY_POC = true;
 
 struct BlurStrength
 {
@@ -418,17 +418,29 @@ Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly
   {
     return {};
   }
-  const bool          batchStrength   = quarterSource && batched;
-  const bool          vOnlyDiagnostic = quarterSource && USE_PERFORMANCE_V_ONLY_POC;
+  const bool          batchStrength        = quarterSource && batched;
+  const bool          sourceOnlyDiagnostic = quarterSource && USE_PERFORMANCE_SOURCE_ONLY_POC;
+  const bool          vOnlyDiagnostic      = quarterSource && !sourceOnlyDiagnostic && USE_PERFORMANCE_V_ONLY_POC;
   thread_local Shader wholeAlphaShader;
   thread_local Shader batchShaders[2];
   thread_local Shader quarterShaders[2][2];
   thread_local Shader vOnlyShaders[2][2];
-  auto&               shader = vOnlyDiagnostic ? vOnlyShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
-                               : quarterSource ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
-                               : batched       ? batchShaders[alphaOnly ? 1u : 0u]
-                                               : wholeAlphaShader;
-  if(vOnlyDiagnostic)
+  thread_local Shader sourceOnlyShaders[2][2];
+  auto&               shader = sourceOnlyDiagnostic ? sourceOnlyShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : vOnlyDiagnostic    ? vOnlyShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : quarterSource      ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : batched            ? batchShaders[alphaOnly ? 1u : 0u]
+                                                    : wholeAlphaShader;
+  if(sourceOnlyDiagnostic)
+  {
+    static const bool logged = []
+    {
+      DALI_LOG_RELEASE_INFO("[TEXT-REVEAL-SOURCE-ONLY-POC] PERFORMANCE uses Source capture only; H/V pipelines disabled\n");
+      return true;
+    }();
+    (void)logged;
+  }
+  else if(vOnlyDiagnostic)
   {
     static const bool logged = []
     {
@@ -559,11 +571,54 @@ void main()
   gl_FragColor = color * uColor;
 }
 )SHADER";
+    if(sourceOnlyDiagnostic)
+    {
+      // Copy the production sharp-Source branch's UV and final color math.
+      // It has no additional half-texel shift: BindTexture retains the same
+      // linear/clamp sampler and the output geometry retains the padded rect.
+      fragment = alphaOnly ? "#define ALPHA_ONLY\n" : "";
+      if(!batched)
+      {
+        fragment += "#define WHOLE_TEXT_OUTPUT\n";
+      }
+      fragment += R"SHADER(
+//@version 100
+precision highp float;
+INPUT highp vec2 vTexCoord;
+#ifndef WHOLE_TEXT_OUTPUT
+INPUT highp vec4 vRevealRectangle;
+#endif
+UNIFORM sampler2D sSharpSource;
+UNIFORM_BLOCK FragColor
+{
+  UNIFORM vec4 uColor;
+#ifdef ALPHA_ONLY
+  UNIFORM vec4 uTextColorAnimatable;
+#endif
+};
+void main()
+{
+#ifdef WHOLE_TEXT_OUTPUT
+  highp vec4 color = TEXTURE(sSharpSource, vTexCoord);
+#else
+  highp vec4 color = TEXTURE(sSharpSource, vRevealRectangle.xy + vTexCoord * vRevealRectangle.zw);
+#endif
+#ifdef ALPHA_ONLY
+  highp vec3 rgb = uTextColorAnimatable.a > 0.0 ? uTextColorAnimatable.rgb / uTextColorAnimatable.a : vec3(0.0);
+  color = vec4(rgb * color.r, color.r);
+#endif
+  gl_FragColor = color * uColor;
+}
+)SHADER";
+    }
     shader = Shader::New(Dali::Integration::ToDaliStringView(batched ? std::string_view(vertex) : BASIC_VERTEX_SOURCE), Dali::Integration::ToDaliStringView(fragment),
-                         Shader::Hint::NONE, vOnlyDiagnostic ? (batched ? "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_BATCH_OUTPUT" : "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_OUTPUT") : quarterSource ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT")
-                                                                                                                                                                 : !batched      ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
-                                                                                                                                                                 : alphaOnly     ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
-                                                                                                                                                                                 : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
+                         Shader::Hint::NONE,
+                         sourceOnlyDiagnostic ? (batched ? "TEXT_REVEAL_SOURCE_ONLY_DIAGNOSTIC_BATCH_OUTPUT" : "TEXT_REVEAL_SOURCE_ONLY_DIAGNOSTIC_OUTPUT")
+                         : vOnlyDiagnostic    ? (batched ? "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_BATCH_OUTPUT" : "TEXT_REVEAL_V_ONLY_DIAGNOSTIC_OUTPUT")
+                         : quarterSource      ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT")
+                         : !batched           ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
+                         : alphaOnly          ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
+                                              : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
     shader.RegisterProperty("viewEffectiveScale", 1.0f);
   }
   if(!Dali::Adaptor::IsAvailable())
@@ -1187,6 +1242,8 @@ public:
       }
     }
     const bool                            quarterBlur           = mSettings.path == RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+    const bool                            sourceOnly            = quarterBlur && USE_PERFORMANCE_SOURCE_ONLY_POC;
+    const uint32_t                        blurPassCount         = sourceOnly ? 0u : 2u;
     const float                           quarterAuthoredRadius = mSettings.authoredRadius;
     ForegroundProperties                  foregroundProperties;
     std::vector<std::pair<size_t, Actor>> orderedOutputs;
@@ -1208,7 +1265,7 @@ public:
         return;
       }
       self.Add(pass.source);
-      for(uint32_t i = 0u; i < 2u; ++i)
+      for(uint32_t i = 0u; i < blurPassCount; ++i)
       {
         pass.blurActors[i] = NewPassActor(batched ? (i == 0u ? "RevealGaussianBatchH" : "RevealGaussianBatchV")
                                                   : (i == 0u ? "RevealGaussianH" : "RevealGaussianV"),
@@ -1219,7 +1276,7 @@ public:
         }
         self.Add(pass.blurActors[i]);
       }
-      if(batched)
+      if(batched && !sourceOnly)
       {
         // Full resolution consumes source/H before the next page overwrites it.
         // Late Smooth also samples source at composition, so only H is scratch
@@ -1238,7 +1295,7 @@ public:
           }
         }
       }
-      for(size_t bufferIndex = 0u; bufferIndex < pass.buffers.size(); ++bufferIndex)
+      for(size_t bufferIndex = 0u; bufferIndex < (sourceOnly ? 1u : pass.buffers.size()); ++bufferIndex)
       {
         auto& buffer = pass.buffers[bufferIndex];
         if(!buffer)
@@ -1444,12 +1501,11 @@ public:
         }
         if(!batched)
         {
-          for(uint32_t i = 0u; i < 2u; ++i)
+          for(uint32_t i = 0u; i < blurPassCount; ++i)
           {
             Actor blurActor = pass.blurActors[i];
             blurActor.SetProperty(Actor::Property::POSITION, offset);
-            Renderer renderer = quarterBlur && USE_PERFORMANCE_ONE_TAP_FILTER_POC ? TextRevealBlurRenderer::CreateOneTapDiagnostic(mRadius)
-                                                                                  : TextRevealBlurRenderer::Create(mRadius);
+            Renderer renderer = TextRevealBlurRenderer::Create(mRadius);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1503,11 +1559,11 @@ public:
           {
             return;
           }
-          BindTexture(output, pass.buffers[2].GetColorTexture());
+          BindTexture(output, pass.buffers[sourceOnly ? 0u : 2u].GetColorTexture());
           if(quarterBlur)
           {
             output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
-            if(!USE_PERFORMANCE_V_ONLY_POC)
+            if(!sourceOnly && !USE_PERFORMANCE_V_ONLY_POC)
             {
               auto textures = output.GetTextures();
               textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
@@ -1543,38 +1599,42 @@ public:
         // same tasks, scratch sharing and isolated output rectangles.
         for(size_t first = 0u; first < batch.count; first += TextRevealBlurRenderer::MAX_LINES_PER_DRAW)
         {
-          const auto count    = static_cast<uint32_t>(std::min(batch.count - first,
-                                                               static_cast<size_t>(TextRevealBlurRenderer::MAX_LINES_PER_DRAW)));
-          Geometry   geometry = CreateBlurBatchGeometry(vertices.data() + first * 4u, count);
-          if(!Dali::Adaptor::IsAvailable() || !geometry)
+          const auto count = static_cast<uint32_t>(std::min(batch.count - first,
+                                                            static_cast<size_t>(TextRevealBlurRenderer::MAX_LINES_PER_DRAW)));
+          Geometry   geometry;
+          Geometry   horizontalGeometry;
+          if(!sourceOnly)
           {
-            return;
-          }
-          // H changes X support only: it cannot populate a transparent source
-          // row. Draw just its filtered Y coverage; V retains the full padded
-          // quads and creates the vertical halo. The full H task clear below
-          // remains essential, including when pages share scratch storage.
-          Geometry   horizontalGeometry = geometry;
-          const auto bandFirst          = horizontalBands.begin() + static_cast<std::vector<Vector2>::difference_type>(batch.first + first);
-          if(std::any_of(bandFirst, bandFirst + count, [](const Vector2& band)
-          {
-            return band.x > 0.0f || band.y < 1.0f;
-          }))
-          {
-            auto candidate = CreateBlurBatchGeometry(horizontalVertices.data() + first * 4u, count);
-            if(!Dali::Adaptor::IsAvailable())
+            geometry = CreateBlurBatchGeometry(vertices.data() + first * 4u, count);
+            if(!Dali::Adaptor::IsAvailable() || !geometry)
             {
               return;
             }
-            if(candidate)
+            // H changes X support only: it cannot populate a transparent source
+            // row. Draw just its filtered Y coverage; V retains the full padded
+            // quads and creates the vertical halo. The full H task clear below
+            // remains essential, including when pages share scratch storage.
+            horizontalGeometry   = geometry;
+            const auto bandFirst = horizontalBands.begin() + static_cast<std::vector<Vector2>::difference_type>(batch.first + first);
+            if(std::any_of(bandFirst, bandFirst + count, [](const Vector2& band)
             {
-              horizontalGeometry = candidate;
+              return band.x > 0.0f || band.y < 1.0f;
+            }))
+            {
+              auto candidate = CreateBlurBatchGeometry(horizontalVertices.data() + first * 4u, count);
+              if(!Dali::Adaptor::IsAvailable())
+              {
+                return;
+              }
+              if(candidate)
+              {
+                horizontalGeometry = candidate;
+              }
             }
           }
-          for(uint32_t i = 0u; i < 2u; ++i)
+          for(uint32_t i = 0u; i < blurPassCount; ++i)
           {
-            Renderer renderer = quarterBlur && USE_PERFORMANCE_ONE_TAP_FILTER_POC ? TextRevealBlurRenderer::CreateOneTapDiagnostic(mRadius, i == 0u ? horizontalGeometry : geometry)
-                                                                                  : TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
+            Renderer renderer = TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1644,11 +1704,11 @@ public:
             {
               return;
             }
-            BindTexture(output, pass.buffers[2].GetColorTexture());
+            BindTexture(output, pass.buffers[sourceOnly ? 0u : 2u].GetColorTexture());
             if(quarterBlur)
             {
               output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
-              if(!USE_PERFORMANCE_V_ONLY_POC)
+              if(!sourceOnly && !USE_PERFORMANCE_V_ONLY_POC)
               {
                 auto textures = output.GetTextures();
                 textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
@@ -1729,11 +1789,12 @@ protected:
     {
       return;
     }
-    mTaskList     = sceneHolder.GetRenderTaskList();
-    auto taskList = mTaskList;
+    mTaskList                = sceneHolder.GetRenderTaskList();
+    auto           taskList  = mTaskList;
+    const uint32_t passCount = mSettings.path == RuntimeRevealBlurPath::AXIS_AWARE_QUARTER && USE_PERFORMANCE_SOURCE_ONLY_POC ? 1u : 3u;
     for(auto& pass : mPasses)
     {
-      for(uint32_t i = 0u; i < 3u; ++i)
+      for(uint32_t i = 0u; i < passCount; ++i)
       {
         auto task = taskList.CreateTask();
         // CreateTask/its camera can emit ObjectCreated before the returned

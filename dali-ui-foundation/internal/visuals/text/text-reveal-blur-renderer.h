@@ -47,15 +47,6 @@ Renderer Create(uint32_t blurRadius);
  * in uRevealBlurState and binds the page texture/sampler.
  */
 Renderer CreateBatch(uint32_t blurRadius, Geometry geometry);
-
-/**
- * @brief Creates the temporary center-sample filtering diagnostic.
- *
- * A supplied geometry selects the batch path; an empty handle selects the same
- * cached scalar quad as Create(). Kernel allocation and renderer properties
- * are retained. Only PERFORMANCE's diagnostic caller uses this entry point.
- */
-Renderer CreateOneTapDiagnostic(uint32_t blurRadius, Geometry geometry = {});
 } //namespace DALI_NAMESPACE::Ui::Internal::TextRevealBlurRenderer
 
 #endif // DALI_UI_INTERNAL_TEXT_REVEAL_BLUR_RENDERER_H
