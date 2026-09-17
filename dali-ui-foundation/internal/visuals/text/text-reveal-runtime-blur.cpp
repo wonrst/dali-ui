@@ -64,6 +64,10 @@ constexpr float QUARTER_BLUR_SCALE = 0.25f;
 // Set false to restore the existing PERFORMANCE output without other changes.
 constexpr bool USE_PERFORMANCE_V_ONLY_POC = true;
 
+// Independent filtering diagnostic. False keeps the current V-only Output but
+// restores Gaussian H/V. Radius, geometry, allocations and timing stay intact.
+constexpr bool USE_PERFORMANCE_ONE_TAP_FILTER_POC = true;
+
 struct BlurStrength
 {
   float start;
@@ -1444,7 +1448,8 @@ public:
           {
             Actor blurActor = pass.blurActors[i];
             blurActor.SetProperty(Actor::Property::POSITION, offset);
-            Renderer renderer = TextRevealBlurRenderer::Create(mRadius);
+            Renderer renderer = quarterBlur && USE_PERFORMANCE_ONE_TAP_FILTER_POC ? TextRevealBlurRenderer::CreateOneTapDiagnostic(mRadius)
+                                                                                  : TextRevealBlurRenderer::Create(mRadius);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1568,7 +1573,8 @@ public:
           }
           for(uint32_t i = 0u; i < 2u; ++i)
           {
-            Renderer renderer = TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
+            Renderer renderer = quarterBlur && USE_PERFORMANCE_ONE_TAP_FILTER_POC ? TextRevealBlurRenderer::CreateOneTapDiagnostic(mRadius, i == 0u ? horizontalGeometry : geometry)
+                                                                                  : TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
