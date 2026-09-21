@@ -1358,7 +1358,10 @@ private:
   void ClearTextReveal(Label label)
   {
     ClearBlurEffect(label);
-    label.SetTextReveal(Text::Reveal::None());
+    if(label.GetTextReveal() != Text::Reveal::None())
+    {
+      label.SetTextReveal(Text::Reveal::None());
+    }
   }
 
   void AnimateBlurEffect(Label label, Animation animation, float radius, float duration,
