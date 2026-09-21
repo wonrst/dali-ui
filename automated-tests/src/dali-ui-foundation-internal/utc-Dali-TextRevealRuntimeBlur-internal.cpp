@@ -21,6 +21,7 @@
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/internal/text/replacement/inline-replacement-data.h>
+#include <dali-ui-foundation/internal/visuals/text/text-reveal-blur-economy.h>
 #include <dali-ui-foundation/internal/visuals/text/text-reveal-blur-renderer.h>
 #include <dali-ui-foundation/internal/visuals/text/text-reveal-runtime-blur.h>
 #include <dali-ui-foundation/internal/visuals/visual-base-impl.h>
@@ -2712,6 +2713,217 @@ int UtcDaliTextRevealRuntimeGaussianShaderIsolationP(void)
   END_TEST;
 }
 
+int UtcDaliTextRevealEconomyKernelP(void)
+{
+  using Ui::Internal::RevealBlurEconomy::CalculateVerticalKernel;
+  for(uint32_t radius : {2u, 4u, 6u, 16u, 24u, 48u, 64u, 200u})
+  {
+    for(uint32_t height : {2u, 3u, 4u, 5u, 13u, 101u, 1180u, 1181u})
+    {
+      const float        scale = static_cast<float>(height) / static_cast<float>((height + 3u) / 4u);
+      std::vector<float> weights, offsets;
+      DALI_TEST_CHECK(CalculateVerticalKernel(radius, scale, weights, offsets));
+      DALI_TEST_CHECK(weights.size() >= 2u && weights.size() <= std::max(2u, radius / 2u));
+      DALI_TEST_EQUALS(weights.size(), offsets.size(), TEST_LOCATION);
+      float sum = 0.0f;
+      for(size_t i = 0u; i < weights.size(); ++i)
+      {
+        DALI_TEST_CHECK(std::isfinite(weights[i]) && weights[i] >= 0.0f);
+        DALI_TEST_CHECK(std::isfinite(offsets[i]) && offsets[i] >= 0.0f);
+        DALI_TEST_CHECK(offsets[i] * scale <= static_cast<float>(radius - 1u) + 0.0001f);
+        sum += 2.0f * weights[i];
+        if(i > 0u)
+        {
+          DALI_TEST_CHECK(offsets[i] >= offsets[i - 1u]);
+        }
+      }
+      DALI_TEST_EQUALS(sum, 1.0f, 0.00001f, TEST_LOCATION);
+    }
+  }
+  for(uint32_t radius : {0u, 1u, 3u, 201u, std::numeric_limits<uint32_t>::max()})
+  {
+    std::vector<float> weights{1.0f}, offsets{1.0f};
+    DALI_TEST_CHECK(!CalculateVerticalKernel(radius, 4.0f, weights, offsets));
+    DALI_TEST_CHECK(weights.empty() && offsets.empty());
+  }
+  for(float scale : {-1.0f, 0.0f, 1.0f, 4.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+  {
+    std::vector<float> weights{1.0f}, offsets{1.0f};
+    DALI_TEST_CHECK(!CalculateVerticalKernel(24u, scale, weights, offsets));
+    DALI_TEST_CHECK(weights.empty() && offsets.empty());
+  }
+  END_TEST;
+}
+
+int UtcDaliTextRevealEconomyKernelOwnershipP(void)
+{
+  UiTestApplication           application;
+  std::vector<WeakHandleBase> blocks;
+  ConnectionTracker           tracker;
+  application.GetCore().GetObjectRegistry().ObjectCreatedSignal().Connect(&tracker, [&](BaseHandle object)
+  {
+    if(Dali::UniformBlock::DownCast(object))
+    {
+      blocks.emplace_back(object);
+    }
+  });
+  auto renderer = Ui::Internal::TextRevealBlurRenderer::CreateReducedVertical(24u, 101.0f / 26.0f);
+  DALI_TEST_CHECK(renderer);
+  DALI_TEST_EQUALS(blocks.size(), static_cast<size_t>(1u), TEST_LOCATION);
+  DALI_TEST_CHECK(blocks.front().GetBaseHandle());
+  auto other = Ui::Internal::TextRevealBlurRenderer::CreateReducedVertical(24u, 4.0f);
+  DALI_TEST_EQUALS(blocks.size(), static_cast<size_t>(2u), TEST_LOCATION);
+  DALI_TEST_CHECK(Dali::UniformBlock::DownCast(blocks[0].GetBaseHandle()).GetProperty<float>("uSampleWeights[0]") !=
+                  Dali::UniformBlock::DownCast(blocks[1].GetBaseHandle()).GetProperty<float>("uSampleWeights[0]"));
+  renderer.Reset();
+  Settle(application);
+  DALI_TEST_CHECK(!blocks.front().GetBaseHandle());
+  DALI_TEST_CHECK(blocks.back().GetBaseHandle());
+  other.Reset();
+  Settle(application);
+  DALI_TEST_CHECK(!blocks.back().GetBaseHandle());
+  END_TEST;
+}
+
+int UtcDaliTextRevealEconomyCurveP(void)
+{
+  using namespace Ui::Internal::RevealBlurEconomy;
+  DALI_TEST_EQUALS(Radius(16.0f, 0.0f), 10.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(Radius(24.0f, 0.0f), 12.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(Radius(64.0f, 0.0f), 12.0f, TEST_LOCATION);
+  DALI_TEST_EQUALS(Composition(0.0f), Vector2(1.0f, 0.0f), TEST_LOCATION);
+  DALI_TEST_EQUALS(Composition(1.0f), Vector2(0.0f, 0.9f), 0.000001f, TEST_LOCATION);
+  DALI_TEST_EQUALS(Composition(0.3f).x, 0.5f, 0.000001f, TEST_LOCATION);
+  DALI_TEST_EQUALS(Radius(24.0f, 0.675f), 18.0f, 0.00001f, TEST_LOCATION);
+  for(float radius : {-1.0f, 0.0f, 0.5f, 1.0f, 4.0f, 5.0f, 16.0f, 24.0f, 48.0f, 64.0f, 200.0f})
+  {
+    float previous = 0.0f;
+    for(uint32_t i = 0u; i <= 100u; ++i)
+    {
+      const float amount  = static_cast<float>(i) / 100.0f;
+      const float value   = Radius(radius, amount);
+      const auto  weights = Composition(amount);
+      DALI_TEST_CHECK(value >= previous && value <= std::max(0.0f, radius));
+      DALI_TEST_CHECK(weights.x >= 0.0f && weights.y >= 0.0f && weights.x + weights.y <= 1.0f);
+      previous = value;
+    }
+  }
+  const auto fallback = Ui::Internal::ResolveRuntimeRevealBlurSettings(static_cast<Text::Reveal::BlurQuality>(255u), 24.0f);
+  DALI_TEST_CHECK(fallback.path == Ui::Internal::RuntimeRevealBlurPath::AXIS_AWARE_QUARTER);
+  END_TEST;
+}
+
+int UtcDaliTextRevealEconomyDimensionsLifecycleP(void)
+{
+  UiTestApplication application;
+  const auto        tasks = application.GetScene().GetRenderTaskList();
+  for(bool perLine : {false, true})
+  {
+    for(uint32_t extent = 0u; extent < 4u; ++extent)
+    {
+      Label label = MakeLabel(application);
+      label.SetRequestedWidth(360.0f + static_cast<float>(extent % 2u));
+      label.SetRequestedHeight(180.0f + static_cast<float>(extent / 2u));
+      label.SetMultiLine(true);
+      label.SetText("First line\nSecond line");
+      Text::Reveal reveal;
+      reveal.SetSequence(perLine ? Text::Reveal::Sequence::PER_LINE : Text::Reveal::Sequence::WHOLE_TEXT);
+      reveal.SetSequenceStaggerRatio(0.25f);
+      reveal.SetBlurDurationRatio(1.0f);
+      reveal.SetBlurQuality(Text::Reveal::BlurQuality::ECONOMY);
+      for(float radius : {0.0f, 0.5f, 4.0f, 5.0f, 24.0f, 64.0f})
+      {
+        label.SetTextRevealProgress(0.4f);
+        reveal.SetBlurRadius(radius);
+        label.SetTextReveal(reveal);
+        Settle(application);
+        if(radius == 0.0f)
+        {
+          DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+          continue;
+        }
+        DALI_TEST_CHECK((tasks.GetTaskCount() - 1u) % 3u == 0u);
+        std::vector<RenderTask>     ordered;
+        std::vector<WeakHandleBase> retired;
+        for(uint32_t i = 1u; i < tasks.GetTaskCount(); ++i)
+        {
+          ordered.push_back(tasks.GetTask(i));
+        }
+        std::sort(ordered.begin(), ordered.end(), [](RenderTask a, RenderTask b)
+        {
+          return a.GetOrderIndex() < b.GetOrderIndex();
+        });
+        for(size_t i = 0u; i < ordered.size(); i += 3u)
+        {
+          auto source     = ordered[i].GetFrameBuffer().GetColorTexture();
+          auto horizontal = ordered[i + 1u].GetFrameBuffer().GetColorTexture();
+          auto vertical   = ordered[i + 2u].GetFrameBuffer().GetColorTexture();
+          DALI_TEST_EQUALS(horizontal.GetWidth(), (source.GetWidth() + 3u) / 4u, TEST_LOCATION);
+          DALI_TEST_EQUALS(horizontal.GetHeight(), (source.GetHeight() + 3u) / 4u, TEST_LOCATION);
+          DALI_TEST_EQUALS(vertical.GetWidth(), horizontal.GetWidth(), TEST_LOCATION);
+          DALI_TEST_EQUALS(vertical.GetHeight(), horizontal.GetHeight(), TEST_LOCATION);
+          for(auto texture : {source, horizontal, vertical})
+          {
+            retired.emplace_back(texture);
+          }
+          auto renderer = ordered[i + 2u].GetSourceActor().GetRendererAt(0u);
+          auto shader   = renderer.GetShader();
+          retired.emplace_back(shader);
+        }
+        ordered.clear();
+        for(float progress : {0.0f, 0.2f, 0.7f, 1.0f, 0.4f})
+        {
+          label.SetTextRevealProgress(progress);
+          Settle(application);
+          for(auto output : Passes(label, "RevealGaussianOutput"))
+          {
+            DALI_TEST_EQUALS(output.GetTextures().GetTextureCount(), 2u, TEST_LOCATION);
+            const auto scalar = output.GetPropertyIndex("uAnimationRatio");
+            if(scalar != Property::INVALID_INDEX)
+            {
+              const auto weights = output.GetCurrentProperty<Vector2>(scalar);
+              DALI_TEST_CHECK(weights.x >= 0.0f && weights.y >= 0.0f && weights.x + weights.y <= 1.0f);
+              if(progress == 1.0f)
+              {
+                DALI_TEST_EQUALS(weights, Vector2(1.0f, 0.0f), TEST_LOCATION);
+              }
+            }
+          }
+          if(progress == 1.0f)
+          {
+            for(const auto& line : BlurLines(label))
+            {
+              DALI_TEST_EQUALS(line.Strength(), 0.0f, TEST_LOCATION);
+            }
+          }
+        }
+        Animation animation = Animation::New(1.0f);
+        animation.AnimateTo(Property(label, label.GetPropertyIndex("uTextRevealProgress")), 0.0f);
+        animation.Play();
+        Settle(application);
+        label.Unparent();
+        Settle(application);
+        DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+        application.GetScene().Add(label);
+        Settle(application);
+        DALI_TEST_CHECK(tasks.GetTaskCount() > 1u);
+        animation.Stop();
+        animation.Clear();
+        label.SetTextReveal(Text::Reveal::None());
+        Settle(application);
+        for(const auto& object : retired)
+        {
+          DALI_TEST_CHECK(!object.GetBaseHandle());
+        }
+        DALI_TEST_EQUALS(tasks.GetTaskCount(), 1u, TEST_LOCATION);
+      }
+      label.Unparent();
+      Settle(application);
+    }
+  }
+  END_TEST;
+}
+
 int UtcDaliTextRevealRuntimeGaussianMinimumRadiusP(void)
 {
   UiTestApplication application;
@@ -2855,7 +3067,8 @@ int UtcDaliTextRevealRuntimeGaussianQualityPublicationP(void)
         };
         std::vector<float> referenceStrengths;
         uint32_t           referenceTaskCount = 0u;
-        for(auto quality : {Text::Reveal::BlurQuality::PERFORMANCE, Text::Reveal::BlurQuality::HIGH, Text::Reveal::BlurQuality::PERFORMANCE})
+        for(auto quality : {Text::Reveal::BlurQuality::PERFORMANCE, Text::Reveal::BlurQuality::ECONOMY,
+                            Text::Reveal::BlurQuality::HIGH, Text::Reveal::BlurQuality::PERFORMANCE})
         {
           const auto previous = completed;
           reveal.SetBlurQuality(quality);
@@ -2885,14 +3098,15 @@ int UtcDaliTextRevealRuntimeGaussianQualityPublicationP(void)
             DALI_TEST_EQUALS(texture.GetPixelFormat(), gradientText ? Pixel::RGBA8888 : Pixel::A8, TEST_LOCATION);
             DALI_TEST_EQUALS(task.GetRefreshRate(), static_cast<uint32_t>(RenderTask::REFRESH_ALWAYS), TEST_LOCATION);
           }
-          const bool reduced = quality == Text::Reveal::BlurQuality::PERFORMANCE;
+          const bool reduced = quality != Text::Reveal::BlurQuality::HIGH;
+          const bool economy = quality == Text::Reveal::BlurQuality::ECONOMY;
           for(size_t index = 0u; index < ordered.size(); index += 3u)
           {
             const auto source     = ordered[index].GetFrameBuffer().GetColorTexture();
             const auto horizontal = ordered[index + 1u].GetFrameBuffer().GetColorTexture();
             const auto vertical   = ordered[index + 2u].GetFrameBuffer().GetColorTexture();
             DALI_TEST_EQUALS(horizontal.GetWidth(), reduced ? (source.GetWidth() + 3u) / 4u : source.GetWidth(), TEST_LOCATION);
-            DALI_TEST_EQUALS(horizontal.GetHeight(), source.GetHeight(), TEST_LOCATION);
+            DALI_TEST_EQUALS(horizontal.GetHeight(), economy ? (source.GetHeight() + 3u) / 4u : source.GetHeight(), TEST_LOCATION);
             DALI_TEST_EQUALS(vertical.GetWidth(), horizontal.GetWidth(), TEST_LOCATION);
             DALI_TEST_EQUALS(vertical.GetHeight(), reduced ? (source.GetHeight() + 3u) / 4u : source.GetHeight(), TEST_LOCATION);
           }
@@ -2907,7 +3121,9 @@ int UtcDaliTextRevealRuntimeGaussianQualityPublicationP(void)
           DALI_TEST_EQUALS(lines.size(), referenceStrengths.size(), TEST_LOCATION);
           for(size_t index = 0u; index < lines.size(); ++index)
           {
-            DALI_TEST_EQUALS(lines[index].Strength(), referenceStrengths[index], 0.0001f, TEST_LOCATION);
+            const float native   = referenceStrengths[index];
+            const float expected = economy && native > 0.0f ? Ui::Internal::RevealBlurEconomy::Radius(24.0f, native) / 24.0f : native;
+            DALI_TEST_EQUALS(lines[index].Strength(), expected, 0.0001f, TEST_LOCATION);
           }
         }
         // Coalesce a quality change back to PERFORMANCE before an async request
@@ -3632,7 +3848,8 @@ int CheckImageBlurCapture(UiTestApplication& application, bool async, bool image
                           Text::Reveal::Unit           unit      = Text::Reveal::Unit::PIXEL,
                           Text::Reveal::Sequence       sequence  = Text::Reveal::Sequence::PER_LINE,
                           bool                         readiness = false,
-                          std::vector<WeakHandleBase>* resources = nullptr)
+                          std::vector<WeakHandleBase>* resources = nullptr,
+                          Text::Reveal::BlurQuality    quality   = Text::Reveal::BlurQuality::PERFORMANCE)
 {
   application.GetGlAbstraction().SetCheckFramebufferStatusResult(GL_FRAMEBUFFER_COMPLETE);
   TextAbstraction::FontClient::Get();
@@ -3656,6 +3873,7 @@ int CheckImageBlurCapture(UiTestApplication& application, bool async, bool image
   Text::Reveal reveal;
   reveal.SetUnit(unit);
   reveal.SetSequence(sequence);
+  reveal.SetBlurQuality(quality);
   reveal.SetSequenceStaggerRatio(0.25f);
   reveal.SetBlurRadius(24.0f);
   reveal.SetBlurDurationRatio(1.0f);
@@ -3905,6 +4123,27 @@ int UtcDaliTextRevealRuntimeOutputBatchImageOrderP(void)
   END_TEST;
 }
 
+int UtcDaliTextRevealEconomyImageCaptureP(void)
+{
+  UiTestApplication application;
+  for(bool async : {false, true})
+  {
+    for(auto sequence : {Text::Reveal::Sequence::WHOLE_TEXT, Text::Reveal::Sequence::PER_LINE})
+    {
+      std::vector<WeakHandleBase> resources;
+      if(CheckImageBlurCapture(application, async, false, Text::Reveal::Unit::PIXEL, sequence, true, &resources, Text::Reveal::BlurQuality::ECONOMY))
+      {
+        return 1;
+      }
+      for(const auto& resource : resources)
+      {
+        DALI_TEST_CHECK(!resource.GetBaseHandle());
+      }
+    }
+  }
+  END_TEST;
+}
+
 int UtcDaliTextRevealBlurImageCaptureReadyP(void)
 {
   UiTestApplication application;
@@ -3953,7 +4192,7 @@ int UtcDaliTextRevealRuntimeGaussianOwnershipStressP(void)
   TextAbstraction::FontClient::Get();
   const auto                 tasks = application.GetScene().GetRenderTaskList();
   std::vector<WeakHandleBase> objects;
-  auto                       cycle = [&](bool churn, uint32_t lineCount) -> int
+  auto                        cycle = [&](bool churn, uint32_t lineCount, bool economy = false) -> int
   {
     const bool  multiPage = lineCount == 0u;
     std::string text;
@@ -4014,7 +4253,9 @@ int UtcDaliTextRevealRuntimeGaussianOwnershipStressP(void)
         label.SetText(text.c_str());
       }
       // Exercise every colored format in PERFORMANCE; interleave HIGH A8.
-      reveal.SetBlurQuality(state != 0u && state % 2u == 0u ? Text::Reveal::BlurQuality::HIGH : Text::Reveal::BlurQuality::PERFORMANCE);
+      reveal.SetBlurQuality(economy                           ? Text::Reveal::BlurQuality::ECONOMY
+                            : state != 0u && state % 2u == 0u ? Text::Reveal::BlurQuality::HIGH
+                                                              : Text::Reveal::BlurQuality::PERFORMANCE);
       reveal.SetSequence(state == 6u ? Text::Reveal::Sequence::WHOLE_TEXT : Text::Reveal::Sequence::PER_LINE);
       label.SetTextReveal(reveal);
       label.SetTextRevealProgress(state % 2u ? 0.0f : 0.4f);
@@ -4056,6 +4297,9 @@ int UtcDaliTextRevealRuntimeGaussianOwnershipStressP(void)
   DALI_TEST_EQUALS(cycle(true, 6u), 0, TEST_LOCATION);
   DALI_TEST_EQUALS(cycle(false, 65u), 0, TEST_LOCATION);
   DALI_TEST_EQUALS(cycle(false, 0u), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(cycle(true, 6u, true), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(cycle(false, 65u, true), 0, TEST_LOCATION);
+  DALI_TEST_EQUALS(cycle(false, 0u, true), 0, TEST_LOCATION);
   objects.clear();
   const auto        textureBaseline = application.GetGlAbstraction().GetNumGeneratedTextures();
   const auto        bufferBaseline  = application.GetGraphicsController().mAllocatedBuffers.size();
@@ -4068,11 +4312,14 @@ int UtcDaliTextRevealRuntimeGaussianOwnershipStressP(void)
       objects.emplace_back(object);
     }
   });
-  for(uint32_t iteration = 0u; iteration < 155u; ++iteration)
+  for(uint32_t iteration = 0u; iteration < 180u; ++iteration)
   {
     const uint32_t boundaries[] = {1u, 2u, 64u, 65u, 0u};
-    DALI_TEST_EQUALS(cycle(iteration >= 100u && iteration < 150u,
-                           iteration < 150u ? 6u : boundaries[iteration - 150u]),
+    const bool     economy       = iteration >= 155u;
+    const uint32_t local         = economy ? iteration - 155u : iteration;
+    const uint32_t boundaryStart = economy ? 20u : 150u;
+    DALI_TEST_EQUALS(cycle(local >= (economy ? 0u : 100u) && local < boundaryStart,
+                           local < boundaryStart ? 6u : boundaries[local - boundaryStart], economy),
                      0, TEST_LOCATION);
     DALI_TEST_CHECK(!objects.empty());
     for(const auto& object : objects)
@@ -4084,7 +4331,7 @@ int UtcDaliTextRevealRuntimeGaussianOwnershipStressP(void)
     DALI_TEST_EQUALS(application.GetGlAbstraction().GetNumGeneratedTextures(), textureBaseline, TEST_LOCATION);
     DALI_TEST_EQUALS(application.GetGraphicsController().mAllocatedBuffers.size(), bufferBaseline, TEST_LOCATION);
   }
-  std::printf("100 A8 + 50 format/quality + 5 line/page-boundary cycles: textures %u -> %u; buffers %zu -> %zu; weak objects 0; tasks 1\n",
+  std::printf("155 existing + 25 ECONOMY lifecycle cycles: textures %u -> %u; buffers %zu -> %zu; weak objects 0; tasks 1\n",
               textureBaseline, application.GetGlAbstraction().GetNumGeneratedTextures(),
               bufferBaseline, application.GetGraphicsController().mAllocatedBuffers.size());
   END_TEST;

@@ -1214,6 +1214,9 @@ int UtcDaliLabelInvokeMethod(void)
 
 int UtcDaliLabelTextRevealBlurValueP(void)
 {
+  static_assert(static_cast<uint8_t>(Text::Reveal::BlurQuality::HIGH) == 0u);
+  static_assert(static_cast<uint8_t>(Text::Reveal::BlurQuality::PERFORMANCE) == 1u);
+  static_assert(static_cast<uint8_t>(Text::Reveal::BlurQuality::ECONOMY) == 2u);
   UiTestApplication application;
   Text::Reveal      reveal;
   DALI_TEST_EQUALS(reveal.GetBlurRadius(), 0.0f, TEST_LOCATION);
@@ -1268,6 +1271,12 @@ int UtcDaliLabelTextRevealBlurValueP(void)
   DALI_TEST_EQUALS(label.GetTextReveal().GetBlurRadius(), 16.5f, TEST_LOCATION);
   label.SetTextReveal(reveal);
   DALI_TEST_CHECK(label.GetTextReveal() == reveal);
+  reveal.SetBlurQuality(Text::Reveal::BlurQuality::ECONOMY);
+  DALI_TEST_CHECK(label.GetTextReveal() != reveal);
+  label.SetTextReveal(reveal);
+  Text::Reveal economyCopy(label.GetTextReveal());
+  Text::Reveal economyMoved(std::move(economyCopy));
+  DALI_TEST_CHECK(economyMoved == reveal);
   label.SetTextReveal(Text::Reveal::None());
   DALI_TEST_CHECK(label.GetTextReveal() == Text::Reveal::None());
   label.SetTextReveal(reveal);

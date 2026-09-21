@@ -35,13 +35,15 @@ namespace DALI_NAMESPACE::Ui::Internal
  *
  * FULL_RESOLUTION retains the original source/H/V pipeline. AXIS_AWARE_QUARTER
  * reduces X in H, then Y in V, and blends back to the full-resolution source.
+ * ECONOMY_QUARTER reduces both axes in H and uses perceptual sharp/blur weights.
  * The path is resolved when publishing the renderer, independently of CPU
  * raster preparation and the authored Reveal timeline.
  */
 enum class RuntimeRevealBlurPath
 {
   FULL_RESOLUTION,
-  AXIS_AWARE_QUARTER
+  AXIS_AWARE_QUARTER,
+  ECONOMY_QUARTER
 };
 
 struct RuntimeRevealBlurSettings
@@ -54,8 +56,8 @@ struct RuntimeRevealBlurSettings
  * @brief Resolves the creation-time sampling policy for a validated publication.
  *
  * PERFORMANCE uses axis-aware quarter resolution at every radius. HIGH keeps
- * the full-resolution pipeline. The display radius controls the sharp handoff,
- * not the choice of sampling path.
+ * the full-resolution pipeline. ECONOMY reduces both H axes. Authored radius
+ * controls filtering and composition, not the choice of sampling path.
  */
 RuntimeRevealBlurSettings ResolveRuntimeRevealBlurSettings(Ui::Text::Reveal::BlurQuality quality, float authoredRadius);
 

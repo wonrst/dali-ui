@@ -149,7 +149,15 @@ public:
     /**
      * @brief Prioritizes performance using reduced-resolution blur processing.
      */
-    PERFORMANCE
+    PERFORMANCE,
+
+    /**
+     * @brief Reduces filtering cost for constrained devices using quarter-resolution blur.
+     *
+     * Blends sharp text with reduced-resolution blur using a perceptual transition.
+     * The visual result can differ from HIGH and PERFORMANCE.
+     */
+    ECONOMY
   };
 
 public:

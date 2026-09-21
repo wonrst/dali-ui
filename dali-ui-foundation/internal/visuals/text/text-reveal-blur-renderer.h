@@ -47,6 +47,15 @@ Renderer Create(uint32_t blurRadius);
  * in uRevealBlurState and binds the page texture/sampler.
  */
 Renderer CreateBatch(uint32_t blurRadius, Geometry geometry);
-} // namespace Dali::Ui::Internal::TextRevealBlurRenderer
+
+/**
+ * @brief Creates a vertical pass whose input has reduced height.
+ *
+ * Scale is the actual source/input height ratio. An empty geometry selects
+ * the scalar quad. Kernel uniforms belong to the returned renderer's shader,
+ * not a persistent cache keyed by layout-dependent floating-point ratios.
+ */
+Renderer CreateReducedVertical(uint32_t blurRadius, float scale, Geometry geometry = {});
+} //namespace DALI_NAMESPACE::Ui::Internal::TextRevealBlurRenderer
 
 #endif // DALI_UI_INTERNAL_TEXT_REVEAL_BLUR_RENDERER_H

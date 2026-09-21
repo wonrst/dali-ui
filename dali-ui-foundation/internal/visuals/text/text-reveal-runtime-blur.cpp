@@ -15,6 +15,7 @@
  *
  */
 
+#include <dali-ui-foundation/internal/visuals/text/text-reveal-blur-economy.h>
 #include <dali-ui-foundation/internal/visuals/text/text-reveal-runtime-blur.h>
 
 #include <dali-ui-foundation/integration-api/view-integ.h>
@@ -55,20 +56,29 @@ namespace DALI_NAMESPACE::Ui::Internal
 {
 namespace
 {
-// H preserves Y until the vertical filter runs. Source remains full resolution
-// for the final sharp handoff; this policy does not change the Reveal schedule.
+// Reduced-resolution paths keep Source full size for sharp composition.
+// PERFORMANCE preserves H's Y extent; ECONOMY also reduces it in H.
 constexpr float QUARTER_BLUR_SCALE = 0.25f;
 
 struct BlurStrength
 {
   float start;
   float duration;
+  float economyRadius{0.0f};
+  float kernelRadius{1.0f};
 
   float Evaluate(float progress) const
   {
-    const float p = Ui::Text::Internal::Reveal::ResolveRenderProgress(progress);
-    const float q = p >= 1.0f ? 1.0f : std::clamp((p - start) / duration, 0.0f, 1.0f);
-    return 1.0f - q * q * (3.0f - 2.0f * q);
+    const float p      = Ui::Text::Internal::Reveal::ResolveRenderProgress(progress);
+    const float q      = p >= 1.0f ? 1.0f : std::clamp((p - start) / duration, 0.0f, 1.0f);
+    const float amount = 1.0f - q * q * (3.0f - 2.0f * q);
+    // Zero strength uses the existing cheap copy path. Tasks keep refreshing,
+    // so seeking or reverse playback never reads an obsolete framebuffer.
+    if(economyRadius > 0.0f)
+    {
+      return RevealBlurEconomy::Composition(amount).y > 0.0f ? RevealBlurEconomy::Radius(economyRadius, amount) / kernelRadius : 0.0f;
+    }
+    return amount;
   }
 
   void operator()(float& value, const PropertyInputContainer& inputs)
@@ -76,6 +86,38 @@ struct BlurStrength
     value = Evaluate(inputs[0]->GetFloat());
   }
 };
+
+bool BindOutputStrength(Renderer output, Actor owner, Property::Index progressIndex,
+                        const char* name, BlurStrength strength, RuntimeRevealBlurPath path)
+{
+  const float progress = owner.GetCurrentProperty<float>(progressIndex);
+  if(path == RuntimeRevealBlurPath::ECONOMY_QUARTER)
+  {
+    const auto index = output.RegisterProperty(name, RevealBlurEconomy::Composition(strength.Evaluate(progress)));
+    if(!Dali::Adaptor::IsAvailable())
+    {
+      return false;
+    }
+    auto constraint = Constraint::New<Vector2>(output, index, [strength](Vector2& value, const PropertyInputContainer& inputs)
+    {
+      value = RevealBlurEconomy::Composition(strength.Evaluate(inputs[0]->GetFloat()));
+    });
+    constraint.AddSource(Source(owner, progressIndex));
+    constraint.Apply();
+  }
+  else
+  {
+    const auto index = output.RegisterProperty(name, strength.Evaluate(progress));
+    if(!Dali::Adaptor::IsAvailable())
+    {
+      return false;
+    }
+    auto constraint = Constraint::New<float>(output, index, strength);
+    constraint.AddSource(Source(owner, progressIndex));
+    constraint.Apply();
+  }
+  return Dali::Adaptor::IsAvailable();
+}
 
 template<typename T>
 void MirrorProperty(Renderer target, Property::Index targetIndex, Renderer source, Property::Index sourceIndex)
@@ -403,25 +445,32 @@ void main()
   return shader;
 }
 
-Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly, bool batched, bool quarterSource = false)
+Renderer CreateBlurOutput(Renderer foreground, Geometry geometry, bool alphaOnly, bool batched, RuntimeRevealBlurPath path)
 {
   if(!Dali::Adaptor::IsAvailable() || !geometry)
   {
     return {};
   }
+  const bool          quarterSource = path != RuntimeRevealBlurPath::FULL_RESOLUTION;
   const bool          batchStrength = quarterSource && batched;
   thread_local Shader wholeAlphaShader;
   thread_local Shader batchShaders[2];
   thread_local Shader quarterShaders[2][2];
-  auto&               shader = quarterSource ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
-                               : batched     ? batchShaders[alphaOnly ? 1u : 0u]
-                                             : wholeAlphaShader;
+  thread_local Shader economyShaders[2][2];
+  auto&               shader = path == RuntimeRevealBlurPath::ECONOMY_QUARTER ? economyShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : quarterSource                                ? quarterShaders[batched ? 1u : 0u][alphaOnly ? 1u : 0u]
+                               : batched                                      ? batchShaders[alphaOnly ? 1u : 0u]
+                                                                              : wholeAlphaShader;
   if(!shader)
   {
     std::string vertex;
     if(batchStrength)
     {
       vertex = "#define TEXT_REVEAL_OUTPUT_BATCH\n#define NUM_REVEAL_LINES " + std::to_string(TextRevealBlurRenderer::MAX_LINES_PER_DRAW) + "\n";
+    }
+    if(path == RuntimeRevealBlurPath::ECONOMY_QUARTER)
+    {
+      vertex += "#define ECONOMY_BLUR_COMPOSITION\n";
     }
     vertex += R"SHADER(
 //@version 100
@@ -433,13 +482,21 @@ OUTPUT highp vec2 vTexCoord;
 OUTPUT highp vec4 vRevealRectangle;
 #ifdef TEXT_REVEAL_OUTPUT_BATCH
 INPUT highp float aRevealLineIndex;
+#ifdef ECONOMY_BLUR_COMPOSITION
+OUTPUT highp vec2 vRevealBlurStrength;
+#else
 OUTPUT highp float vRevealBlurStrength;
+#endif
 #endif
 UNIFORM_BLOCK VertBlock
 {
   UNIFORM highp mat4 uMvpMatrix;
 #ifdef TEXT_REVEAL_OUTPUT_BATCH
+#ifdef ECONOMY_BLUR_COMPOSITION
+  UNIFORM highp vec2 uRevealBlurStrength[NUM_REVEAL_LINES];
+#else
   UNIFORM highp float uRevealBlurStrength[NUM_REVEAL_LINES];
+#endif
 #endif
 };
 void main()
@@ -457,6 +514,10 @@ void main()
     if(quarterSource)
     {
       fragment += "#define QUARTER_BLUR_SHARP_TAKEOVER\n";
+    }
+    if(path == RuntimeRevealBlurPath::ECONOMY_QUARTER)
+    {
+      fragment += "#define ECONOMY_BLUR_COMPOSITION\n";
     }
     if(batchStrength)
     {
@@ -477,16 +538,28 @@ UNIFORM sampler2D sTexture;
 #ifdef QUARTER_BLUR_SHARP_TAKEOVER
 UNIFORM sampler2D sSharpSource;
 #ifdef TEXT_REVEAL_OUTPUT_BATCH
+#ifdef ECONOMY_BLUR_COMPOSITION
+INPUT highp vec2 vRevealBlurStrength;
+#else
 INPUT highp float vRevealBlurStrength;
+#endif
 #define uAnimationRatio vRevealBlurStrength
 #endif
+#if !defined(TEXT_REVEAL_OUTPUT_BATCH) || !defined(ECONOMY_BLUR_COMPOSITION)
 UNIFORM_BLOCK RevealBlurHandoff
 {
 #ifndef TEXT_REVEAL_OUTPUT_BATCH
+#ifdef ECONOMY_BLUR_COMPOSITION
+  UNIFORM highp vec2 uAnimationRatio;
+#else
   UNIFORM highp float uAnimationRatio;
 #endif
+#endif
+#ifndef ECONOMY_BLUR_COMPOSITION
   UNIFORM highp float uQuarterAuthoredRadius;
+#endif
 };
+#endif
 #endif
 UNIFORM_BLOCK FragColor
 {
@@ -517,6 +590,10 @@ void main()
 #else
   highp vec4 sharpColor = TEXTURE(sSharpSource, vRevealRectangle.xy + vTexCoord * vRevealRectangle.zw);
 #endif
+#ifdef ECONOMY_BLUR_COMPOSITION
+  // Both inputs are current premultiplied content. CPU weights cannot add glow.
+  color = sharpColor * uAnimationRatio.x + color * uAnimationRatio.y;
+#else
   // The existing output constraint supplies this line's actual blur strength.
   // Only handoff uses authored radius; H/V sampling and timing stay unchanged.
   const highp float SHARP_ONLY_EFFECTIVE_RADIUS = 2.0;
@@ -528,6 +605,7 @@ void main()
   // The alpha-only path reconstructs text color from the mixed red channel.
   color = t <= 0.0 ? sharpColor : mix(sharpColor, color, blurMix);
 #endif
+#endif
 #ifdef ALPHA_ONLY
   highp vec3 rgb = uTextColorAnimatable.a > 0.0 ? uTextColorAnimatable.rgb / uTextColorAnimatable.a : vec3(0.0);
   color = vec4(rgb * color.r, color.r);
@@ -535,10 +613,22 @@ void main()
   gl_FragColor = color * uColor;
 }
 )SHADER";
+    const char* name;
+    if(path == RuntimeRevealBlurPath::ECONOMY_QUARTER)
+    {
+      name = batched ? "TEXT_REVEAL_ECONOMY_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_ECONOMY_BLUR_OUTPUT";
+    }
+    else if(quarterSource)
+    {
+      name = batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT";
+    }
+    else
+    {
+      name = !batched ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT" : alphaOnly ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
+                                                                          : "TEXT_REVEAL_BLUR_BATCH_OUTPUT";
+    }
     shader = Shader::New(Dali::Integration::ToDaliStringView(batched ? std::string_view(vertex) : BASIC_VERTEX_SOURCE), Dali::Integration::ToDaliStringView(fragment),
-                         Shader::Hint::NONE, quarterSource ? (batched ? "TEXT_REVEAL_QUARTER_BLUR_BATCH_OUTPUT" : "TEXT_REVEAL_QUARTER_BLUR_OUTPUT") : !batched  ? "TEXT_REVEAL_BLUR_WHOLE_ALPHA_OUTPUT"
-                                                                                                                                                     : alphaOnly ? "TEXT_REVEAL_BLUR_ALPHA_OUTPUT"
-                                                                                                                                                                 : "TEXT_REVEAL_BLUR_BATCH_OUTPUT");
+                         Shader::Hint::NONE, name);
     shader.RegisterProperty("viewEffectiveScale", 1.0f);
   }
   if(!Dali::Adaptor::IsAvailable())
@@ -601,7 +691,7 @@ struct BlurBatchOutputVertex
   Vector4 rectangle;
 };
 
-// PERFORMANCE output selects line-local strength for the sharp-source handoff.
+// Reduced-resolution output selects line-local sharp/blur composition.
 // HIGH keeps its existing vertex format, without unused shader attributes.
 struct BlurBatchHandoffVertex
 {
@@ -1161,7 +1251,8 @@ public:
         batches.push_back({index, 1u, lineSizes[index]});
       }
     }
-    const bool                            quarterBlur           = mSettings.path == RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+    const bool                            quarterBlur           = mSettings.path != RuntimeRevealBlurPath::FULL_RESOLUTION;
+    const bool                            economyBlur           = mSettings.path == RuntimeRevealBlurPath::ECONOMY_QUARTER;
     const float                           quarterAuthoredRadius = mSettings.authoredRadius;
     ForegroundProperties                  foregroundProperties;
     std::vector<std::pair<size_t, Actor>> orderedOutputs;
@@ -1197,8 +1288,8 @@ public:
       if(batched)
       {
         // Full resolution consumes source/H before the next page overwrites it.
-        // Late Smooth also samples source at composition, so only H is scratch
-        // in that path. Never share textures across companions or formats.
+        // Reduced-resolution outputs also sample source at composition, so
+        // only H is scratch there. Never share across companions or formats.
         for(size_t previous = 0u; previous < batchIndex; ++previous)
         {
           if(mPasses[previous].size == pass.size &&
@@ -1223,7 +1314,7 @@ public:
           if(quarterBlur && bufferIndex > 0u)
           {
             width = std::max(1u, static_cast<uint32_t>(std::ceil(pass.size.x * QUARTER_BLUR_SCALE)));
-            if(bufferIndex == 2u)
+            if(bufferIndex == 2u || economyBlur)
             {
               height = std::max(1u, static_cast<uint32_t>(std::ceil(pass.size.y * QUARTER_BLUR_SCALE)));
             }
@@ -1241,6 +1332,7 @@ public:
           buffer.AttachColorTexture(texture);
         }
       }
+      const float                         verticalScale = economyBlur ? pass.size.y / static_cast<float>(pass.buffers[1u].GetColorTexture().GetHeight()) : 1.0f;
       std::vector<BlurBatchVertex>        vertices;
       std::vector<BlurBatchVertex>        horizontalVertices;
       std::vector<BlurBatchOutputVertex>  outputVertices;
@@ -1423,7 +1515,8 @@ public:
           {
             Actor blurActor = pass.blurActors[i];
             blurActor.SetProperty(Actor::Property::POSITION, offset);
-            Renderer renderer = TextRevealBlurRenderer::Create(mRadius);
+            Renderer renderer = economyBlur && i == 1u ? TextRevealBlurRenderer::CreateReducedVertical(mRadius, verticalScale)
+                                                       : TextRevealBlurRenderer::Create(mRadius);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1432,12 +1525,12 @@ public:
             renderer.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::OFF);
             renderer.RegisterProperty("uOpacity", 1.0f);
             renderer.RegisterProperty("uOffsetDirection", i == 0u ? Vector2(1.0f / size.x, 0.0f)
-                                                                  : Vector2(0.0f, 1.0f / size.y));
+                                                                  : Vector2(0.0f, verticalScale / size.y));
             if(quarterBlur)
             {
               // Keep full-size camera/quads and normalized Gaussian offsets:
-              // H reads full Source; V reads reduced H but still offsets by
-              // sample/fullHeight, NOT sample/quarterHeight. Kernel unchanged.
+              // H reads full Source. PERFORMANCE V keeps full-height offsets;
+              // ECONOMY scales both its kernel and offsets to the input domain.
               const auto input = pass.buffers[i].GetColorTexture();
               renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"),
                                    Vector2(1.0f / input.GetWidth(), 1.0f / input.GetHeight()));
@@ -1457,7 +1550,7 @@ public:
             });
             mirror.AddSource(Source(owner, mProgressIndex));
             mirror.Apply();
-            BlurStrength strength{timing.start, mBlurDuration};
+            BlurStrength strength{timing.start, mBlurDuration, economyBlur ? quarterAuthoredRadius : 0.0f, static_cast<float>(mRadius)};
             auto         index = renderer.RegisterProperty("uAnimationRatio", strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
             if(!Dali::Adaptor::IsAvailable())
             {
@@ -1471,7 +1564,7 @@ public:
         }
         if(!batched)
         {
-          Renderer output = alphaOnly || quarterBlur ? CreateBlurOutput(mForeground, mForeground.GetGeometry(), alphaOnly, false, quarterBlur)
+          Renderer output = alphaOnly || quarterBlur ? CreateBlurOutput(mForeground, mForeground.GetGeometry(), alphaOnly, false, mSettings.path)
                                                      : CreatePlainOutput();
           if(!Dali::Adaptor::IsAvailable() || !output)
           {
@@ -1480,15 +1573,17 @@ public:
           BindTexture(output, pass.buffers[2].GetColorTexture());
           if(quarterBlur)
           {
-            output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+            if(!economyBlur)
+            {
+              output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+            }
             auto textures = output.GetTextures();
             textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
             textures.SetSampler(1u, textures.GetSampler(0u));
-            BlurStrength strength{timing.start, mBlurDuration};
-            const auto   index      = output.RegisterProperty("uAnimationRatio", strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
-            auto         constraint = Constraint::New<float>(output, index, strength);
-            constraint.AddSource(Source(owner, mProgressIndex));
-            constraint.Apply();
+            if(!BindOutputStrength(output, owner, mProgressIndex, "uAnimationRatio", {timing.start, mBlurDuration}, mSettings.path))
+            {
+              return;
+            }
           }
           output.SetProperty(Renderer::Property::BLEND_PRE_MULTIPLIED_ALPHA, true);
           output.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
@@ -1527,7 +1622,9 @@ public:
           // remains essential, including when pages share scratch storage.
           Geometry   horizontalGeometry = geometry;
           const auto bandFirst          = horizontalBands.begin() + static_cast<std::vector<Vector2>::difference_type>(batch.first + first);
-          if(std::any_of(bandFirst, bandFirst + count, [](const Vector2& band)
+          // Quarter-Y H needs full padded coverage. D2's full-Y band geometry
+          // remains exclusive to HIGH/PERFORMANCE.
+          if(!economyBlur && std::any_of(bandFirst, bandFirst + count, [](const Vector2& band)
           {
             return band.x > 0.0f || band.y < 1.0f;
           }))
@@ -1544,7 +1641,8 @@ public:
           }
           for(uint32_t i = 0u; i < 2u; ++i)
           {
-            Renderer renderer = TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
+            Renderer renderer = economyBlur && i == 1u ? TextRevealBlurRenderer::CreateReducedVertical(mRadius, verticalScale, geometry)
+                                                       : TextRevealBlurRenderer::CreateBatch(mRadius, i == 0u ? horizontalGeometry : geometry);
             if(!Dali::Adaptor::IsAvailable() || !renderer)
             {
               return;
@@ -1552,12 +1650,12 @@ public:
             BindTexture(renderer, pass.buffers[i].GetColorTexture());
             renderer.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::OFF);
             renderer.RegisterProperty("uOpacity", 1.0f);
-            renderer.RegisterProperty("uOffsetDirection", i == 0u ? Vector2(1.0f, 0.0f) : Vector2(0.0f, 1.0f));
+            renderer.RegisterProperty("uOffsetDirection", i == 0u ? Vector2(1.0f, 0.0f) : Vector2(0.0f, verticalScale));
             renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"), Vector2(1.0f / pass.size.x, 1.0f / pass.size.y));
             if(quarterBlur)
             {
-              // Vertex offsets still use each full-resolution line extent;
-              // only the input tile's half-texel clamp follows its resolution.
+              // Geometry stores full-resolution line extents. The direction
+              // converts ECONOMY V to input pixels; clamps use actual texels.
               const auto input = pass.buffers[i].GetColorTexture();
               renderer.SetProperty(renderer.GetPropertyIndex("uRevealBatchInvSize"),
                                    Vector2(1.0f / input.GetWidth(), 1.0f / input.GetHeight()));
@@ -1577,7 +1675,7 @@ public:
             for(uint32_t line = 0u; line < count; ++line)
             {
               const auto&        timing = mSequences[batch.first + first + line];
-              const BlurStrength strength{timing.start, mBlurDuration};
+              const BlurStrength strength{timing.start, mBlurDuration, economyBlur ? quarterAuthoredRadius : 0.0f, static_cast<float>(mRadius)};
               const std::string  name  = "uRevealBlurState[" + std::to_string(line) + "]";
               const auto         index = renderer.RegisterProperty(name.c_str(), Vector2(strength.Evaluate(progressValue), timing.start));
               if(!Dali::Adaptor::IsAvailable())
@@ -1609,7 +1707,7 @@ public:
             const auto outputCount    = static_cast<uint32_t>(outputEnd - outputFirst);
             auto       outputGeometry = quarterBlur ? CreateBlurBatchGeometry(handoffVertices.data() + outputFirst * 4u, outputCount)
                                                     : CreateBlurBatchGeometry(outputVertices.data() + outputFirst * 4u, outputCount);
-            Renderer   output         = CreateBlurOutput(mForeground, outputGeometry, alphaOnly, true, quarterBlur);
+            Renderer   output         = CreateBlurOutput(mForeground, outputGeometry, alphaOnly, true, mSettings.path);
             if(!Dali::Adaptor::IsAvailable() || !output)
             {
               return;
@@ -1617,7 +1715,10 @@ public:
             BindTexture(output, pass.buffers[2].GetColorTexture());
             if(quarterBlur)
             {
-              output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+              if(!economyBlur)
+              {
+                output.RegisterProperty("uQuarterAuthoredRadius", quarterAuthoredRadius);
+              }
               auto textures = output.GetTextures();
               textures.SetTexture(1u, pass.buffers[0u].GetColorTexture());
               textures.SetSampler(1u, textures.GetSampler(0u));
@@ -1627,15 +1728,11 @@ public:
                 const BlurStrength strength{timing.start, mBlurDuration};
                 // Indices are local to the H/V draw, not to a split output
                 // range (mixed-format pages can have gaps in logical order).
-                const std::string name  = "uRevealBlurStrength[" + std::to_string(line - first) + "]";
-                const auto        index = output.RegisterProperty(name.c_str(), strength.Evaluate(owner.GetCurrentProperty<float>(mProgressIndex)));
-                if(!Dali::Adaptor::IsAvailable())
+                const std::string name = "uRevealBlurStrength[" + std::to_string(line - first) + "]";
+                if(!BindOutputStrength(output, owner, mProgressIndex, name.c_str(), strength, mSettings.path))
                 {
                   return;
                 }
-                auto constraint = Constraint::New<float>(output, index, strength);
-                constraint.AddSource(Source(owner, mProgressIndex));
-                constraint.Apply();
               }
             }
             output.SetProperty(Renderer::Property::BLEND_PRE_MULTIPLIED_ALPHA, true);
@@ -2067,9 +2164,10 @@ Rect<int32_t> ResolveRuntimeRevealBlurTarget(Renderer foreground, const Vector2&
 
 RuntimeRevealBlurSettings ResolveRuntimeRevealBlurSettings(Ui::Text::Reveal::BlurQuality quality, float authoredRadius)
 {
-  const bool fullResolution = quality == Ui::Text::Reveal::BlurQuality::HIGH;
-  return {fullResolution ? RuntimeRevealBlurPath::FULL_RESOLUTION : RuntimeRevealBlurPath::AXIS_AWARE_QUARTER,
-          authoredRadius};
+  const auto path = quality == Ui::Text::Reveal::BlurQuality::HIGH      ? RuntimeRevealBlurPath::FULL_RESOLUTION
+                    : quality == Ui::Text::Reveal::BlurQuality::ECONOMY ? RuntimeRevealBlurPath::ECONOMY_QUARTER
+                                                                        : RuntimeRevealBlurPath::AXIS_AWARE_QUARTER;
+  return {path, authoredRadius};
 }
 
 Actor PrepareRuntimeRevealBlur(Actor owner, Renderer foreground, const Vector2& size,

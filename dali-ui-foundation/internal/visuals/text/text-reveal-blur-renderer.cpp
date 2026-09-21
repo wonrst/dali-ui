@@ -19,15 +19,19 @@
 
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/render-effects/gaussian-blur-algorithm.h>
+#include <dali-ui-foundation/internal/visuals/text/text-reveal-blur-economy.h>
 #include <dali/integration-api/adaptor-framework/adaptor.h>
 #include <dali/integration-api/debug.h>
+#include <dali/integration-api/shader-integ.h>
 #include <dali/integration-api/string-utils.h>
 #include <dali/public-api/math/vector2.h>
 #include <dali/public-api/math/vector4.h>
 #include <dali/public-api/rendering/vertex-buffer.h>
+#include <cmath>
 #include <locale>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace DALI_NAMESPACE::Ui::Internal::TextRevealBlurRenderer
 {
@@ -112,13 +116,16 @@ Shader& GetShader(uint32_t blurRadius, bool batch)
   return shader;
 }
 
-Renderer CreateRenderer(uint32_t blurRadius, Geometry geometry, bool batch)
+Renderer CreateRenderer(uint32_t blurRadius, Geometry geometry, bool batch, Shader shader = {})
 {
   if(!Dali::Adaptor::IsAvailable())
   {
     return {};
   }
-  auto shader = GetShader(blurRadius, batch);
+  if(!shader)
+  {
+    shader = GetShader(blurRadius, batch);
+  }
   if(!Dali::Adaptor::IsAvailable() || !shader)
   {
     return {};
@@ -152,5 +159,45 @@ Renderer Create(uint32_t blurRadius)
 Renderer CreateBatch(uint32_t blurRadius, Geometry geometry)
 {
   return CreateRenderer(blurRadius, geometry, true);
+}
+
+Renderer CreateReducedVertical(uint32_t blurRadius, float scale, Geometry geometry)
+{
+  if(!Dali::Adaptor::IsAvailable() || !GaussianBlurAlgorithm::IsSupportedRadius(blurRadius) || !std::isfinite(scale) || scale < 1.0f)
+  {
+    return {};
+  }
+  std::vector<float> weights;
+  std::vector<float> offsets;
+  if(!RevealBlurEconomy::CalculateVerticalKernel(blurRadius, scale, weights, offsets))
+  {
+    return {};
+  }
+  auto block = Dali::UniformBlock::New("GaussianBlurSampleBlock");
+  if(!Dali::Adaptor::IsAvailable())
+  {
+    return {};
+  }
+  for(size_t i = 0u; i < weights.size(); ++i)
+  {
+    block.RegisterProperty(Dali::Integration::ToDaliString("uSampleOffsets[" + std::to_string(i) + "]"), offsets[i]);
+    block.RegisterProperty(Dali::Integration::ToDaliString("uSampleWeights[" + std::to_string(i) + "]"), weights[i]);
+  }
+  const bool        batch    = static_cast<bool>(geometry);
+  const std::string vertex   = batch ? "#define NUM_REVEAL_LINES " + std::to_string(MAX_LINES_PER_DRAW) + "\n" + std::string(SHADER_TEXT_REVEAL_BLUR_VERT)
+                                     : std::string(SHADER_CONTROL_RENDERERS_VERT);
+  const std::string fragment = "#define NUM_SAMPLES " + std::to_string(weights.size()) + "\n" +
+                               (batch ? "#define TEXT_REVEAL_DRAW_BATCH\n" : "") + std::string(SHADER_TEXT_REVEAL_BLUR_FRAG);
+  const std::string name = "TEXT_REVEAL_ECONOMY_V_" + std::to_string(weights.size()) + (batch ? "_BATCH" : "");
+  // Unlike the shared full-resolution kernel, this layout-dependent block has
+  // no cache owner. Keep it alive through the shader, then release both together.
+  auto shader = Dali::Integration::ShaderNewWithUniformBlock(Dali::Integration::ToDaliStringView(vertex), Dali::Integration::ToDaliStringView(fragment),
+                                                             Shader::Hint::FILE_CACHE_SUPPORT, Dali::Integration::ToDaliStringView(name), {block}, true);
+  if(!Dali::Adaptor::IsAvailable() || !shader)
+  {
+    return {};
+  }
+  shader.RegisterUniqueProperty("viewEffectiveScale", 1.0f);
+  return CreateRenderer(blurRadius, batch ? geometry : GetCachedGeometry(), batch, shader);
 }
 } //namespace DALI_NAMESPACE::Ui::Internal::TextRevealBlurRenderer
