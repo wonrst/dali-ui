@@ -1,0 +1,16 @@
+# Target runtime RPM manifest
+
+common is shared byte-for-byte by production and Source-only. optional is not installed by default.
+
+| Variant | Package | Full path | Bytes | SHA256 |
+|---|---|---|---:|---|
+| common | com.samsung.dali.text | com.samsung.dali.text-2.0.0-1.ryutrace.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/common/com.samsung.dali.text-2.0.0-1.ryutrace.armv7l.rpm`) | 797739 | `1b3de217151e947bde33962c5e27d816f82c2894e13556688f0a88b6e6828f49` |
+| common | dali2 | dali2-2.5.39-2.ryucmd.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/common/dali2-2.5.39-2.ryucmd.armv7l.rpm`) | 545643 | `22b60aff4818c51e8090f54824c0cc01c368f170ccc91a8f26814c016e0a4d90` |
+| common | dali2-adaptor | dali2-adaptor-2.5.39-2.ryucmd.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/common/dali2-adaptor-2.5.39-2.ryucmd.armv7l.rpm`) | 965059 | `a4866185a93ad825894f01dbea0920196d574184467297892f763e42e692cda0` |
+| common | dali2-adaptor-profile_tv | dali2-adaptor-profile_tv-2.5.39-2.ryucmd.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/common/dali2-adaptor-profile_tv-2.5.39-2.ryucmd.armv7l.rpm`) | 774791 | `383e6bf60cab3f6177b834b1c8c99a77778a6a7d736cf77b731291b226d8b539` |
+| optional | dali2-adaptor-dali2-feedback-plugin | dali2-adaptor-dali2-feedback-plugin-2.5.39-2.ryucmd.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/optional/dali2-adaptor-dali2-feedback-plugin-2.5.39-2.ryucmd.armv7l.rpm`) | 10583 | `9a089031f075126ef5be59ddb738b1df03b46779cc2b20523362bd6705cecb1d` |
+| optional | dali2-adaptor-vulkan | dali2-adaptor-vulkan-2.5.39-2.ryucmd.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/optional/dali2-adaptor-vulkan-2.5.39-2.ryucmd.armv7l.rpm`) | 201611 | `4f6b4aacd293b07ffffceae8280d6cef70ee1e01689690ce483d1c3dc2e39ae0` |
+| production | dali2-ui-components | dali2-ui-components-2.5.39.11414-2.ryucmd.production.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/production/dali2-ui-components-2.5.39.11414-2.ryucmd.production.armv7l.rpm`) | 267363 | `1e9a5a7df6604d11081f38f8172304712a2272107b07144c05a19f1737ba5cbd` |
+| production | dali2-ui-foundation | dali2-ui-foundation-2.5.39.11414-2.ryucmd.production.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/production/dali2-ui-foundation-2.5.39.11414-2.ryucmd.production.armv7l.rpm`) | 1370103 | `4ba7fa2677760253c3a2b3593102b619f4c9c9db53de5567e3950f12ba62b4c8` |
+| source-only | dali2-ui-components | dali2-ui-components-2.5.39.11414-2.ryucmd.sourceonly.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/source-only/dali2-ui-components-2.5.39.11414-2.ryucmd.sourceonly.armv7l.rpm`) | 267419 | `12d62b0283c90fa4e73891d546b5f9b5f980d53825c787e29fd07fa89f4d99f7` |
+| source-only | dali2-ui-foundation | dali2-ui-foundation-2.5.39.11414-2.ryucmd.sourceonly.armv7l.rpm (로컬 자료: `/home/bowonryuubuntu/tizen/reveal-command-attribution.O3eOCq/artifacts/source-only/dali2-ui-foundation-2.5.39.11414-2.ryucmd.sourceonly.armv7l.rpm`) | 1370319 | `722584f3e101831dccaf9f70b89e9fa4018566bb34f27546d72f4fffc47e39f7` |
