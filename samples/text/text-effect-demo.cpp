@@ -30,7 +30,7 @@ using namespace Dali;
 using namespace Dali::Ui;
 
 // Local travel-demo content illustrates Reveal, gradients and layout transitions.
-// Keys: Enter/Space advances, Esc/Back returns, 0 restarts, 1 selects Sync, 2 selects Async.
+// Keys: Enter/Space advances, Esc/Back returns, 0 restarts, 1 selects Sync, 2 selects Async, 3 cycles blur quality.
 // Markdown owns its internal Labels and is excluded from the rendering-mode controls.
 // Blur Effect compares ordinary Reveal + one GaussianBlurEffect per animated Label.
 // Select the mode, then press 0 for a repeatable comparison from the loading screen.
@@ -717,7 +717,9 @@ private:
     mBlurRadiusButton.SetEnabled(revealBlurEnabled);
     mBlurRadiusButton.SetTextColor(UiColor(revealBlurEnabled ? CYAN_COLOR : MUTED_TEXT_COLOR));
     mBlurRadiusButton.SetBorderlineColor(UiColor(revealBlurEnabled ? BLUE_COLOR : CARD_LINE_COLOR));
-    mBlurQualityButton.SetText(mBlurQuality == Text::Reveal::BlurQuality::HIGH ? "High" : "Performance");
+    mBlurQualityButton.SetText(mBlurQuality == Text::Reveal::BlurQuality::HIGH      ? "High"
+                               : mBlurQuality == Text::Reveal::BlurQuality::ECONOMY ? "Economy"
+                                                                                    : "Performance");
     mBlurQualityButton.SetEnabled(revealBlurEnabled);
     mBlurQualityButton.SetTextColor(UiColor(revealBlurEnabled ? CYAN_COLOR : MUTED_TEXT_COLOR));
     mBlurQualityButton.SetBorderlineColor(UiColor(revealBlurEnabled ? BLUE_COLOR : CARD_LINE_COLOR));
@@ -788,7 +790,18 @@ private:
     {
       return;
     }
-    mBlurQuality = mBlurQuality == Text::Reveal::BlurQuality::HIGH ? Text::Reveal::BlurQuality::PERFORMANCE : Text::Reveal::BlurQuality::HIGH;
+    switch(mBlurQuality)
+    {
+      case Text::Reveal::BlurQuality::HIGH:
+        mBlurQuality = Text::Reveal::BlurQuality::PERFORMANCE;
+        break;
+      case Text::Reveal::BlurQuality::PERFORMANCE:
+        mBlurQuality = Text::Reveal::BlurQuality::ECONOMY;
+        break;
+      case Text::Reveal::BlurQuality::ECONOMY:
+        mBlurQuality = Text::Reveal::BlurQuality::HIGH;
+        break;
+    }
     UpdateBlurControls();
     UpdateSceneBlur();
   }
@@ -2012,6 +2025,10 @@ private:
     else if(key == "2" || key == "KP_2")
     {
       SetTextRenderingMode(true);
+    }
+    else if(key == "3" || key == "KP_3")
+    {
+      ToggleBlurQuality();
     }
     else if(IsKey(event, Dali::DALI_KEY_ESCAPE) || IsKey(event, Dali::DALI_KEY_BACK))
     {

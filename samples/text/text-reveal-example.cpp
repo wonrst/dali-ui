@@ -463,8 +463,10 @@ private:
     StackLayout blurQualityControls = NewMenuRow("QUALITY");
     mBlurHighButton                 = NewButton("High");
     mBlurPerformanceButton          = NewButton("Performance");
+    mBlurEconomyButton              = NewButton("Economy");
     blurQualityControls.Add(mBlurHighButton);
     blurQualityControls.Add(mBlurPerformanceButton);
+    blurQualityControls.Add(mBlurEconomyButton);
     mBlurHighButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
     {
       SetBlurQuality(Text::Reveal::BlurQuality::HIGH);
@@ -472,6 +474,10 @@ private:
     mBlurPerformanceButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
     {
       SetBlurQuality(Text::Reveal::BlurQuality::PERFORMANCE);
+    });
+    mBlurEconomyButton.AsInteractive().ClickedSignal().Connect(this, [this](View, InputEvent)
+    {
+      SetBlurQuality(Text::Reveal::BlurQuality::ECONOMY);
     });
 
     StackLayout blurEndControls = NewMenuRow("BLUR TIME");
@@ -929,6 +935,7 @@ private:
     SetButtonSelected(mBlurButton, mBlurEnabled);
     SetButtonSelected(mBlurHighButton, mBlurQuality == Text::Reveal::BlurQuality::HIGH);
     SetButtonSelected(mBlurPerformanceButton, mBlurQuality == Text::Reveal::BlurQuality::PERFORMANCE);
+    SetButtonSelected(mBlurEconomyButton, mBlurQuality == Text::Reveal::BlurQuality::ECONOMY);
     GetSlider(SliderId::RADIUS).SetValue(mBlurRadius);
     GetSlider(SliderId::BLUR_TIME).SetValue(mBlurDurationRatio);
   }
@@ -1421,6 +1428,7 @@ private:
   Label                                  mBlurButton;
   Label                                  mBlurHighButton;
   Label                                  mBlurPerformanceButton;
+  Label                                  mBlurEconomyButton;
   ScrollView                             mControlsViewport;
   Label                                  mAsyncButton;
   Label                                  mFillButton;
