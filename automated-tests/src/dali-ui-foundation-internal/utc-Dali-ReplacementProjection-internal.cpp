@@ -1761,7 +1761,7 @@ int UtcDaliReplacementEditableCaretAndVisualLayerP(void)
   decorator->SetHandleActive(Text::RIGHT_SELECTION_HANDLE, true);
   decorator->ResizeHighlightQuads(1u);
   decorator->AddHighlight(0u, Vector4(10.0f, 10.0f, 90.0f, 40.0f));
-  decorator->SetHighLightBox(Vector2(10.0f, 10.0f), Size(80.0f, 30.0f), 0.0f);
+  decorator->SetHighLightBox(Vector2(10.0f, 10.0f), Size(80.0f, 30.0f));
   decorator->SetHighlightActive(true);
 
   struct NoopDecoratorRelayoutContainer : public RelayoutContainer

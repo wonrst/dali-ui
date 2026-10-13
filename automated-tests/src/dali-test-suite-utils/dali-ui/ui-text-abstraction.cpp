@@ -65,7 +65,7 @@ FontId GetMockFontId(PointSize26Dot6 pointSize)
 
 float GetMockFontPixelSize(FontId fontId)
 {
-  return static_cast<float>(fontId > 0u ? fontId : DEFAULT_POINT_SIZE_26DOT6) / 64.0f;
+  return static_cast<float>(fontId > 0u ? (fontId & ~Test::FALLBACK_SOURCE_FONT_BIT) : DEFAULT_POINT_SIZE_26DOT6) / 64.0f;
 }
 } // namespace
 
@@ -225,11 +225,15 @@ public:
   }
   bool IsCharacterSupportedByFont(FontId fontId, Character character)
   {
+    if(fontId & Test::FALLBACK_SOURCE_FONT_BIT)
+    {
+      return character == CHAR_SPACE || character == 0x1F600u;
+    }
     return true;
   }
   PointSize26Dot6 GetPointSize(FontId id)
   {
-    return id > 0u ? static_cast<PointSize26Dot6>(id) : DEFAULT_POINT_SIZE_26DOT6;
+    return id > 0u ? static_cast<PointSize26Dot6>(id & ~Test::FALLBACK_SOURCE_FONT_BIT) : DEFAULT_POINT_SIZE_26DOT6;
   }
   FontId FindDefaultFont(Character charcode, PointSize26Dot6 pointSize, bool preferColor)
   {
@@ -245,7 +249,7 @@ public:
   }
   FontId GetFontId(const FontDescription& fontDescription, PointSize26Dot6 pointSize, FaceIndex faceIndex, Property::Map* variationsMapPtr)
   {
-    return GetMockFontId(pointSize);
+    return GetMockFontId(pointSize) | (fontDescription.family == Test::FALLBACK_SOURCE_FAMILY ? Test::FALLBACK_SOURCE_FONT_BIT : 0u);
   }
   bool IsScalable(const FontPath& path)
   {
@@ -296,6 +300,10 @@ public:
       glyph.xBearing = 0.0f;
       glyph.yBearing = pixelSize * 0.8f;
       glyph.advance  = width;
+      if(glyph.index == CHAR_SPACE && (glyph.fontId & Test::FALLBACK_SOURCE_FONT_BIT))
+      {
+        glyph.advance = pixelSize * 3.f;
+      }
     }
     return true;
   }
@@ -304,16 +312,29 @@ public:
     // Dummy data for testing
     data.width           = 2;
     data.height          = 4;
-    data.format          = Pixel::L8;
+    data.format          = glyphIndex == Test::COLOR_GLYPH_INDEX ? Pixel::BGRA8888 : Pixel::L8;
     data.compressionType = TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;
-    data.isColorEmoji    = false;
+    data.isColorEmoji    = glyphIndex == Test::COLOR_GLYPH_INDEX;
     data.isColorBitmap   = false;
 
     uint8_t* newBuffer = (uint8_t*)malloc(data.width * data.height * Pixel::GetBytesPerPixel(data.format));
     // Keep the default opaque test glyph, with one explicitly reserved index
     // for deterministic half-coverage antialiasing tests.
     const uint8_t coverage = glyphIndex == Test::HALF_COVERAGE_GLYPH_INDEX ? 128u : 255u;
-    std::fill(newBuffer, newBuffer + (data.width * data.height), coverage);
+    if(data.isColorEmoji)
+    {
+      for(uint32_t i = 0; i < data.width * data.height; ++i)
+      {
+        newBuffer[4u * i]      = 32u;
+        newBuffer[4u * i + 1u] = 128u;
+        newBuffer[4u * i + 2u] = 240u;
+        newBuffer[4u * i + 3u] = i == 0u ? 128u : 255u;
+      }
+    }
+    else
+    {
+      std::fill(newBuffer, newBuffer + (data.width * data.height), coverage);
+    }
 
     data.buffer          = newBuffer;
     data.isBufferOwned   = true;
@@ -384,7 +405,7 @@ public:
   }
   bool IsColorGlyph(FontId fontId, GlyphIndex glyphIndex)
   {
-    return false;
+    return glyphIndex == Test::COLOR_GLYPH_INDEX;
   }
   bool IsColorFont(FontId fontId)
   {
@@ -499,7 +520,7 @@ public:
 
         // Dummy info for testing
         glyph.fontId   = mFontId;
-        glyph.index    = mText[i];
+        glyph.index    = (mFontId & Test::FALLBACK_SOURCE_FONT_BIT) && mText[i] == 0x1F600u ? Test::COLOR_GLYPH_INDEX : mText[i];
         glyph.advance  = 1.0f;
         glyph.xBearing = 0.0f;
         glyph.yBearing = 0.0f;
@@ -959,7 +980,8 @@ bool IsRightToLeftScript(Script script)
 
 Script GetCharacterScript(Character character)
 {
-  return LATIN;
+  // Paragraph separators must split script runs during incremental edits.
+  return IsWhiteSpace(character) || IsNewParagraph(character) ? COMMON : LATIN;
 }
 
 bool IsWhiteSpace(Character character)
@@ -1072,6 +1094,10 @@ void Segmentation::GetLineBreakPositions(unsigned int const* text, unsigned int 
       else if(IsWhiteSpace(text[i]))
       {
         breakInfo[i] = TextAbstraction::LINE_ALLOW_BREAK;
+      }
+      else
+      {
+        breakInfo[i] = TextAbstraction::LINE_NO_BREAK;
       }
     }
     breakInfo[length - 1] = TextAbstraction::LINE_MUST_BREAK;

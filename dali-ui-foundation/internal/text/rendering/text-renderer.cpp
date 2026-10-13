@@ -32,6 +32,12 @@ Renderer::~Renderer()
 {
 }
 
+bool Renderer::RequiresGroupComposition() const
+{
+  // A backend must establish non-overlap before using direct framebuffer blending.
+  return true;
+}
+
 bool Renderer::SetAtlasGradientState(const Internal::Gradient::AtlasRendererState&)
 {
   return false;

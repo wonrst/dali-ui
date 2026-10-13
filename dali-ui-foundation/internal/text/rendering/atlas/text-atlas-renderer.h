@@ -45,6 +45,8 @@ public:
   virtual Actor Render(ViewInterface& view, Actor textControl, Property::Index animatablePropertyIndex,
                        float& alignmentOffset, int depth) override;
 
+  bool RequiresGroupComposition() const override;
+
   bool SetAtlasGradientState(const Internal::Gradient::AtlasRendererState& state) override;
   void UpdateAtlasGradient(const Vector2& coordinateSize, const Vector4& bounds) override;
   void UpdateAtlasGradientSpanViewBounds(const Vector2& coordinateSize, const Vector4& bounds) override;

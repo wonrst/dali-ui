@@ -163,6 +163,8 @@ public:
    */
   const Vector2& GetShadowOffset() const override;
 
+  float GetShadowBlurRadius() const override;
+
   /**
    * @copydoc Dali::Ui::Text::ViewInterface::IsShadowEnabled()
    */
@@ -237,6 +239,8 @@ public:
    * @copydoc Dali::Ui::Text::ViewInterface::GetOutlineOffset()
    */
   const Vector2& GetOutlineOffset() const override;
+
+  float GetOutlineBlurRadius() const override;
 
   /**
    * @copydoc Dali::Ui::Text::ViewInterface::GetOutlineColor()

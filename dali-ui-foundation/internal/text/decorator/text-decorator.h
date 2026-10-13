@@ -496,9 +496,8 @@ public:
    *
    * @param[in] position The position of the highlighted text in decorator's coords.
    * @param[in] size The size of the highlighted text.
-   * @param[in] outlineOffset The outline's offset.
    */
-  void SetHighLightBox(const Vector2& position, const Size& size, float outlineOffset);
+  void SetHighLightBox(const Vector2& position, const Size& size);
 
   /**
    * @brief Removes all of the previously added highlights.

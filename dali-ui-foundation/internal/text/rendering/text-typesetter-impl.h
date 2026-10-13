@@ -22,14 +22,18 @@
 #include <dali/devel-api/text-abstraction/font-client.h>
 #include <dali/devel-api/text-abstraction/text-abstraction-definitions.h>
 #include <dali/public-api/adaptor-framework/pixel-buffer.h>
+#include <dali/public-api/common/dali-vector.h>
 #include <dali/public-api/common/intrusive-ptr.h>
 #include <dali/public-api/images/pixel.h>
 #include <dali/public-api/object/ref-object.h>
 #include <memory> ///< for std::unique_ptr
 
 // INTERNAL INCLUDES
+#include <dali-ui-foundation/internal/text/rendering/text-raster-geometry.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
+#include <dali-ui-foundation/internal/text/strikethrough-glyph-run.h>
 #include <dali-ui-foundation/internal/text/text-enumerations.h>
+#include <dali-ui-foundation/internal/text/underlined-glyph-run.h>
 
 namespace DALI_NAMESPACE
 {
@@ -61,6 +65,14 @@ namespace Reveal
 void ExpandMetadataOwnership(uint8_t* metadata, uint32_t width, uint32_t height);
 } // namespace Reveal
 } // namespace Internal
+
+/** @brief A checked raster destination in local text paint coordinates. */
+struct RasterTarget
+{
+  PixelBuffer    buffer;
+  Raster::Bounds bounds;
+  bool           valid{true};
+};
 
 /**
  * @brief This class is seperated logics for TypeSetter.
@@ -137,7 +149,7 @@ public:
 public: // Image buffer creation
   void DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth, const uint32_t bufferHeight,
                             const bool ignoreHorizontalAlignment, const int32_t horizontalOffset,
-                            const int32_t verticalOffset);
+                            const int32_t verticalOffset, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief Create & draw the image buffer for the given range of the glyphs in the given style.
@@ -159,6 +171,7 @@ public: // Image buffer creation
    * @param[in] toGlyphIndex The index of the last glyph within the text to be drawn
    * @param[in] revealOffsetY Metadata storage origin in the original target, otherwise zero.
    * @param[in] revealFullHeight Original target height for metadata line traversal, or zero to use bufferHeight.
+   * @param[out] recolorMask Optional paired coefficient plane for single-color RGBA8888 STYLE_NONE.
    *
    * @return An image buffer with the text.
    */
@@ -167,7 +180,7 @@ public: // Image buffer creation
                                 const Pixel::Format pixelFormat, const int32_t horizontalOffset,
                                 const int32_t verticalOffset, const TextAbstraction::GlyphIndex fromGlyphIndex,
                                 const TextAbstraction::GlyphIndex toGlyphIndex,
-                                uint32_t revealOffsetY = 0u, uint32_t revealFullHeight = 0u);
+                                uint32_t revealOffsetY = 0u, uint32_t revealFullHeight = 0u, PixelBuffer* recolorMask = nullptr, const Raster::SourceClip* sourceClip = nullptr, Raster::BoundsAccumulator* sourceBounds = nullptr);
 
   /**
    * @brief Create & draw a L8 mask containing TextGradient target glyph coverage only.
@@ -184,6 +197,8 @@ public: // Image buffer creation
    * @param[in] fromGlyphIndex The index of the first glyph within the text to be drawn.
    * @param[in] toGlyphIndex The index of the last glyph within the text to be drawn.
    *
+   * @param[in,out] target Optional tight destination; gradient coordinates retain the original buffer domain.
+   * @param[in] sourceClip Optional pre-effect source planes.
    * @return An image buffer containing TextGradient target glyph coverage only.
    */
   PixelBuffer CreateTextGradientMaskImageBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,
@@ -192,7 +207,8 @@ public: // Image buffer creation
                                                 const int32_t                     horizontalOffset,
                                                 const int32_t                     verticalOffset,
                                                 const TextAbstraction::GlyphIndex fromGlyphIndex,
-                                                const TextAbstraction::GlyphIndex toGlyphIndex);
+                                                const TextAbstraction::GlyphIndex toGlyphIndex,
+                                                RasterTarget* target = nullptr, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief Create & draw a RGBA buffer containing TextGradient non-target glyphs only.
@@ -208,6 +224,8 @@ public: // Image buffer creation
    * @param[in] fromGlyphIndex The index of the first glyph within the text to be drawn.
    * @param[in] toGlyphIndex The index of the last glyph within the text to be drawn.
    *
+   * @param[in,out] target Optional tight destination; gradient coordinates retain the original buffer domain.
+   * @param[in] sourceClip Optional pre-effect source planes.
    * @return An image buffer containing TextGradient non-target glyphs only.
    */
   PixelBuffer CreateTextGradientPreservedImageBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,
@@ -216,9 +234,48 @@ public: // Image buffer creation
                                                      const int32_t                     horizontalOffset,
                                                      const int32_t                     verticalOffset,
                                                      const TextAbstraction::GlyphIndex fromGlyphIndex,
-                                                     const TextAbstraction::GlyphIndex toGlyphIndex);
+                                                     const TextAbstraction::GlyphIndex toGlyphIndex,
+                                                     RasterTarget* target = nullptr, const Raster::SourceClip* sourceClip = nullptr);
+
+  /** @brief Request-local style runs shared by bounds and drawing passes. */
+  struct StyleRuns
+  {
+    Vector<UnderlinedGlyphRun>    underline;
+    Vector<StrikethroughGlyphRun> strikethrough;
+  };
+
+  /** @brief Composites a contained, tightly packed premultiplied RGBA ROI behind a plane. */
+  static bool CompositeBehind(RasterTarget& destination, const RasterTarget& source);
+
+  /** @brief Draws a style into a checked target without changing layout coordinates. */
+  bool RasterizeStyle(uint32_t legacyWidth, uint32_t legacyHeight, Typesetter::Style style,
+                      bool ignoreHorizontalAlignment, int32_t x, int32_t y,
+                      TextAbstraction::GlyphIndex first, TextAbstraction::GlyphIndex last,
+                      const StyleRuns& runs, RasterTarget& target, PixelBuffer* recolorMask = nullptr, const Raster::SourceClip* sourceClip = nullptr);
+
+  bool RasterizeBackground(uint32_t legacyWidth, uint32_t legacyHeight, bool ignoreHorizontalAlignment,
+                           int32_t x, int32_t y, RasterTarget& target, const Raster::SourceClip* sourceClip = nullptr);
+
+  /** @brief Resolves one existing style pass without a destination allocation. */
+  bool ResolveStyleBounds(uint32_t width, uint32_t height, Typesetter::Style style,
+                          bool ignoreHorizontalAlignment, int32_t x, int32_t y,
+                          TextAbstraction::GlyphIndex first, TextAbstraction::GlyphIndex last, const StyleRuns& runs, Raster::Bounds& result, const Raster::SourceClip* sourceClip = nullptr);
+
+  /** @brief Resolves the existing range-background pass without drawing it. */
+  bool ResolveBackgroundBounds(uint32_t width, uint32_t height, bool ignoreHorizontalAlignment,
+                               int32_t x, int32_t y, Raster::Bounds& result, const Raster::SourceClip* sourceClip = nullptr);
 
 private:
+  template<bool MEASURE, bool TRANSLATE = false>
+  PixelBuffer ProcessImage(uint32_t width, uint32_t height, Typesetter::Style style, bool ignoreHorizontalAlignment,
+                           Pixel::Format format, int32_t x, int32_t y, TextAbstraction::GlyphIndex first,
+                           TextAbstraction::GlyphIndex last, uint32_t revealOffsetY, uint32_t revealFullHeight,
+                           Raster::BoundsAccumulator* bounds, const StyleRuns* runs, RasterTarget* target = nullptr, PixelBuffer* recolorMask = nullptr, const Raster::SourceClip* sourceClip = nullptr, Raster::BoundsAccumulator* sourceBounds = nullptr);
+
+  template<bool MEASURE, bool TRANSLATE = false>
+  void ProcessGlyphsBackground(PixelBuffer& buffer, uint32_t width, uint32_t height, bool ignoreHorizontalAlignment,
+                               int32_t x, int32_t y, Raster::BoundsAccumulator* bounds, RasterTarget* target = nullptr, const Raster::SourceClip* sourceClip = nullptr);
+
   std::unique_ptr<ViewModel>           mModel;
   std::unique_ptr<RevealRasterContext> mRevealRasterContext;
   TextAbstraction::FontClient          mFontClient;

@@ -57,12 +57,16 @@ public:
   {
     GlyphStyle()
     : outline{0u},
+      blurRadius{0.0f},
+      mask{false},
       isItalic{false},
       isBold{false}
     {
     }
 
     uint16_t outline;      ///< The outline width of this glyph
+    float    blurRadius;   ///< Blur kernel radius for cached paint.
+    bool     mask : 1;     ///< Cache color glyph alpha as an L8 mask.
     bool     isItalic : 1; ///< Whether the glyph is italic.
     bool     isBold : 1;   ///< Whether the glyph is bold.
   };
@@ -95,9 +99,10 @@ public:
    * @param[in] style The style of this glyph
    * @param[in] bitmap bitmap to use for glyph addition
    * @param[out] slot information returned by atlas manager for addition
+   * @param[in] origin Signed bitmap origin relative to the logical glyph position.
    */
   void Add(const Text::GlyphInfo& glyph, const GlyphStyle& style, const PixelData& bitmap,
-           AtlasManager::AtlasSlot& slot);
+           AtlasManager::AtlasSlot& slot, const Vector2& origin = Vector2::ZERO);
 
   /**
    * @brief Generate mesh data for an image contained in an atlas
@@ -115,10 +120,12 @@ public:
    * @param[in] index The GlyphIndex of this glyph
    * @param[in] style The style of this glyph
    * @param[out] slot container holding information about the glyph( mImage = 0 indicates not being cached )
+   * @param[out] origin Cached bitmap origin, when requested.
    *
    * @return Whether glyph is cached or not ?
    */
-  bool IsCached(Text::FontId fontId, Text::GlyphIndex index, const GlyphStyle& style, AtlasManager::AtlasSlot& slot);
+  bool IsCached(Text::FontId fontId, Text::GlyphIndex index, const GlyphStyle& style,
+                AtlasManager::AtlasSlot& slot, Vector2* origin = nullptr);
 
   /**
    * @brief Retrieve the size of an atlas

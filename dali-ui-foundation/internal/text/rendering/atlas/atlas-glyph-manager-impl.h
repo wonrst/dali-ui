@@ -51,6 +51,9 @@ public:
     uint32_t         mImageId;
     int32_t          mCount;
     uint16_t         mOutlineWidth;
+    Vector2          mOrigin;
+    float            mBlurRadius;
+    bool             mMask : 1;
     bool             isItalic : 1;
     bool             isBold : 1;
   };
@@ -71,7 +74,7 @@ public:
    * @copydoc Ui::AtlasGlyphManager::Add
    */
   void Add(const Text::GlyphInfo& glyph, const Ui::AtlasGlyphManager::GlyphStyle& style, const PixelData& bitmap,
-           Dali::Ui::AtlasManager::AtlasSlot& slot);
+           Dali::Ui::AtlasManager::AtlasSlot& slot, const Vector2& origin = Vector2::ZERO);
 
   /**
    * @copydoc Ui::AtlasGlyphManager::GenerateMeshData
@@ -82,7 +85,7 @@ public:
    * @copydoc Ui::AtlasGlyphManager::IsCached
    */
   bool IsCached(Text::FontId fontId, Text::GlyphIndex index, const Ui::AtlasGlyphManager::GlyphStyle& style,
-                Dali::Ui::AtlasManager::AtlasSlot& slot);
+                Dali::Ui::AtlasManager::AtlasSlot& slot, Vector2* origin = nullptr);
 
   /**
    * @copydoc Ui::AtlasGlyphManager::GetAtlasSize

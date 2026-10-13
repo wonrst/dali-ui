@@ -64,6 +64,9 @@ public:
   virtual Actor Render(ViewInterface& view, Actor textContol, Property::Index animatablePropertyIndex,
                        float& alignmentOffset, int depth) = 0;
 
+  /** @brief Whether the published paint needs composition before inherited opacity. */
+  virtual bool RequiresGroupComposition() const;
+
   /**
    * @brief Supplies the active normal/placeholder atlas gradient snapshot.
    *

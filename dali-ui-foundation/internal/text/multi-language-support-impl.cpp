@@ -987,7 +987,9 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
     return fontId;
   };
 
-  CharacterIndex lastCharacter = startIndex + numberOfCharacters - 1u;
+  FontId         previousRequestedFontId = 0u;
+  CharacterIndex nextNonSpaceIndex       = startIndex;
+  CharacterIndex lastCharacter           = startIndex + numberOfCharacters - 1u;
   for(Length index = startIndex; index <= lastCharacter; ++index)
   {
     // Get the current character.
@@ -1035,6 +1037,46 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
     // Get the script for the current character.
     Script script = GetScript(index, scriptRunIt, scriptRunEndIt);
 
+    // Resolve spaces from this text's font context, not a fallback cached by an earlier request.
+    Character validationCharacter  = character;
+    bool      usePreviousSpaceFont = false;
+    if(TextAbstraction::IsSpace(character) && TextAbstraction::HasLigatureMustBreak(script))
+    {
+      usePreviousSpaceFont = !isNewParagraphCharacter && previousScript == script && currentFontId == previousRequestedFontId &&
+                             fontClient.IsCharacterSupportedByFont(previousFontId, character);
+      if(!usePreviousSpaceFont)
+      {
+        // Scan each space sequence once. A leading space uses the following character only
+        // within the same script and authored font; paragraph/style boundaries stay intact.
+        if(nextNonSpaceIndex <= index)
+        {
+          nextNonSpaceIndex = index + 1u;
+          while(nextNonSpaceIndex <= lastCharacter && TextAbstraction::IsSpace(textBuffer[nextNonSpaceIndex]))
+          {
+            ++nextNonSpaceIndex;
+          }
+        }
+        bool crossesFontBoundary = false;
+        for(const auto& run : fontDescriptions)
+        {
+          const auto begin = run.characterRun.characterIndex;
+          const auto end   = begin + run.characterRun.numberOfCharacters;
+          if((index < begin && begin <= nextNonSpaceIndex) || (index < end && end <= nextNonSpaceIndex))
+          {
+            crossesFontBoundary = true;
+            break;
+          }
+        }
+        auto nextScriptRunIt = scriptRunIt;
+        if(!crossesFontBoundary && nextNonSpaceIndex <= lastCharacter &&
+           !TextAbstraction::IsCommonScript(textBuffer[nextNonSpaceIndex]) &&
+           GetScript(nextNonSpaceIndex, nextScriptRunIt, scriptRunEndIt) == script)
+        {
+          validationCharacter = textBuffer[nextNonSpaceIndex];
+        }
+      }
+    }
+
 #ifdef DEBUG_ENABLED
     if(gLogFilter->IsEnabledFor(Debug::Verbose))
     {
@@ -1060,7 +1102,7 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
       if(NULL != defaultFonts)
       {
         // This cache stores fall-back fonts.
-        cachedDefaultFontId = defaultFonts->FindFont(fontClient, currentFontDescription, currentFontPointSize, character);
+        cachedDefaultFontId = defaultFonts->FindFont(fontClient, currentFontDescription, currentFontPointSize, validationCharacter);
       }
     }
     // Whether the cached default font is valid.
@@ -1073,7 +1115,7 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
     if(isValidFont)
     {
       // Check if the font supports the character.
-      isValidFont = fontClient.IsCharacterSupportedByFont(fontId, character);
+      isValidFont = fontClient.IsCharacterSupportedByFont(fontId, validationCharacter);
     }
 
     bool isEmojiScript = IsOneOfEmojiScripts(script);
@@ -1133,10 +1175,9 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
       }
     }
 
-    if(TextAbstraction::IsSpace(character) && TextAbstraction::HasLigatureMustBreak(script) &&
-       isValidCachedDefaultFont && (isDefaultFont || (currentFontId == previousFontId)))
+    if(usePreviousSpaceFont)
     {
-      fontId      = cachedDefaultFontId;
+      fontId      = previousFontId;
       isValidFont = true;
     }
 
@@ -1167,10 +1208,19 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
     // - the platform default font is different than the default font for the current script.
 
     // Need to check if the given font supports the current character.
-    CheckFontSupportsCharacter(isValidFont, isCommonScript, character, validFontsPerScriptCacheBuffer, script, fontId,
+    CheckFontSupportsCharacter(isValidFont, isCommonScript, validationCharacter, validFontsPerScriptCacheBuffer, script, fontId,
                                fontClient, isValidCachedDefaultFont, cachedDefaultFontId, currentFontDescription,
                                currentFontPointSize, defaultFontPerScriptCacheBuffer, findFallbackFont,
                                useFallbackFontCache);
+
+    if(validationCharacter != character && !fontClient.IsCharacterSupportedByFont(fontId, character))
+    {
+      isValidFont = false;
+      fontId      = currentFontId;
+      CheckFontSupportsCharacter(isValidFont, isCommonScript, character, validFontsPerScriptCacheBuffer, script, fontId,
+                                 fontClient, isValidCachedDefaultFont, cachedDefaultFontId, currentFontDescription,
+                                 currentFontPointSize, defaultFontPerScriptCacheBuffer, false, useFallbackFontCache);
+    }
 
     if(TextAbstraction::EMOJI_TEXT == script && (!isValidFont || fontClient.IsColorFont(fontId)))
     {
@@ -1299,6 +1349,7 @@ void MultilanguageSupport::ValidateFonts(TextAbstraction::FontClient& fontClient
     // Whether the current character is a new paragraph character.
     isNewParagraphCharacter = TextAbstraction::IsNewParagraph(character);
     previousScript          = script;
+    previousRequestedFontId = currentFontId;
     currentFontId           = fontId;
     previousFontId          = currentFontId;
   } // end traverse characters.

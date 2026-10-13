@@ -605,7 +605,7 @@ int UtcDaliTextGradientOverlayShaderUniformSymbolsP(void)
   DALI_TEST_CHECK(fragmentShader.find("uTextGradientOverlayStartOffset") != std::string::npos);
   DALI_TEST_CHECK(fragmentShader.find("uTextGradientOverlayBounds") != std::string::npos);
   DALI_TEST_CHECK(fragmentShader.find("uTextGradientOverlayMode") != std::string::npos);
-  DALI_TEST_CHECK(fragmentShader.find("ApplyTextGradientOverlay(textColor, vTexCoord)") != std::string::npos);
+  DALI_TEST_CHECK(fragmentShader.find("ApplyTextGradientOverlay(textColor, sourceCoord)") != std::string::npos);
   DALI_TEST_CHECK(fragmentShader.find("mediump float glyphAlpha = baseFill.a") != std::string::npos);
   DALI_TEST_CHECK(fragmentShader.find("if(glyphAlpha <= 0.000001)") != std::string::npos);
   DALI_TEST_CHECK(fragmentShader.find("return baseFill;") != std::string::npos);
@@ -687,8 +687,8 @@ int UtcDaliTextRevealForegroundShaderCompositionP(void)
   DALI_TEST_CHECK(revealBevelPrefix.find("#define IS_REQUIRED_EMBOSS\n") != std::string::npos);
 
   const std::string fragmentShader(SHADER_TEXT_VISUAL_SHADER_FRAG);
-  const size_t      gradientOverlay = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, vTexCoord)");
-  const size_t      revealMultiply  = fragmentShader.find("textColor *= ResolveTextRevealOpacity(vTexCoord)");
+  const size_t      gradientOverlay  = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, sourceCoord)");
+  const size_t      revealMultiply   = fragmentShader.find("textColor *= ResolveTextRevealOpacity(sourceCoord)");
   const size_t      styleComposition = fragmentShader.find("gl_FragColor = uColor * (");
   DALI_TEST_CHECK(gradientOverlay != std::string::npos);
   DALI_TEST_CHECK(revealMultiply != std::string::npos);
@@ -700,13 +700,13 @@ int UtcDaliTextRevealForegroundShaderCompositionP(void)
 
   // Bevel samples displaced foreground coverage, so each component uses the
   // timing metadata at the matching source coordinate before composition.
-  DALI_TEST_CHECK(fragmentShader.find("textAlpha *= ResolveTextRevealOpacity(vTexCoord)") != std::string::npos);
-  DALI_TEST_CHECK(fragmentShader.find("light *= ResolveTextRevealOpacity(clamp(vTexCoord - offset, 0.0, 1.0))") != std::string::npos);
-  DALI_TEST_CHECK(fragmentShader.find("shadow *= ResolveTextRevealOpacity(clamp(vTexCoord + offset, 0.0, 1.0))") != std::string::npos);
-  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "textColor *= ResolveTextRevealOpacity(vTexCoord)"), 1u, TEST_LOCATION);
-  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "textAlpha *= ResolveTextRevealOpacity(vTexCoord)"), 2u, TEST_LOCATION);
-  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "light *= ResolveTextRevealOpacity(clamp(vTexCoord - offset, 0.0, 1.0))"), 2u, TEST_LOCATION);
-  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "shadow *= ResolveTextRevealOpacity(clamp(vTexCoord + offset, 0.0, 1.0))"), 2u, TEST_LOCATION);
+  DALI_TEST_CHECK(fragmentShader.find("textAlpha *= ResolveTextRevealOpacity(sourceCoord)") != std::string::npos);
+  DALI_TEST_CHECK(fragmentShader.find("light *= ResolveTextRevealOpacity(clamp(sourceCoord - offset, 0.0, 1.0))") != std::string::npos);
+  DALI_TEST_CHECK(fragmentShader.find("shadow *= ResolveTextRevealOpacity(clamp(sourceCoord + offset, 0.0, 1.0))") != std::string::npos);
+  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "textColor *= ResolveTextRevealOpacity(sourceCoord)"), 1u, TEST_LOCATION);
+  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "textAlpha *= ResolveTextRevealOpacity(sourceCoord)"), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "light *= ResolveTextRevealOpacity(clamp(sourceCoord - offset, 0.0, 1.0))"), 2u, TEST_LOCATION);
+  DALI_TEST_EQUALS(CountOccurrences(fragmentShader, "shadow *= ResolveTextRevealOpacity(clamp(sourceCoord + offset, 0.0, 1.0))"), 2u, TEST_LOCATION);
 
   // The preprocessor combinations above fix the runtime metadata sampling
   // count: Reveal off compiles no resolver call, Reveal without emboss keeps
@@ -903,7 +903,7 @@ int UtcDaliTextGradientShaderCompositionMixedMultiColorFeatureP(void)
   std::string fragmentShader = fragmentPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
   const auto  maskSampler    = fragmentShader.find("UNIFORM sampler2D sTextGradientMask;");
   const auto  lookupSampler  = fragmentShader.find("UNIFORM sampler2D sGradientLookup;");
-  const auto  maskLookup     = fragmentShader.find("TEXTURE(sTextGradientMask, TEXT_SOURCE_UV(vTexCoord)).r");
+  const auto  maskLookup     = fragmentShader.find("TEXTURE(sTextGradientMask, TEXT_SOURCE_UV(sourceCoord)).r");
   const auto  gradientLookup = fragmentShader.find("TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5))");
   const auto  alphaOver      = fragmentShader.find("gradientFill + preservedColor * (1.0 - gradientFill.a)");
 
@@ -1010,7 +1010,7 @@ int UtcDaliTextGradientVisualMixedStyleOverlayShaderFeatureP(void)
   std::string fragmentPrefix = GetFragmentPrefix(builder);
   std::string fragmentShader = fragmentPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
   const auto  mixedFill      = fragmentShader.find("textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);");
-  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, vTexCoord);");
+  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, sourceCoord);");
   const auto  styleApply     = fragmentShader.find("+ styleTexture * (1.0 - textColor.a)");
 
   DALI_TEST_EQUALS(builder.IsEnabledTextGradient(), false, TEST_LOCATION);
@@ -1091,7 +1091,7 @@ int UtcDaliTextGradientVisualMixedOverlayStyleAndGradientOverlayShaderFeatureP(v
   std::string fragmentPrefix = GetFragmentPrefix(builder);
   std::string fragmentShader = fragmentPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
   const auto  mixedFill      = fragmentShader.find("textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);");
-  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, vTexCoord);");
+  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, sourceCoord);");
   const auto  overlayStyle   = fragmentShader.find(") * (1.0 - overlayStyleTexture.a) + overlayStyleTexture");
 
   DALI_TEST_EQUALS(builder.IsEnabledTextGradient(), false, TEST_LOCATION);
@@ -1121,7 +1121,7 @@ int UtcDaliTextGradientVisualMixedStyleOverlayStyleAndGradientOverlayShaderFeatu
   std::string fragmentPrefix = GetFragmentPrefix(builder);
   std::string fragmentShader = fragmentPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
   const auto  mixedFill      = fragmentShader.find("textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);");
-  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, vTexCoord);");
+  const auto  overlayApply   = fragmentShader.find("textColor = ApplyTextGradientOverlay(textColor, sourceCoord);");
   const auto  styleApply     = fragmentShader.find("+ styleTexture * (1.0 - textColor.a)");
   const auto  overlayStyle   = fragmentShader.find(") * (1.0 - overlayStyleTexture.a) + overlayStyleTexture");
 
@@ -1295,7 +1295,7 @@ int UtcDaliTextGradientShaderCompositionSkipsSingleColorFallbackP(void)
   std::string fragmentShader = fragmentPrefix + std::string(SHADER_TEXT_VISUAL_SHADER_FRAG);
 
   ExpectTextGradientDefine(fragmentPrefix);
-  DALI_TEST_EQUALS(fragmentShader.find("#elif defined(IS_REQUIRED_TEXT_GRADIENT)\n  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord)).r;") != std::string::npos, true, TEST_LOCATION);
+  DALI_TEST_EQUALS(fragmentShader.find("#elif defined(IS_REQUIRED_TEXT_GRADIENT)\n  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord)).r;") != std::string::npos, true, TEST_LOCATION);
   END_TEST;
 }
 

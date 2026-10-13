@@ -26,6 +26,7 @@
 #include <dali/public-api/images/pixel-data.h>
 #include <dali/public-api/images/pixel.h>
 #include <dali/public-api/math/rect.h>
+#include <dali/public-api/math/vector4.h>
 #include <dali/public-api/object/ref-object.h>
 #include <memory> ///< for std::unique_ptr
 
@@ -42,6 +43,13 @@ namespace Text
 {
 class ModelInterface;
 class ViewModel;
+struct TextRasterGeometry;
+namespace Raster
+{
+struct SourceClip;
+struct BoundsAccumulator;
+} // namespace Raster
+struct TextRasterResult;
 class Typesetter;
 struct FinalElisionResult;
 struct MarqueeStartAnchor;
@@ -135,6 +143,91 @@ public:
   TextAbstraction::FontClient GetFontClient();
 
   /**
+   * @brief Resolves CLIP planes from pre-effect glyph bounds; ELLIPSIS has no planes.
+   * @param[in] size Raster target used for alignment and traversal.
+   * @param[in] viewport Logical content rectangle (left, top, width, height).
+   * @param[out] sourceClip Active planes in the original raster coordinate system.
+   * @return Whether source bounds and viewport are representable.
+   */
+  bool ResolveSourceClip(const Vector2& size, const Vector4& viewport, Raster::SourceClip& sourceClip);
+
+  /**
+   * @brief Renders constrained fill and resolves source planes for subsequent effects.
+   * Reuses the fill traversal when the logical viewport contains raster storage.
+   * @param[in] size Raster storage size.
+   * @param[in] textDirection Final text direction.
+   * @param[in] pixelFormat Fill pixel format.
+   * @param[in] viewport Logical source rectangle, or nullptr to retain ordinary rendering.
+   * @param[out] sourceClip Pre-effect planes for subsequent style renders.
+   * @param[out] recolorMask Optional paired monochrome recolor coefficient.
+   * @return Fill pixels, or empty on invalid source geometry.
+   */
+  PixelData RenderFill(const Vector2& size, Direction textDirection, Pixel::Format pixelFormat,
+                       const Vector4* viewport, Raster::SourceClip& sourceClip, PixelData* recolorMask = nullptr);
+
+  /**
+   * @brief Resolves raster support of the final model's effect planes.
+   *
+   * Call after layout, TextFit, replacement projection and effective styles, with
+   * the same model/final elision result and legacy target as Render(). This does
+   * not relayout, allocate destination pixels, cache geometry or publish it.
+   * Ordinary rendering does not call this opt-in internal operation.
+   *
+   * @param[in] size Legacy raster target, used only for alignment and traversal.
+   * @param[in] textDirection Final text direction.
+   * @param[out] geometry Plane support, empty on failure.
+   * @param[in] ignoreHorizontalAlignment Whether to omit line alignment.
+   * @param[in] originSize Original height used for vertical alignment.
+   * @param[in] sourceViewport Optional logical content rectangle for CLIP source eligibility.
+   * @return Whether all calculated bounds are representable.
+   */
+  bool ResolveRasterGeometry(const Vector2& size, Direction textDirection, TextRasterGeometry& geometry,
+                             bool ignoreHorizontalAlignment = false, const Vector2& originSize = Size::ZERO, const Vector4* sourceViewport = nullptr);
+
+  /**
+   * @brief Renders independently bounded CPU planes from the final render model.
+   *
+   * Geometry is resolved after layout and final elision, as in ResolveRasterGeometry().
+   * GradientSpan paint retains its authored raster domain. Cutout is unsupported. Reveal,
+   * marquee, tiling and GPU composition are not performed by this operation.
+   *
+   * @param[in] size The legacy target used for alignment, never a plane size.
+   * @param[in] textDirection The final text direction.
+   * @param[in] fillFormat L8 coverage or RGBA8888 premultiplied fill.
+   * @param[in] maxDimension Resource limit for plane/ROI dimensions and paint coordinates.
+   * @param[out] result Complete planes and geometry, or empty on failure.
+   * @param[in] colorGlyphMask Whether RGBA fill needs its surviving monochrome recolor coefficient.
+   * @param[in] sourceViewport Optional logical content rectangle for CLIP source eligibility.
+   * @param[in] textGradientMixed Produce preserved RGBA fill and paired Global Gradient target coverage.
+   * @param[in] embossMask Whether native mixed Emboss needs raw monochrome coverage.
+   * @param[in] ignoreHorizontalAlignment Whether to omit line alignment for horizontal marquee.
+   * @param[in] originSize Original height used for vertical marquee alignment.
+   * @return True on success, including a completely empty text result.
+   */
+  bool RenderRasterPlanes(const Vector2& size, Direction textDirection, Pixel::Format fillFormat,
+                          uint32_t maxDimension, TextRasterResult& result, bool colorGlyphMask = false, const Vector4* sourceViewport = nullptr, bool textGradientMixed = false, bool embossMask = false,
+                          bool ignoreHorizontalAlignment = false, const Vector2& originSize = Size::ZERO);
+
+  /**
+   * @brief Prepares bounded foreground and static decoration planes for Reveal.
+   *
+   * Retains the original raster domain for timing metadata and foreground blur.
+   * Uses the same final model and glyph/style raster passes as ordinary text.
+   * @param[in] size Original raster size, before any timing/blur atlas packing.
+   * @param[in] textDirection Final text direction.
+   * @param[in] fillFormat Foreground pixel format.
+   * @param[in] maxDimension Maximum supported texture dimension.
+   * @param[out] result Complete planes, or empty on failure.
+   * @param[in] colorGlyphMask Produce the paired monochrome recolor coefficient.
+   * @param[in] textGradientMixed Produce preserved fill and gradient coverage.
+   * @param[in] embossMask Produce raw monochrome coverage for native mixed Emboss.
+   * @return Whether the complete bounded payload was prepared.
+   */
+  bool RenderRevealPlanes(const Vector2& size, Direction textDirection, Pixel::Format fillFormat,
+                          uint32_t maxDimension, TextRasterResult& result, bool colorGlyphMask,
+                          bool textGradientMixed, bool embossMask);
+
+  /**
    * @brief Renders the text.
    *
    * Does the following operations:
@@ -154,11 +247,15 @@ public:
    * @param[in] originSize The origin size for calculating vertical alignment. (default) If zero, the control and
    * renderer sizes are used.
    *
+   * @param[out] recolorMask Optional paired L8 coefficient of the final monochrome write.
+   * Requires single-color RGBA8888 RENDER_NO_STYLES; native glyph writes clear the coefficient.
+   * @param[in] sourceClip Optional pre-effect source planes resolved for this request.
    * @return A pixel data with the text rendered.
    */
   PixelData Render(const Vector2& size, Direction textDirection,
                    RenderBehaviour behaviour = RENDER_TEXT_AND_STYLES, bool ignoreHorizontalAlignment = false,
-                   Pixel::Format pixelFormat = Pixel::RGBA8888, const Vector2& originSize = Size::ZERO);
+                   Pixel::Format pixelFormat = Pixel::RGBA8888, const Vector2& originSize = Size::ZERO,
+                   PixelData* recolorMask = nullptr, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief Resolves an anchor in the exact ViewModel geometry used by the preceding render.
@@ -185,11 +282,12 @@ public:
    * @param[in] originSize The origin size for calculating vertical alignment. (default) If zero, the control and
    * renderer sizes are used.
    *
+   * @param[in] sourceClip Optional pre-effect source planes resolved for this request.
    * @return A pixel data containing glyph coverage for TextGradient target glyphs only.
    */
   PixelData RenderTextGradientMask(const Vector2& size, Direction textDirection,
                                    bool ignoreHorizontalAlignment = false, Pixel::Format pixelFormat = Pixel::L8,
-                                   const Vector2& originSize = Size::ZERO);
+                                   const Vector2& originSize = Size::ZERO, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief Renders non-gradient glyphs for mixed TextGradient composition.
@@ -205,12 +303,13 @@ public:
    * @param[in] originSize The origin size for calculating vertical alignment. (default) If zero, the control and
    * renderer sizes are used.
    *
+   * @param[in] sourceClip Optional pre-effect source planes resolved for this request.
    * @return A pixel data containing non-gradient text glyphs only.
    */
   PixelData RenderTextGradientPreserved(const Vector2& size, Direction textDirection,
                                         bool           ignoreHorizontalAlignment = false,
                                         Pixel::Format  pixelFormat               = Pixel::RGBA8888,
-                                        const Vector2& originSize                = Size::ZERO);
+                                        const Vector2& originSize = Size::ZERO, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief After the Render, use the pixel information of the given cutoutBuffer to make the part where the pixel is
@@ -253,13 +352,18 @@ public:
    * @param[in] originSize The origin size for calculating vertical alignment. (default) If zero, the control and
    * renderer sizes are used.
    *
+   * @param[out] recolorMask Optional paired recolor coefficient, with the same restrictions as Render().
+   * @param[out] sourceBounds Optional raw bounds collected during RENDER_NO_STYLES traversal.
+   * @param[in] sourceClip Optional pre-effect source planes resolved for this request.
    * @return A pixel data with the text rendered.
    */
   PixelBuffer RenderWithPixelBuffer(const Vector2& size, Direction textDirection,
                                     RenderBehaviour behaviour                 = RENDER_TEXT_AND_STYLES,
                                     bool            ignoreHorizontalAlignment = false,
                                     Pixel::Format   pixelFormat               = Pixel::RGBA8888,
-                                    const Vector2&  originSize                = Size::ZERO);
+                                    const Vector2&  originSize                = Size::ZERO,
+                                    PixelBuffer* recolorMask = nullptr, const Raster::SourceClip* sourceClip = nullptr,
+                                    Raster::BoundsAccumulator* sourceBounds = nullptr);
 
   /**
    * @brief Projects source reveal semantics onto the current final glyph sequence.
@@ -353,6 +457,7 @@ public:
    * PIXEL timing keeps the original visual X, independently of tile storage.
    * Include one extra source texel outside each cropped metadata edge for
    * ownership expansion. Non-metadata planes retain the full width.
+   * @param[out] recolorMask Optional paired recolor coefficient for an RGBA8888 TEXT plane.
    * Non-metadata GradientSpan planes require the full target so their paint
    * coordinates and overlap coverage retain the ordinary raster semantics.
    */
@@ -360,7 +465,7 @@ public:
                                   RuntimeBlurPlane plane, Pixel::Format format,
                                   const Internal::Reveal::Plan& plan,
                                   uint32_t rasterOffsetY = 0u, uint32_t rasterHeight = 0u,
-                                  uint32_t rasterOffsetX = 0u, uint32_t rasterWidth = 0u);
+                                  uint32_t rasterOffsetX = 0u, uint32_t rasterWidth = 0u, PixelData* recolorMask = nullptr);
 
   /**
    * @brief Create & draw the image buffer of single background color.
@@ -426,7 +531,7 @@ private:
   PixelBuffer ApplyUnderlineMarkupImageBuffer(PixelBuffer topPixelBuffer, const uint32_t bufferWidth,
                                               const uint32_t bufferHeight, const bool ignoreHorizontalAlignment,
                                               const Pixel::Format pixelFormat, const int32_t horizontalOffset,
-                                              const int32_t verticalOffset);
+                                              const int32_t verticalOffset, const Raster::SourceClip* sourceClip = nullptr);
 
   /**
    * @brief Apply markup strikethrough tags.
@@ -452,7 +557,7 @@ private:
                                                   const uint32_t      bufferHeight,
                                                   const bool          ignoreHorizontalAlignment,
                                                   const Pixel::Format pixelFormat,
-                                                  const int32_t horizontalOffset, const int32_t verticalOffset);
+                                                  const int32_t horizontalOffset, const int32_t verticalOffset, const Raster::SourceClip* sourceClip = nullptr);
 
 protected:
   /**
@@ -463,6 +568,11 @@ protected:
   virtual ~Typesetter();
 
 private:
+  struct RasterPlan;
+  // Requires the caller to prepare the final ViewModel exactly once.
+  bool ResolveRasterPlan(const Vector2& size, Direction textDirection, RasterPlan& plan,
+                         bool ignoreHorizontalAlignment, const Vector2& originSize, const Vector4* sourceViewport);
+
   struct Impl;
   std::unique_ptr<Impl> mImpl;
 };

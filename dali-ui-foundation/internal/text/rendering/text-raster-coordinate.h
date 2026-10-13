@@ -87,21 +87,23 @@ struct GlyphClip
   int32_t left, right, top, bottom; // Half-open indices inside the source bitmap.
 };
 
-inline bool ClipGlyph(float positionX, float positionY, int32_t horizontalOffset, int32_t verticalOffset,
-                      uint32_t width, uint32_t height, uint32_t glyphBytesPerPixel,
-                      uint32_t bufferWidth, uint32_t bufferHeight, GlyphClip& clip,
-                      uint32_t bufferBytesPerPixel = 4u)
+// Quantize glyph positions before adding integer pen/origin offsets.
+inline bool ResolveGlyphPosition(float positionX, float positionY, int32_t horizontalOffset, int32_t verticalOffset,
+                                 uint32_t width, uint32_t height, uint32_t glyphBytesPerPixel, int32_t& paintX, int32_t& paintY)
 {
   int32_t x, y, end;
-  if(width == 0u || height == 0u || !GlyphBufferFits(width, height, glyphBytesPerPixel) ||
-     !BufferFits(bufferWidth, bufferHeight, bufferBytesPerPixel) ||
-     !Convert(positionX, x) || !Convert(positionY, y) ||
-     !Add(x, width, end) || !Add(y, height, end) ||
-     !Add(x, horizontalOffset, clip.x) || !Add(y, verticalOffset, clip.y))
-  {
-    return false;
-  }
+  return width != 0u && height != 0u && GlyphBufferFits(width, height, glyphBytesPerPixel) &&
+         Convert(positionX, x) && Convert(positionY, y) &&
+         Add(x, width, end) && Add(y, height, end) &&
+         Add(x, horizontalOffset, paintX) && Add(y, verticalOffset, paintY);
+}
 
+// Clip an integer paint position after the plane origin has been subtracted.
+inline bool ClipPositionedGlyph(int32_t x, int32_t y, uint32_t width, uint32_t height,
+                                uint32_t bufferWidth, uint32_t bufferHeight, GlyphClip& clip)
+{
+  clip.x = x;
+  clip.y = y;
   // Widen BEFORE negation/subtraction. In particular, -INT_MIN and
   // bufferWidth - a negative offset must never be evaluated as int32_t.
   const int64_t left   = std::max<int64_t>(0, -static_cast<int64_t>(clip.x));
@@ -117,6 +119,21 @@ inline bool ClipGlyph(float positionX, float positionY, int32_t horizontalOffset
   clip.top    = static_cast<int32_t>(top);
   clip.bottom = static_cast<int32_t>(bottom);
   return true;
+}
+
+inline bool ClipGlyph(float positionX, float positionY, int32_t horizontalOffset, int32_t verticalOffset,
+                      uint32_t width, uint32_t height, uint32_t glyphBytesPerPixel,
+                      uint32_t bufferWidth, uint32_t bufferHeight, GlyphClip& clip,
+                      uint32_t bufferBytesPerPixel = 4u)
+{
+  if(!BufferFits(bufferWidth, bufferHeight, bufferBytesPerPixel) ||
+     !ResolveGlyphPosition(positionX, positionY, horizontalOffset, verticalOffset,
+                           width, height, glyphBytesPerPixel, clip.x, clip.y))
+  {
+    return false;
+  }
+
+  return ClipPositionedGlyph(clip.x, clip.y, width, height, bufferWidth, bufferHeight, clip);
 }
 
 // Clipping valid coordinates is distinct from clamping malformed layout data:

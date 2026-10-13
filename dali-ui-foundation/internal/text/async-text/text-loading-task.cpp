@@ -102,6 +102,28 @@ bool TextLoadingTask::IsReady()
 
 void TextLoadingTask::Load()
 {
+  if(mParameters.isEffectOverflowRequested && mParameters.renderScale > 1.0f)
+  {
+    // SetupRenderScale and fitting mutate the request. Keep the original input
+    // so an unsupported/failed advanced raster can use unchanged legacy semantics.
+    auto originalParameters = mParameters;
+    LoadRequest();
+    if(!mRenderInfo.effectOverflow)
+    {
+      mParameters                           = std::move(originalParameters);
+      mParameters.isEffectOverflowRequested = false;
+      LoadRequest();
+      mParameters.isEffectOverflowRequested = true;
+    }
+  }
+  else
+  {
+    LoadRequest();
+  }
+}
+
+void TextLoadingTask::LoadRequest()
+{
   switch(mParameters.requestType)
   {
     case Ui::Integration::Text::Async::RENDER_FIXED_SIZE:

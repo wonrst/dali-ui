@@ -20,12 +20,22 @@
 #include <dali/integration-api/constraint-integ.h>
 #include <dali/integration-api/debug.h>
 #include <dali/integration-api/string-utils.h>
+#include <dali/public-api/adaptor-framework/pixel-buffer.h>
 #include <dali/public-api/animation/constraints.h>
 #include <dali/public-api/math/math-utils.h>
 #include <dali/public-api/object/weak-handle.h>
 #include <dali/public-api/rendering/geometry.h>
 #include <dali/public-api/rendering/renderer.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <map>
+#include <queue>
+#include <utility>
 #include <vector>
 
 // INTERNAL INCLUDES
@@ -82,12 +92,6 @@ void GradientOffsetConstraint(float& current, const PropertyInputContainer& inpu
 
 struct AtlasRenderer::Impl
 {
-  enum Style
-  {
-    STYLE_NORMAL,
-    STYLE_DROP_SHADOW
-  };
-
   ~Impl()
   {
     ClearGradientAnimBinding();
@@ -177,6 +181,49 @@ struct AtlasRenderer::Impl
     }
   };
 
+  static bool HasGlyphOverlap(std::vector<PixelBounds>& bounds)
+  {
+    for(const auto& box : bounds)
+    {
+      if(!std::isfinite(box.minX) || !std::isfinite(box.minY) ||
+         !std::isfinite(box.maxX) || !std::isfinite(box.maxY))
+      {
+        return true;
+      }
+    }
+    std::sort(bounds.begin(), bounds.end(), [](const PixelBounds& a, const PixelBounds& b)
+    {
+      return a.minX < b.minX;
+    });
+
+    // Before the first overlap, active Y intervals are disjoint. Only the
+    // neighbours in Y can overlap a new quad; expiry is ordered by its right edge.
+    std::map<float, float> active;
+    using Edge = std::pair<float, float>;
+    std::priority_queue<Edge, std::vector<Edge>, std::greater<Edge>> expiry;
+    for(const auto& box : bounds)
+    {
+      if(box.maxX <= box.minX || box.maxY <= box.minY)
+      {
+        continue;
+      }
+      while(!expiry.empty() && expiry.top().first <= box.minX)
+      {
+        active.erase(expiry.top().second);
+        expiry.pop();
+      }
+      const auto next = active.lower_bound(box.minY);
+      if((next != active.end() && next->first < box.maxY) ||
+         (next != active.begin() && std::prev(next)->second > box.minY))
+      {
+        return true;
+      }
+      active.emplace(box.minY, box.maxY);
+      expiry.emplace(box.maxX, box.minY);
+    }
+    return false;
+  }
+
   /**
    * brief Struct used to generate the underline/striketthrough mesh.
    * There is one Extent per line of text.
@@ -250,7 +297,8 @@ struct AtlasRenderer::Impl
   };
 
   Impl()
-  : mDepth(0)
+  : mDepth(0),
+    mRequiresGroupComposition(true)
   {
     mGlyphManager = AtlasGlyphManager::Get();
     mFontClient   = TextAbstraction::FontClient::Get();
@@ -262,15 +310,16 @@ struct AtlasRenderer::Impl
   }
 
   void CacheGlyph(const GlyphInfo& glyph, FontId lastFontId, const AtlasGlyphManager::GlyphStyle& style,
-                  AtlasManager::AtlasSlot& slot)
+                  AtlasManager::AtlasSlot& slot, Vector2* origin = nullptr)
   {
+    slot = {};
     const Size& defaultTextAtlasSize =
       mFontClient.GetDefaultTextAtlasSize(); // Retrieve default size of text-atlas-block from font-client.
     const Size& maximumTextAtlasSize =
       mFontClient.GetMaximumTextAtlasSize(); // Retrieve maximum size of text-atlas-block from font-client.
 
     const bool glyphNotCached = !mGlyphManager.IsCached(
-      glyph.fontId, glyph.index, style, slot); // Check FontGlyphRecord vector for entry with glyph index and fontId
+      glyph.fontId, glyph.index, style, slot, origin); // Check FontGlyphRecord vector for entry with glyph index and fontId
 
     DALI_LOG_INFO(gLogFilter, Debug::Verbose, "AddGlyphs fontID[%u] glyphIndex[%u] [%s]\n", glyph.fontId, glyph.index,
                   (glyphNotCached) ? "not cached" : "cached");
@@ -316,34 +365,90 @@ struct AtlasRenderer::Impl
         mFontClient.CreateBitmap(glyph.fontId, glyph.index, glyph.isItalicRequired, glyph.isBoldRequired,
                                  glyphBufferData, style.outline);
 
-        uint32_t glyphBufferSize =
-          glyphBufferData.width * glyphBufferData.height * Pixel::GetBytesPerPixel(glyphBufferData.format);
-        // If glyph buffer data don't have ownership, Or if we need to decompress, create new memory and replace
-        // ownership.
+        Vector2 bitmapOrigin(-static_cast<float>(style.outline) - glyphBufferData.outlineOffsetX,
+                             -static_cast<float>(style.outline) - glyphBufferData.outlineOffsetY);
+
+        if(!glyphBufferData.buffer || glyphBufferData.width == 0u || glyphBufferData.height == 0u)
+        {
+          return;
+        }
+        if((style.mask || style.blurRadius > 0.0f) &&
+           glyphBufferData.format != Pixel::L8 && glyphBufferData.format != Pixel::A8 &&
+           glyphBufferData.format != Pixel::RGBA8888 && glyphBufferData.format != Pixel::BGRA8888)
+        {
+          // An unsupported effect mask must not reinterpret another color channel.
+          return;
+        }
+        const uint32_t bytesPerPixel = Pixel::GetBytesPerPixel(glyphBufferData.format);
+        const uint64_t glyphBytes    = static_cast<uint64_t>(glyphBufferData.width) * glyphBufferData.height * bytesPerPixel;
+        if(bytesPerPixel == 0u || glyphBytes > std::numeric_limits<uint32_t>::max())
+        {
+          return;
+        }
+        const uint32_t glyphBufferSize = static_cast<uint32_t>(glyphBytes);
         if(!glyphBufferData.isBufferOwned ||
            glyphBufferData.compressionType != TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION)
         {
-          uint8_t* newBuffer = (uint8_t*)malloc(glyphBufferSize);
-          if(DALI_LIKELY(newBuffer != nullptr))
+          auto* buffer = static_cast<uint8_t*>(malloc(glyphBufferSize));
+          if(!buffer)
           {
-            TextAbstraction::GlyphBufferData::Decompress(glyphBufferData, newBuffer);
-            if(glyphBufferData.isBufferOwned)
-            {
-              // Release previous buffer
-              free(glyphBufferData.buffer);
-            }
-            glyphBufferData.isBufferOwned   = true;
-            glyphBufferData.buffer          = newBuffer;
-            glyphBufferData.compressionType = TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;
+            return;
           }
+          TextAbstraction::GlyphBufferData::Decompress(glyphBufferData, buffer);
+          if(glyphBufferData.isBufferOwned)
+          {
+            free(glyphBufferData.buffer);
+          }
+          glyphBufferData.buffer          = buffer;
+          glyphBufferData.isBufferOwned   = true;
+          glyphBufferData.compressionType = TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;
         }
 
-        // Create the pixel data.
-        bitmap = PixelData::New(glyphBufferData.buffer, glyphBufferSize, glyphBufferData.width, glyphBufferData.height,
-                                glyphBufferData.format, PixelData::FREE);
-
-        // Change buffer ownership.
-        glyphBufferData.isBufferOwned = false;
+        if(style.mask || style.blurRadius > 0.0f)
+        {
+          const double support = std::ceil(static_cast<double>(style.blurRadius));
+          const double width   = glyphBufferData.width + 2.0 * support;
+          const double height  = glyphBufferData.height + 2.0 * support;
+          if(!std::isfinite(support) || support < 0.0 ||
+             width + DOUBLE_PIXEL_PADDING + 1u >= maximumTextAtlasSize.width ||
+             height + DOUBLE_PIXEL_PADDING + 1u >= maximumTextAtlasSize.height)
+          {
+            return;
+          }
+          PixelBuffer padded = PixelBuffer::New(static_cast<uint32_t>(width), static_cast<uint32_t>(height), Pixel::L8);
+          if(!padded || !padded.GetBuffer())
+          {
+            return;
+          }
+          memset(padded.GetBuffer(), 0, padded.GetBufferSize());
+          const auto padding = static_cast<uint32_t>(support);
+          const bool color   = glyphBufferData.format == Pixel::BGRA8888 || glyphBufferData.format == Pixel::RGBA8888;
+          for(uint32_t y = 0u; y < glyphBufferData.height; ++y)
+          {
+            auto*       destination = padded.GetBuffer() + (y + padding) * padded.GetWidth() + padding;
+            const auto* source      = glyphBufferData.buffer + y * glyphBufferData.width * bytesPerPixel;
+            for(uint32_t x = 0u; x < glyphBufferData.width; ++x)
+            {
+              destination[x] = source[x * bytesPerPixel + (color ? 3u : 0u)];
+            }
+          }
+          if(style.blurRadius > 0.0f && !padded.ApplyGaussianBlur(style.blurRadius))
+          {
+            return;
+          }
+          bitmapOrigin -= Vector2(static_cast<float>(padding), static_cast<float>(padding));
+          bitmap = PixelBuffer::Convert(padded);
+        }
+        else
+        {
+          bitmap                        = PixelData::New(glyphBufferData.buffer, glyphBufferSize, glyphBufferData.width, glyphBufferData.height,
+                                                         glyphBufferData.format, PixelData::FREE);
+          glyphBufferData.isBufferOwned = false;
+        }
+        if(origin)
+        {
+          *origin = bitmapOrigin;
+        }
 
         if(bitmap)
         {
@@ -376,7 +481,7 @@ struct AtlasRenderer::Impl
                                         blockSize.mNeededBlockHeight);
 
           // Locate a new slot for our glyph
-          mGlyphManager.Add(glyph, style, bitmap, slot); // slot will be 0 is glyph not added
+          mGlyphManager.Add(glyph, style, bitmap, slot, bitmapOrigin); // slot will be 0 is glyph not added
         }
       }
     }
@@ -495,11 +600,30 @@ struct AtlasRenderer::Impl
                     bool underlineEnabled, uint32_t underlineChunkId, float underlinePosition, float underlineThickness,
                     Vector<Extent>& underlineExtents, bool strikethroughEnabled, uint32_t strikethroughChunkId,
                     float strikethroughThickness, Vector<Extent>& strikethroughExtents,
-                    bool usesGradientFill, Internal::GradientSpanPaintIndex gradientSpanPaintIndex)
+                    bool usesGradientFill, Internal::GradientSpanPaintIndex gradientSpanPaintIndex,
+                    std::vector<PixelBounds>* paintBounds = nullptr)
   {
     // Generate mesh data for this quad, plugging in our supplied position
     AtlasManager::Mesh2D newMesh;
     mGlyphManager.GenerateMeshData(slot.mImageId, position, newMesh);
+    if(paintBounds && !newMesh.mVertices.Empty())
+    {
+      const auto  first = newMesh.mVertices[0u].mPosition;
+      PixelBounds bounds{first.x, first.y, first.x, first.y, true};
+      for(const auto& vertex : newMesh.mVertices)
+      {
+        if(!std::isfinite(vertex.mPosition.x) || !std::isfinite(vertex.mPosition.y))
+        {
+          bounds.minX = std::numeric_limits<float>::quiet_NaN();
+          break;
+        }
+        bounds.minX = std::min(bounds.minX, vertex.mPosition.x);
+        bounds.minY = std::min(bounds.minY, vertex.mPosition.y);
+        bounds.maxX = std::max(bounds.maxX, vertex.mPosition.x);
+        bounds.maxY = std::max(bounds.maxY, vertex.mPosition.y);
+      }
+      paintBounds->push_back(bounds);
+    }
 
     if(!isGlyphCached)
     {
@@ -537,57 +661,20 @@ struct AtlasRenderer::Impl
   }
 
   void CreateActors(const std::vector<MeshRecord>& meshContainer, const Size& textSize, const Vector4& color,
-                    const Vector4& shadowColor, const Vector2& shadowOffset, Actor textControl,
-                    Property::Index animatablePropertyIndex, bool drawShadow, bool allowGradient)
+                    Actor textControl, Property::Index animatablePropertyIndex, bool allowGradient)
   {
     if(!mActor)
     {
-      // Create a container actor to act as a common parent for text and shadow, to avoid color inheritence issues.
       mActor = Actor::New();
       mActor.SetProperty(Actor::Property::PARENT_ORIGIN, ParentOrigin::TOP_LEFT);
       mActor.SetProperty(Actor::Property::PIVOT, Pivot::TOP_LEFT);
       mActor.SetProperty(Actor::Property::SIZE, textSize);
       mActor.SetProperty(Actor::Property::COLOR_MODE, USE_OWN_MULTIPLY_PARENT_COLOR);
     }
-
-    for(std::vector<MeshRecord>::const_iterator it = meshContainer.begin(), endIt = meshContainer.end(); it != endIt;
-        ++it)
+    for(const auto& meshRecord : meshContainer)
     {
-      const MeshRecord& meshRecord = *it;
-
-      Actor actor = CreateMeshActor(textControl, animatablePropertyIndex, color, meshRecord, textSize, STYLE_NORMAL,
-                                    allowGradient);
-
-      // Whether the actor has renderers.
-      const bool hasRenderer = actor.GetRendererCount() > 0u;
-
-      // Create an effect if necessary
-      if(hasRenderer && drawShadow)
-      {
-        // Change the color of the vertices.
-        for(Vector<AtlasManager::Vertex2D>::Iterator vIt    = meshRecord.mMesh.mVertices.Begin(),
-                                                     vEndIt = meshRecord.mMesh.mVertices.End();
-            vIt != vEndIt; ++vIt)
-        {
-          AtlasManager::Vertex2D& vertex = *vIt;
-
-          vertex.mColor = shadowColor;
-        }
-
-        Actor shadowActor =
-          CreateMeshActor(textControl, animatablePropertyIndex, color, meshRecord, textSize, STYLE_DROP_SHADOW, false);
-#if defined(DEBUG_ENABLED)
-        shadowActor.SetProperty(Dali::Actor::Property::NAME, "Text Shadow renderable actor");
-#endif
-        // Offset shadow in x and y
-        shadowActor.RegisterProperty("uOffset", shadowOffset);
-        Dali::Renderer renderer(shadowActor.GetRendererAt(0));
-        int            depthIndex = renderer.GetProperty<int>(Dali::Renderer::Property::DEPTH_INDEX);
-        renderer.SetProperty(Dali::Renderer::Property::DEPTH_INDEX, depthIndex - 1);
-        mActor.Add(shadowActor);
-      }
-
-      if(hasRenderer)
+      Actor actor = CreateMeshActor(textControl, animatablePropertyIndex, color, meshRecord, textSize, allowGradient);
+      if(actor.GetRendererCount() > 0u)
       {
         mActor.Add(actor);
       }
@@ -609,6 +696,7 @@ struct AtlasRenderer::Impl
 
     std::vector<MeshRecord> meshContainer;
     std::vector<MeshRecord> meshContainerOutline;
+    std::vector<MeshRecord> meshContainerShadow;
     Vector<Extent>          underlineExtents;
     Vector<Extent>          strikethroughExtents;
     mDepth = depth;
@@ -628,6 +716,13 @@ struct AtlasRenderer::Impl
     const Length     hyphensCount         = view.GetHyphensCount();
     const bool       strikethroughEnabled = view.IsStrikethroughEnabled();
     const float      characterSpacing(view.GetCharacterSpacing());
+    mRequiresGroupComposition = isOutline || shadowEnabled || underlineEnabled || strikethroughEnabled ||
+                                view.GetNumberOfUnderlineRuns() != 0u || view.GetNumberOfStrikethroughRuns() != 0u;
+    std::vector<PixelBounds> glyphPaintBounds;
+    if(!mRequiresGroupComposition)
+    {
+      glyphPaintBounds.reserve(glyphs.Count());
+    }
 
     // Elided text info. Indices according to elided text.
     const auto startIndexOfGlyphs              = view.GetStartIndexOfElidedGlyphs();
@@ -671,16 +766,10 @@ struct AtlasRenderer::Impl
     float maxStrikethroughHeight = viewStrikethroughProperties.height;
 
     FontId lastFontId                  = 0;
-    Style  style                       = STYLE_NORMAL;
     float  currentUnderlinePosition    = ZERO;
     float  currentFontMetricsAscender  = ZERO;
     bool   thereAreUnderlinedGlyphs    = false;
     bool   thereAreStrikethroughGlyphs = false;
-
-    if(shadowEnabled)
-    {
-      style = STYLE_DROP_SHADOW;
-    }
 
     CalculateBlocksSize(glyphs);
 
@@ -764,6 +853,8 @@ struct AtlasRenderer::Impl
       // reserved box, so atlas/font/style work must be skipped completely.
       if(Text::IsSyntheticReplacementGlyph(glyph))
       {
+        // Replacement visuals publish their own paint outside the atlas mesh.
+        mRequiresGroupComposition = true;
         if(addHyphen)
         {
           hyphenIndex++;
@@ -842,11 +933,26 @@ struct AtlasRenderer::Impl
         // Retrieves and caches the glyph's bitmap.
         CacheGlyph(glyph, lastFontId, style, slot);
 
+        Vector2 outlineOrigin(Vector2::ZERO);
         // Retrieves and caches the outline glyph's bitmap.
         if(isOutline)
         {
-          style.outline = outlineWidth;
-          CacheGlyph(glyph, lastFontId, style, slotOutline);
+          style.outline          = outlineWidth;
+          const float blurRadius = view.GetOutlineBlurRadius();
+          style.blurRadius       = std::isfinite(blurRadius) && blurRadius > 0.0f ? blurRadius : 0.0f;
+          CacheGlyph(glyph, lastFontId, style, slotOutline, &outlineOrigin);
+        }
+
+        AtlasManager::AtlasSlot slotShadow{};
+        Vector2                 shadowOrigin(Vector2::ZERO);
+        if(shadowEnabled)
+        {
+          const bool colorGlyph  = Internal::IsRenderableColorGlyph(mFontClient, glyph.fontId, glyph.index);
+          style.outline          = isOutline && !colorGlyph ? outlineWidth : 0u;
+          const float blurRadius = view.GetShadowBlurRadius();
+          style.blurRadius       = std::isfinite(blurRadius) && blurRadius > 0.0f ? blurRadius : 0.0f;
+          style.mask             = colorGlyph;
+          CacheGlyph(glyph, lastFontId, style, slotShadow, &shadowOrigin);
         }
 
         // Move the origin (0,0) of the mesh to the center of the actor
@@ -866,14 +972,6 @@ struct AtlasRenderer::Impl
 
         if(0u != slot.mImageId) // invalid slot id, glyph has failed to be added to atlas
         {
-          Vector2 positionPlusOutlineOffset = position + outlineOffset;
-          if(isOutline)
-          {
-            // Add an offset to the text.
-            const float outlineWidthOffset = static_cast<float>(outlineWidth);
-            positionPlusOutlineOffset += Vector2(outlineWidthOffset, outlineWidthOffset);
-          }
-
           // Get the color of the character.
           const ColorIndex colorIndex = useDefaultColor ? 0u : *(colorIndicesBuffer + i);
           const Vector4&   color =
@@ -933,17 +1031,26 @@ struct AtlasRenderer::Impl
           isPreStrikethrough         = isGlyphStrikethrough;
           preStrikethroughProperties = currentStrikethroughProperties;
 
-          GenerateMesh(glyph, positionPlusOutlineOffset, color, NO_OUTLINE, slot, meshContainer, newTextCache, false,
+          GenerateMesh(glyph, position, color, NO_OUTLINE, slot, meshContainer, newTextCache, false,
                        currentFontMetricsAscender, isGlyphUnderlined, underlineChunkId, currentUnderlinePosition,
                        maxUnderlineHeight, underlineExtents, isGlyphStrikethrough, strikethroughChunkId,
-                       maxStrikethroughHeight, strikethroughExtents, usesGradientFill, gradientSpanPaintIndex);
+                       maxStrikethroughHeight, strikethroughExtents, usesGradientFill, gradientSpanPaintIndex,
+                       mRequiresGroupComposition ? nullptr : &glyphPaintBounds);
 
           lastFontId = glyph.fontId; // Prevents searching for existing blocksizes when string of the same fontId.
         }
 
+        if(slotShadow.mImageId != 0u)
+        {
+          GenerateMesh(glyph, position + shadowOffset + shadowOrigin, shadowColor, style.outline,
+                       slotShadow, meshContainerShadow, newTextCache, false, currentFontMetricsAscender,
+                       false, 0u, currentUnderlinePosition, maxUnderlineHeight, underlineExtents,
+                       false, 0u, maxStrikethroughHeight, strikethroughExtents, false, 0u);
+        }
+
         if(isOutline && (0u != slotOutline.mImageId)) // invalid slot id, glyph has failed to be added to atlas
         {
-          GenerateMesh(glyph, position, outlineColor, outlineWidth, slotOutline, meshContainerOutline, newTextCache,
+          GenerateMesh(glyph, position + outlineOffset + outlineOrigin, outlineColor, outlineWidth, slotOutline, meshContainerOutline, newTextCache,
                        false, currentFontMetricsAscender, false, 0u, currentUnderlinePosition, maxUnderlineHeight,
                        underlineExtents, false, 0u, maxStrikethroughHeight, strikethroughExtents, false, 0u);
         }
@@ -954,6 +1061,8 @@ struct AtlasRenderer::Impl
         hyphenIndex++;
       }
     } // glyphs
+
+    mRequiresGroupComposition = mRequiresGroupComposition || HasGlyphOverlap(glyphPaintBounds);
 
     // Now remove references for the old text
     RemoveText();
@@ -972,23 +1081,14 @@ struct AtlasRenderer::Impl
                             mapStrikethroughChunkIdWithProperties);
     }
 
-    // For each MeshData object, create a mesh actor and add to the renderable actor
-    bool isShadowDrawn = false;
-    if(!meshContainerOutline.empty())
+    // Compose shadow, outline and fill in paint order. Inherited opacity is
+    // applied to their combined result by EditableTextGroup.
+    for(const auto* meshes : {&meshContainerShadow, &meshContainerOutline, &meshContainer})
     {
-      const bool drawShadow = STYLE_DROP_SHADOW == style;
-      CreateActors(meshContainerOutline, textSize, outlineColor, shadowColor, shadowOffset, textControl,
-                   animatablePropertyIndex, drawShadow, false);
-
-      isShadowDrawn = drawShadow;
-    }
-
-    // For each MeshData object, create a mesh actor and add to the renderable actor
-    if(!meshContainer.empty())
-    {
-      const bool drawShadow = !isShadowDrawn && (STYLE_DROP_SHADOW == style);
-      CreateActors(meshContainer, textSize, defaultColor, shadowColor, shadowOffset, textControl,
-                   animatablePropertyIndex, drawShadow, true);
+      if(!meshes->empty())
+      {
+        CreateActors(*meshes, textSize, defaultColor, textControl, animatablePropertyIndex, meshes == &meshContainer);
+      }
     }
 
 #if defined(DEBUG_ENABLED)
@@ -1298,8 +1398,20 @@ struct AtlasRenderer::Impl
   }
 
   Actor CreateMeshActor(Actor textControl, Property::Index animatablePropertyIndex, const Vector4& defaultColor,
-                        const MeshRecord& meshRecord, const Vector2& actorSize, Style style, bool allowGradient)
+                        const MeshRecord& meshRecord, const Vector2& actorSize, bool allowGradient)
   {
+    Vector2 paintMin = meshRecord.mMesh.mVertices[0u].mPosition;
+    Vector2 paintMax = paintMin;
+    for(const auto& vertex : meshRecord.mMesh.mVertices)
+    {
+      paintMin.x = std::min(paintMin.x, vertex.mPosition.x);
+      paintMin.y = std::min(paintMin.y, vertex.mPosition.y);
+      paintMax.x = std::max(paintMax.x, vertex.mPosition.x);
+      paintMax.y = std::max(paintMax.y, vertex.mPosition.y);
+    }
+    const Vector2 paintSize   = paintMax - paintMin;
+    const Vector2 paintCenter = (paintMin + paintMax) * 0.5f;
+
     VertexBuffer quadVertices = VertexBuffer::New(mQuadVertexFormat);
     quadVertices.SetData(const_cast<AtlasManager::Vertex2D*>(&meshRecord.mMesh.mVertices[0]),
                          static_cast<uint32_t>(meshRecord.mMesh.mVertices.Size()));
@@ -1308,7 +1420,7 @@ struct AtlasRenderer::Impl
     quadGeometry.AddVertexBuffer(quadVertices);
 
     const bool isColorShader =
-      (STYLE_DROP_SHADOW != style) && (Pixel::BGRA8888 == mGlyphManager.GetPixelFormat(meshRecord.mAtlasId));
+      Pixel::BGRA8888 == mGlyphManager.GetPixelFormat(meshRecord.mAtlasId);
     const GradientSpanAtlasResource* gradientSpanResource = nullptr;
     if(meshRecord.mGradientSpanPaintIndex > 0u &&
        meshRecord.mGradientSpanPaintIndex <= mGradientSpanResources.size())
@@ -1317,7 +1429,7 @@ struct AtlasRenderer::Impl
     }
     const bool gradientEnabled          = gradientSpanResource ? gradientSpanResource->IsEnabled() : mGradientState.IsEnabled();
     const bool hasCompleteGradientFlags = meshRecord.mGradientFlags.Count() == meshRecord.mMesh.mVertices.Count();
-    const bool useGradientShader        = allowGradient && (STYLE_NORMAL == style) && !isColorShader &&
+    const bool useGradientShader        = allowGradient && !isColorShader &&
                                    gradientEnabled && meshRecord.mHasGradientFill &&
                                    hasCompleteGradientFlags;
     if(useGradientShader)
@@ -1433,8 +1545,9 @@ struct AtlasRenderer::Impl
     // Keep all of the origins aligned
     actor.SetProperty(Actor::Property::PARENT_ORIGIN, ParentOrigin::TOP_LEFT);
     actor.SetProperty(Actor::Property::PIVOT, Pivot::TOP_LEFT);
-    actor.SetProperty(Actor::Property::SIZE, actorSize);
-    actor.RegisterProperty("uOffset", Vector2::ZERO);
+    actor.SetProperty(Actor::Property::SIZE, paintSize);
+    actor.SetProperty(Actor::Property::POSITION, paintMin + actorSize * 0.5f);
+    actor.RegisterProperty("uOffset", -paintCenter);
     actor.SetProperty(Actor::Property::COLOR_MODE, USE_OWN_MULTIPLY_PARENT_COLOR);
 
     return actor;
@@ -1881,6 +1994,7 @@ struct AtlasRenderer::Impl
   Vector4                                  mGradientBounds{0.0f, 0.0f, 1.0f, 1.0f};
   int                                      mDepth; ///< DepthIndex passed by control when connect to stage
   bool                                     mGradientAnimApplyAlways{false};
+  bool                                     mRequiresGroupComposition;
 };
 
 Text::RendererPtr AtlasRenderer::New()
@@ -1895,6 +2009,7 @@ Actor AtlasRenderer::Render(Text::ViewInterface& view, Actor textControl, Proper
 {
   DALI_LOG_INFO(gLogFilter, Debug::General, "Text::AtlasRenderer::Render()\n");
 
+  mImpl->mRequiresGroupComposition = false;
   UnparentAndReset(mImpl->mActor);
   mImpl->RemoveGradientAnimConstraints();
   mImpl->mGradientRenderers.clear();
@@ -1940,6 +2055,11 @@ Actor AtlasRenderer::Render(Text::ViewInterface& view, Actor textControl, Proper
   mImpl->RebindGradientAnimConstraints();
 
   return mImpl->mActor;
+}
+
+bool AtlasRenderer::RequiresGroupComposition() const
+{
+  return mImpl->mRequiresGroupComposition;
 }
 
 bool AtlasRenderer::SetAtlasGradientState(const Internal::Gradient::AtlasRendererState& state)

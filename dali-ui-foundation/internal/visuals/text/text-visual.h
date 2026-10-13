@@ -25,6 +25,7 @@
 #include <dali/public-api/object/base-object.h>
 #include <dali/public-api/object/weak-handle.h>
 
+#include <memory>
 #include <utility>
 
 // INTERNAL INCLUDES
@@ -34,6 +35,7 @@
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/reveal/text-reveal-blur-preparation.h>
 #include <dali-ui-foundation/internal/text/text-gradient-style.h>
+#include <dali-ui-foundation/internal/text/text-scroller.h>
 #include <dali-ui-foundation/internal/visuals/text/text-visual-gradient-data.h>
 #include <dali-ui-foundation/internal/visuals/text/text-visual-reveal-data.h>
 #include <dali-ui-foundation/internal/visuals/text/text-visual-shader-factory.h>
@@ -175,6 +177,9 @@ public:
                                                 blurMode);
   }
 
+  /** @brief Enables the internal effect overflow publication path. */
+  static void SetEffectOverflowEnabled(Ui::Integration::Visual::Base visual, bool enabled);
+
   /**
    * @brief Set the flag to trigger the textures to be initialized and renderer to be added to the control.
    * @param[in] visual The text visual.
@@ -233,8 +238,10 @@ public:
    * The owner is responsible for requesting a replacement render when needed.
    *
    * @param[in] visual The text visual.
+   * @param[in] effectOverflowOnly Limit invalidation to the effect overflow lifecycle.
+   * @return Whether a render publication was invalidated.
    */
-  static void CancelAsyncRender(Ui::Integration::Visual::Base visual);
+  static bool CancelAsyncRender(Ui::Integration::Visual::Base visual, bool effectOverflowOnly = false);
 
   /**
    * @brief Instantly requests the async size computation.
@@ -367,6 +374,15 @@ public:
    * @return The visual size in Label coordinates after transform constraints.
    */
   static Vector2 GetGradientViewCoordinateSize(Ui::Integration::Visual::Base visual);
+
+  /** @brief Prepares complete periodic paint without changing the marquee viewport. */
+  static bool PrepareMarqueeText(Ui::Integration::Visual::Base visual, const Vector2& size, const Vector2& originSize,
+                                 bool horizontal, const Ui::Text::MarqueeStartAnchor& startAnchor,
+                                 Ui::Text::MarqueeTextureAnchor& textureAnchor, Ui::Text::TextScrollerGradient& gradient);
+
+  /** @brief Resolves marquee gradient domains from the accepted source geometry. */
+  static Ui::Text::TextScrollerGradient GetMarqueeGradient(Ui::Integration::Visual::Base visual, const Vector2& size,
+                                                           const Vector4& contentBounds, bool emboss);
 
   /**
    * @brief Render marquee text PixelData with the TextVisual-owned Typesetter.
@@ -859,7 +875,19 @@ private:
    * Get the texture of the text for rendering. It will use cached shader feature for text visual.
    * @param[in] size The texture size.
    */
+  Vector4    GetSourceViewport(const Vector2& size) const;
   TextureSet GetTextTexture(const Vector2& size);
+
+  struct EffectOverflowTextures;
+
+  // Prepares the complete GPU publication before replacing any renderer state.
+  bool CreateEffectOverflowTextures(const Vector2& size, bool multipleColors, bool colorGlyphs, bool gradient, bool gradientOverlay, EffectOverflowTextures& prepared);
+  bool PrepareEffectOverflowTextures(const Ui::Text::TextRasterResult& result, bool multipleColors, bool gradient, bool gradientOverlay, bool emboss, const Vector2& embossDirection, float embossStrength, EffectOverflowTextures& prepared, bool marquee = false, bool horizontal = true, const PixelData& revealMetadata = PixelData());
+  void PublishEffectOverflowTextures(EffectOverflowTextures& prepared, const Vector2& coordinateSize, const Vector4& contentBounds);
+  void ApplyEffectOverflowTransform(VisualRenderer renderer, const Vector2& rasterSize,
+                                    const Vector4& compositionBounds);
+  void ApplyMarqueeTransform(VisualRenderer renderer, const EffectOverflowTextures& prepared, const Vector2& sourceSize);
+  void ApplyPaintTransform(VisualRenderer renderer, const Vector2& visualSize, const Vector2& paintOffset, const Vector2& paintSize);
 
   /**
    * Get the text rendering shader.
@@ -895,6 +923,12 @@ private:
   void LoadComplete(bool success, const TextInformation& textInformation) override;
 
 private:
+  struct EffectOverflowTransform
+  {
+    Vector2 size;
+    Vector2 offset;
+  };
+
   typedef std::vector<VisualRenderer> RendererContainer;
   typedef std::vector<Constraint>     ConstraintContainer;
 
@@ -904,6 +938,8 @@ private:
   Ui::Integration::Text::AsyncTextInterface* mAsyncTextInterface; ///< The text's async interface.
   TextVisualGradientDataPtr                  mGradientData;       ///< Lazily allocated TextGradient rendering state.
   TextVisualRevealDataPtr                    mRevealData;         ///< Lazily allocated TextReveal rendering state.
+
+  std::unique_ptr<EffectOverflowTransform> mEffectOverflowTransform; ///< Layout transform while the renderer covers paint bounds.
 
   TextVisualShaderFactory&                mTextVisualShaderFactory; ///< The shader factory for text visual.
   TextVisualShaderFeature::FeatureBuilder mTextShaderFeatureCache;  ///< The cached shader feature for text visual.
@@ -929,6 +965,7 @@ private:
   uint64_t                 mTextLoadingMaximumLinesRevision;    ///< MaximumLines revision owned by the latest render task.
   uint64_t                 mNaturalSizeMaximumLinesRevision;    ///< MaximumLines revision owned by the latest natural-size task.
   uint64_t                 mHeightForWidthMaximumLinesRevision; ///< MaximumLines revision owned by the latest HFW task.
+  bool                     mEffectOverflowEnabled : 1;          ///< Requests independent effect-plane rendering.
   bool                     mRendererUpdateNeeded : 1;           ///< The flag to indicate whether the renderer needs to be updated.
   bool                     mApplyingFittingMode : 1;            ///< Whether renderer update is running from OnApplyFittingMode().
   bool                     mTextRequireRender : 1;              ///< The flag to indicate whether the text needs to be rendered.

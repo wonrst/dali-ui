@@ -23,5 +23,9 @@ namespace DALI_NAMESPACE::TextAbstraction::Test
 {
 // Reserved by the test FontClient for deterministic half-coverage bitmaps.
 // Keep this distinct from UINT32_MAX, which text code uses as an invalid or synthetic glyph sentinel.
+// An opt-in authored font that supports spaces/emoji but requires a Latin fallback.
+constexpr char     FALLBACK_SOURCE_FAMILY[] = "Test Fallback Source";
+constexpr uint32_t FALLBACK_SOURCE_FONT_BIT = 0x10000000u;
 constexpr uint32_t HALF_COVERAGE_GLYPH_INDEX = 0xF0000001u;
+constexpr uint32_t COLOR_GLYPH_INDEX         = 0xF0000002u;
 } // namespace Dali::TextAbstraction::Test

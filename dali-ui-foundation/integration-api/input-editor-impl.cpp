@@ -15,6 +15,8 @@
  *
  */
 
+#include <dali-ui-foundation/internal/text/rendering/editable-text-group.h>
+
 // EXTERNAL INCLUDES
 #include <dali/devel-api/actors/actor-devel.h>
 #include <dali/devel-api/actors/actor-enumerations-devel.h>
@@ -1818,6 +1820,8 @@ void InputEditorImpl::OnRelayout(const Vector2& size, RelayoutContainer& contain
     ClearInlineReplacementData();
   }
 
+  UpdateTextGroup();
+
   if(mCursorPositionChanged)
   {
     EmitCursorPositionChanged();
@@ -2627,6 +2631,25 @@ void InputEditorImpl::AddLayer(Actor& layer, Actor& actor)
   layer = actor;
 }
 
+void InputEditorImpl::UpdateTextGroup()
+{
+  const bool composeText = mRenderer && Ui::Text::EditableTextGroup::RequiresComposition(
+                                          *mRenderer, static_cast<bool>(mBackgroundActor), mDecorator && mDecorator->IsHighlightVisible());
+  if(composeText && mRenderableActor && mStencil)
+  {
+    if(!mTextGroup)
+    {
+      mTextGroup = std::make_unique<Ui::Text::EditableTextGroup>(mStencil);
+    }
+    const auto* replacements = Internal::Text::GetEditableInlineReplacementData(*this);
+    mTextGroup->Update(mRenderableActor, mBackgroundActor, replacements ? Actor(replacements->visualLayer) : Actor(), mCursorLayer);
+  }
+  else
+  {
+    mTextGroup.reset();
+  }
+}
+
 void InputEditorImpl::RenderText(Text::UpdateTextType updateTextType)
 {
   const Vector2 size            = Self().GetProperty<Vector3>(Actor::Property::SIZE).GetVectorXY();
@@ -2646,6 +2669,7 @@ void InputEditorImpl::RenderText(Text::UpdateTextType updateTextType)
                                             mClippingDecorationActors, mAnchorActors, updateTextType,
                                             atlasFrameState, size);
   BindGradientAnimProperties();
+  UpdateTextGroup();
 }
 
 bool InputEditorImpl::SyncAtlasGradientState()

@@ -74,9 +74,9 @@ AtlasGlyphManager::AtlasGlyphManager(Internal::AtlasGlyphManager* impl)
 }
 
 void AtlasGlyphManager::Add(const Text::GlyphInfo& glyph, const GlyphStyle& style, const PixelData& bitmap,
-                            AtlasManager::AtlasSlot& slot)
+                            AtlasManager::AtlasSlot& slot, const Vector2& origin)
 {
-  GetImplementation(*this).Add(glyph, style, bitmap, slot);
+  GetImplementation(*this).Add(glyph, style, bitmap, slot, origin);
 }
 
 void AtlasGlyphManager::GenerateMeshData(uint32_t imageId, const Vector2& position, Ui::AtlasManager::Mesh2D& mesh)
@@ -85,9 +85,9 @@ void AtlasGlyphManager::GenerateMeshData(uint32_t imageId, const Vector2& positi
 }
 
 bool AtlasGlyphManager::IsCached(Text::FontId fontId, Text::GlyphIndex index, const GlyphStyle& style,
-                                 AtlasManager::AtlasSlot& slot)
+                                 AtlasManager::AtlasSlot& slot, Vector2* origin)
 {
-  return GetImplementation(*this).IsCached(fontId, index, style, slot);
+  return GetImplementation(*this).IsCached(fontId, index, style, slot, origin);
 }
 
 void AtlasGlyphManager::SetNewAtlasSize(uint32_t width, uint32_t height, uint32_t blockWidth, uint32_t blockHeight)

@@ -34,7 +34,11 @@ SET(TC_SOURCES
     utc-Dali-ReplacementEditNormalizer-internal.cpp
     utc-Dali-TextGradientStyle-internal.cpp
     utc-Dali-TextEffectsStyle-internal.cpp
+    utc-Dali-TextRasterGeometry-internal.cpp
+    utc-Dali-TextEffectOverflow-internal.cpp
     utc-Dali-TextDecorationScale-internal.cpp
+    utc-Dali-TextDecorationLayout-internal.cpp
+    utc-Dali-EditableTextPaint-internal.cpp
     utc-Dali-TextFontStyle-internal.cpp
     utc-Dali-TextLogicalModel-internal.cpp
     utc-Dali-TextUtilities-internal.cpp

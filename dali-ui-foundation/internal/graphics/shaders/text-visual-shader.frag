@@ -5,7 +5,27 @@
 precision highp float;
 
 INPUT highp vec2 vTexCoord;
-#ifdef TEXT_REVEAL_SOURCE_ATLAS
+#ifdef TEXT_MARQUEE_PLANES
+#if defined(IS_REQUIRED_TEXT_GRADIENT) || defined(IS_REQUIRED_TEXT_GRADIENT_OVERLAY)
+INPUT highp vec2 vTextGradientCoord;
+#endif
+#define TEXT_SOURCE_UV(coord) ((coord) * uFillUvTransform.xy + uFillUvTransform.zw)
+#define TEXT_EMBOSS_UV(coord, shift) TEXT_SOURCE_UV((coord) + (shift))
+#define TEXT_SOURCE_BOUNDS(bounds) bounds
+#elif defined(TEXT_INDEPENDENT_PLANES)
+INPUT highp vec2 vFillUv;
+#ifdef IS_REQUIRED_STYLE
+INPUT highp vec2 vUnderlayUv;
+#endif
+#ifdef IS_REQUIRED_OVERLAY
+INPUT highp vec2 vOverlayUv;
+#endif
+// Gradient evaluation uses original text coordinates; only texture samples
+// use tight plane coordinates, including their transparent border.
+#define TEXT_SOURCE_UV(coord) vFillUv
+#define TEXT_EMBOSS_UV(coord, shift) (vFillUv + shift)
+#define TEXT_SOURCE_BOUNDS(bounds) bounds
+#elif defined(TEXT_REVEAL_SOURCE_ATLAS)
 INPUT highp vec4 vSourceAtlas;
 INPUT highp vec4 vSourceCrop;
 // Timing and gradient calculations still use local text coordinates. Only
@@ -47,11 +67,25 @@ UNIFORM sampler2D sTextRevealMetadata;
 
 UNIFORM_BLOCK FragBlock
 {
+#ifdef TEXT_MARQUEE_PLANES
+  UNIFORM highp vec4 uFillUvTransform;
+  UNIFORM highp vec2 uMarqueeSupport;
+  UNIFORM highp vec2 uMarqueeGradientCoordinates;
+#ifdef IS_REQUIRED_STYLE
+  UNIFORM highp vec4 uUnderlayUvTransform;
+#endif
+#ifdef IS_REQUIRED_OVERLAY
+  UNIFORM highp vec4 uOverlayUvTransform;
+#endif
+#endif
   #ifndef IS_REQUIRED_TEXT_GRADIENT
     #ifdef IS_REQUIRED_MULTI_COLOR
     #elif defined(IS_REQUIRED_EMOJI)
     // Single color with emoji.
     UNIFORM lowp float uHasMultipleTextColors;
+    #ifndef IS_REQUIRED_EMBOSS
+    UNIFORM mediump vec4 uTextColorBaked;
+    #endif
     #endif
   #endif
   UNIFORM lowp vec4 uTextColorAnimatable;
@@ -85,7 +119,11 @@ UNIFORM_BLOCK FragBlock
   #endif
 
   #ifdef IS_REQUIRED_EMBOSS
+#ifdef TEXT_MARQUEE_PLANES
+  UNIFORM highp vec2 uEmbossSize;
+#else
   UNIFORM lowp vec2 uEmbossSize;
+#endif
   UNIFORM lowp vec2 uEmbossDirection;
   UNIFORM lowp float uEmbossStrength;
   UNIFORM lowp vec4 uEmbossLightColor;
@@ -151,6 +189,9 @@ mediump vec4 ApplyTextGradientOverlay(mediump vec4 baseFill, highp vec2 texCoord
     return baseFill;
   }
 
+#ifdef TEXT_MARQUEE_PLANES
+  texCoord = mix(vTextGradientCoord, texCoord, uMarqueeGradientCoordinates.y);
+#endif
   highp vec4 overlayBounds = TEXT_SOURCE_BOUNDS(uTextGradientOverlayBounds);
   highp vec2 textGradientOverlayCoord =
     (texCoord - overlayBounds.xy) / max(overlayBounds.zw, vec2(0.000001));
@@ -209,52 +250,60 @@ highp float ResolveTextRevealOpacity(highp vec2 texCoord)
 }
 #endif
 
-void main()
+#ifndef TEXT_EMBOSS_UV
+#define TEXT_EMBOSS_UV(coord, shift) clamp(coord + shift, 0.0, 1.0)
+#endif
+
+mediump vec4 ResolveTextForeground(highp vec2 sourceCoord)
 {
-#ifdef IS_REQUIRED_STYLE
-  mediump vec4 styleTexture = TEXTURE( sStyle, vTexCoord );
-#endif
-
-#ifdef IS_REQUIRED_OVERLAY
-  mediump vec4 overlayStyleTexture = TEXTURE( sOverlayStyle, vTexCoord );
-#endif
-
   mediump vec4 textColor;
 #ifdef IS_REQUIRED_TEXT_GRADIENT_MIXED
-  mediump vec4 preservedColor = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord));
-  mediump float textTexture = TEXTURE(sTextGradientMask, TEXT_SOURCE_UV(vTexCoord)).r;
+  mediump vec4 preservedColor = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord));
+  mediump float textTexture = TEXTURE(sTextGradientMask, TEXT_SOURCE_UV(sourceCoord)).r;
   highp vec4 gradientBounds = TEXT_SOURCE_BOUNDS(uTextGradientBounds);
+  highp vec2 gradientSourceCoord = sourceCoord;
+#ifdef TEXT_MARQUEE_PLANES
+  gradientSourceCoord = mix(vTextGradientCoord, sourceCoord, uMarqueeGradientCoordinates.x);
+#endif
   highp vec2 textGradientCoord =
-    (vTexCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
+    (gradientSourceCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
   mediump vec4 gradientFill = vec4(gradientColor.rgb * textTexture,
                                    gradientColor.a * textTexture * uTextColorAnimatable.a);
   textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);
 #elif defined(IS_REQUIRED_TEXT_GRADIENT)
-  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord)).r;
+  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord)).r;
   highp vec4 gradientBounds = TEXT_SOURCE_BOUNDS(uTextGradientBounds);
+  highp vec2 gradientSourceCoord = sourceCoord;
+#ifdef TEXT_MARQUEE_PLANES
+  gradientSourceCoord = mix(vTextGradientCoord, sourceCoord, uMarqueeGradientCoordinates.x);
+#endif
   highp vec2 textGradientCoord =
-    (vTexCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
+    (gradientSourceCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
   textColor = vec4(gradientColor.rgb * textTexture, gradientColor.a * textTexture * uTextColorAnimatable.a);
 #elif defined(IS_REQUIRED_MULTI_COLOR) || defined(IS_REQUIRED_EMOJI)
   // Multiple color or use emoji.
-  textColor = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord));
+  textColor = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord));
 #ifdef IS_REQUIRED_EMBOSS
   // Multiple color or use emoji, with emboss
   mediump float textAlpha = textColor.a;
+#ifdef TEXT_MARQUEE_PLANES
+  highp vec2 offset = normalize(uEmbossDirection) * uEmbossSize * uEmbossStrength;
+#else
   mediump vec2 offset = normalize(uEmbossDirection) * uEmbossSize * uEmbossStrength;
-  float light = TEXTURE(sTexture, clamp(vTexCoord - offset, 0.0, 1.0)).a;
-  float shadow = TEXTURE(sTexture, clamp(vTexCoord + offset, 0.0, 1.0)).a;
+#endif
+  float light = TEXTURE(sTexture, TEXT_EMBOSS_UV(sourceCoord, -offset)).a;
+  float shadow = TEXTURE(sTexture, TEXT_EMBOSS_UV(sourceCoord, offset)).a;
 
 #ifdef IS_REQUIRED_TEXT_REVEAL
   // Bevel extends the foreground with neighboring texture samples. Apply the
   // timing owned by each source sample so its halo cannot precede the glyph.
-  textAlpha *= ResolveTextRevealOpacity(vTexCoord);
-  light *= ResolveTextRevealOpacity(clamp(vTexCoord - offset, 0.0, 1.0));
-  shadow *= ResolveTextRevealOpacity(clamp(vTexCoord + offset, 0.0, 1.0));
+  textAlpha *= ResolveTextRevealOpacity(sourceCoord);
+  light *= ResolveTextRevealOpacity(clamp(sourceCoord - offset, 0.0, 1.0));
+  shadow *= ResolveTextRevealOpacity(clamp(sourceCoord + offset, 0.0, 1.0));
 #define TEXT_REVEAL_RESOLVED_IN_EMBOSS
 #endif
 
@@ -272,26 +321,33 @@ void main()
 #elif defined(IS_REQUIRED_MULTI_COLOR)
 #elif defined(IS_REQUIRED_EMOJI)
   // Single color with emoji.
-  mediump float maskTexture = TEXTURE(sMask, TEXT_SOURCE_UV(vTexCoord)).r;
+  mediump float maskTexture = TEXTURE(sMask, TEXT_SOURCE_UV(sourceCoord)).r;
 
-  // Set the color of non-transparent pixel in text to what it is animated to.
-  // Markup text with multiple text colors are not animated (but can be supported later on if required).
-  // Emoji color are not animated.
-  mediump float vstep = step( 0.0001, textColor.a );
+#ifdef IS_REQUIRED_EMBOSS
+  // Emboss has already replaced the sampled fill and retains its raw coverage mask.
+  mediump float vstep = step(0.0001, textColor.a);
   textColor.rgb = mix(textColor.rgb, uTextColorAnimatable.rgb, vstep * maskTexture * (1.0 - uHasMultipleTextColors));
+#else
+  // The paired mask stores the coefficient of the final monochrome write.
+  textColor = clamp(textColor + (uTextColorAnimatable - uTextColorBaked) * maskTexture * (1.0 - uHasMultipleTextColors), 0.0, 1.0);
+#endif
 #elif defined(IS_REQUIRED_EMBOSS)
 // Single color with emboss, without emoji.
-  mediump float textAlpha = TEXTURE(sTexture, vTexCoord).r;
+  mediump float textAlpha = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord)).r;
+#ifdef TEXT_MARQUEE_PLANES
+  highp vec2 offset = normalize(uEmbossDirection) * uEmbossSize * uEmbossStrength;
+#else
   mediump vec2 offset = normalize(uEmbossDirection) * uEmbossSize * uEmbossStrength;
-  float light = TEXTURE(sTexture, clamp(vTexCoord - offset, 0.0, 1.0)).r;
-  float shadow = TEXTURE(sTexture, clamp(vTexCoord + offset, 0.0, 1.0)).r;
+#endif
+  float light = TEXTURE(sTexture, TEXT_EMBOSS_UV(sourceCoord, -offset)).r;
+  float shadow = TEXTURE(sTexture, TEXT_EMBOSS_UV(sourceCoord, offset)).r;
 
 #ifdef IS_REQUIRED_TEXT_REVEAL
   // Bevel extends the foreground with neighboring texture samples. Apply the
   // timing owned by each source sample so its halo cannot precede the glyph.
-  textAlpha *= ResolveTextRevealOpacity(vTexCoord);
-  light *= ResolveTextRevealOpacity(clamp(vTexCoord - offset, 0.0, 1.0));
-  shadow *= ResolveTextRevealOpacity(clamp(vTexCoord + offset, 0.0, 1.0));
+  textAlpha *= ResolveTextRevealOpacity(sourceCoord);
+  light *= ResolveTextRevealOpacity(clamp(sourceCoord - offset, 0.0, 1.0));
+  shadow *= ResolveTextRevealOpacity(clamp(sourceCoord + offset, 0.0, 1.0));
 #define TEXT_REVEAL_RESOLVED_IN_EMBOSS
 #endif
 
@@ -305,20 +361,85 @@ void main()
 
 #else
   // Single color without emoji.
-  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord)).r;
+  mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(sourceCoord)).r;
   textColor = uTextColorAnimatable * textTexture;
 #endif
 
+#ifdef IS_REQUIRED_EMBOSS
+  // Neighbor coverage can sum above one, and the raw-mask color mix can
+  // exceed alpha. Normalize before underlay composition and inherited opacity.
+  textColor = clamp(textColor, 0.0, 1.0);
+  textColor.rgb = min(textColor.rgb, vec3(textColor.a));
+#endif
+
 #ifdef IS_REQUIRED_TEXT_GRADIENT_OVERLAY
-  textColor = ApplyTextGradientOverlay(textColor, vTexCoord);
+  textColor = ApplyTextGradientOverlay(textColor, sourceCoord);
 #endif
 
 #ifdef IS_REQUIRED_TEXT_REVEAL
 #ifndef TEXT_REVEAL_RESOLVED_IN_EMBOSS
   // textColor is premultiplied, so scale rgb and alpha together.
-  textColor *= ResolveTextRevealOpacity(vTexCoord);
+  textColor *= ResolveTextRevealOpacity(sourceCoord);
 #endif
 #endif
+
+  return textColor;
+}
+
+void main()
+{
+#ifdef TEXT_MARQUEE_PLANES
+  // The quad bounds the scrolling axis; signed cross-axis paint remains visible.
+  highp vec2 sourceCoord = vTexCoord;
+#ifdef TEXT_MARQUEE_VERTICAL
+  highp float coordinate = fract(vTexCoord.y);
+#else
+  highp float coordinate = fract(vTexCoord.x);
+#endif
+  // Descending source indices are ascending logical copy indices. Compose
+  // complete instances before applying inherited color/opacity once.
+  highp float last = floor(uMarqueeSupport.y - coordinate);
+  highp float first = ceil(uMarqueeSupport.x - coordinate);
+  mediump vec4 paint = vec4(0.0);
+  for(int i = 0; i < TEXT_MARQUEE_MAX_COPIES; ++i)
+  {
+    highp float j = last - float(i);
+    if(j < first) break;
+#ifdef TEXT_MARQUEE_VERTICAL
+    sourceCoord.y = coordinate + j;
+#else
+    sourceCoord.x = coordinate + j;
+#endif
+    mediump vec4 instance = ResolveTextForeground(sourceCoord);
+#ifdef IS_REQUIRED_STYLE
+    mediump vec4 underlay = TEXTURE(sStyle, sourceCoord * uUnderlayUvTransform.xy + uUnderlayUvTransform.zw);
+    instance += underlay * (1.0 - instance.a);
+#endif
+#ifdef IS_REQUIRED_OVERLAY
+    mediump vec4 overlay = TEXTURE(sOverlayStyle, sourceCoord * uOverlayUvTransform.xy + uOverlayUvTransform.zw);
+    instance = overlay + instance * (1.0 - overlay.a);
+#endif
+    paint = instance + paint * (1.0 - instance.a);
+  }
+  gl_FragColor = uColor * paint;
+#else
+#ifdef IS_REQUIRED_STYLE
+#ifdef TEXT_INDEPENDENT_PLANES
+  mediump vec4 styleTexture = TEXTURE(sStyle, vUnderlayUv);
+#else
+  mediump vec4 styleTexture = TEXTURE(sStyle, vTexCoord);
+#endif
+#endif
+
+#ifdef IS_REQUIRED_OVERLAY
+#ifdef TEXT_INDEPENDENT_PLANES
+  mediump vec4 overlayStyleTexture = TEXTURE(sOverlayStyle, vOverlayUv);
+#else
+  mediump vec4 overlayStyleTexture = TEXTURE(sOverlayStyle, vTexCoord);
+#endif
+#endif
+
+  mediump vec4 textColor = ResolveTextForeground(vTexCoord);
 
   // Draw the text as overlay above the style
   gl_FragColor = uColor * (
@@ -337,5 +458,6 @@ void main()
   // Private single-color capture: A8 is stored as R8 by the graphics backend.
   // Keep final foreground alpha (including Reveal) and restore RGB at output.
   gl_FragColor = vec4(gl_FragColor.a);
+#endif
 #endif
 }

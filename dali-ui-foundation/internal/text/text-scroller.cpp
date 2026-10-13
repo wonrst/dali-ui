@@ -451,7 +451,7 @@ void TextScroller::SetParameters(Actor scrollingTextActor, Renderer renderer, Te
                                  bool isTextContentOverflow, CharacterDirection direction, Alignment horizontalAlignment,
                                  Alignment verticalAlignment, bool animationReStart,
                                  const TextScrollerGradient& textGradient,
-                                 const MarqueeInitialDelta&  marqueeInitialDelta)
+                                 const MarqueeInitialDelta& marqueeInitialDelta, Shader paintShader)
 {
   DALI_LOG_INFO(gLogFilter, Debug::Verbose,
                 "TextScroller::SetParameters controlSize[%f,%f] textureSize[%f,%f] direction[%d]\n", controlSize.x,
@@ -481,64 +481,68 @@ void TextScroller::SetParameters(Actor scrollingTextActor, Renderer renderer, Te
     mScrollAnimation.Clear();
   }
 
-  // Set the shader and texture for scrolling
-  const std::string_view vertexShaderSource       = isHorizontal ? SHADER_TEXT_SCROLLER_SHADER_VERT : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_VERT;
-  const std::string_view fragmentShaderSource     = isHorizontal ? SHADER_TEXT_SCROLLER_SHADER_FRAG : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_FRAG;
-  const bool             textGradientMixedEnabled = textGradient.enabled && textGradient.mixedTextGradient;
-  const bool             textStyleEnabled         = textGradient.styleTextureEnabled;
-  const bool             textOverlayStyleEnabled  = textGradient.overlayStyleTextureEnabled;
-  const std::string      vertexShader             = BuildTextScrollerShaderSource(vertexShaderSource,
-                                                                                  textGradient.enabled,
-                                                                                  textGradientMixedEnabled,
-                                                                                  textGradient.overlayEnabled,
-                                                                                  textGradient.useTextureCoordinates,
-                                                                                  textGradient.overlayUseTextureCoordinates,
-                                                                                  textStyleEnabled,
-                                                                                  textOverlayStyleEnabled);
-  const std::string      fragmentShader           = BuildTextScrollerShaderSource(fragmentShaderSource,
-                                                                                  textGradient.enabled,
-                                                                                  textGradientMixedEnabled,
-                                                                                  textGradient.overlayEnabled,
-                                                                                  textGradient.useTextureCoordinates,
-                                                                                  textGradient.overlayUseTextureCoordinates,
-                                                                                  textStyleEnabled,
-                                                                                  textOverlayStyleEnabled);
-  std::string            shaderName               = isHorizontal ? "TEXT_SCROLLER" : "TEXT_SCROLLER_VERTICAL";
-  if(textGradient.enabled)
+  Shader shader = paintShader;
+  if(!shader)
   {
-    shaderName += "_TEXT_GRADIENT";
-  }
-  if(textGradientMixedEnabled)
-  {
-    shaderName += "_TEXT_GRADIENT_MIXED";
-  }
-  if(textGradient.overlayEnabled)
-  {
-    shaderName += "_TEXT_GRADIENT_OVERLAY";
-  }
-  if(textGradient.enabled && textGradient.useTextureCoordinates)
-  {
-    shaderName += "_CONTENT_BOUND";
-  }
-  if(textGradient.overlayEnabled && textGradient.overlayUseTextureCoordinates)
-  {
-    shaderName += "_OVERLAY_CONTENT_BOUND";
-  }
-  if(textStyleEnabled)
-  {
-    shaderName += "_TEXT_STYLE";
-  }
-  if(textOverlayStyleEnabled)
-  {
-    shaderName += "_TEXT_OVERLAY_STYLE";
-  }
+    // Set the shader and texture for scrolling
+    const std::string_view vertexShaderSource       = isHorizontal ? SHADER_TEXT_SCROLLER_SHADER_VERT : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_VERT;
+    const std::string_view fragmentShaderSource     = isHorizontal ? SHADER_TEXT_SCROLLER_SHADER_FRAG : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_FRAG;
+    const bool             textGradientMixedEnabled = textGradient.enabled && textGradient.mixedTextGradient;
+    const bool             textStyleEnabled         = textGradient.styleTextureEnabled;
+    const bool             textOverlayStyleEnabled  = textGradient.overlayStyleTextureEnabled;
+    const std::string      vertexShader             = BuildTextScrollerShaderSource(vertexShaderSource,
+                                                                                    textGradient.enabled,
+                                                                                    textGradientMixedEnabled,
+                                                                                    textGradient.overlayEnabled,
+                                                                                    textGradient.useTextureCoordinates,
+                                                                                    textGradient.overlayUseTextureCoordinates,
+                                                                                    textStyleEnabled,
+                                                                                    textOverlayStyleEnabled);
+    const std::string      fragmentShader           = BuildTextScrollerShaderSource(fragmentShaderSource,
+                                                                                    textGradient.enabled,
+                                                                                    textGradientMixedEnabled,
+                                                                                    textGradient.overlayEnabled,
+                                                                                    textGradient.useTextureCoordinates,
+                                                                                    textGradient.overlayUseTextureCoordinates,
+                                                                                    textStyleEnabled,
+                                                                                    textOverlayStyleEnabled);
+    std::string            shaderName               = isHorizontal ? "TEXT_SCROLLER" : "TEXT_SCROLLER_VERTICAL";
+    if(textGradient.enabled)
+    {
+      shaderName += "_TEXT_GRADIENT";
+    }
+    if(textGradientMixedEnabled)
+    {
+      shaderName += "_TEXT_GRADIENT_MIXED";
+    }
+    if(textGradient.overlayEnabled)
+    {
+      shaderName += "_TEXT_GRADIENT_OVERLAY";
+    }
+    if(textGradient.enabled && textGradient.useTextureCoordinates)
+    {
+      shaderName += "_CONTENT_BOUND";
+    }
+    if(textGradient.overlayEnabled && textGradient.overlayUseTextureCoordinates)
+    {
+      shaderName += "_OVERLAY_CONTENT_BOUND";
+    }
+    if(textStyleEnabled)
+    {
+      shaderName += "_TEXT_STYLE";
+    }
+    if(textOverlayStyleEnabled)
+    {
+      shaderName += "_TEXT_OVERLAY_STYLE";
+    }
 
-  const Dali::StringView vertexShaderView   = ToDaliStringView(vertexShader);
-  const Dali::StringView fragmentShaderView = ToDaliStringView(fragmentShader);
-  Shader                 shader             = Shader::New(vertexShaderView,
-                                                          fragmentShaderView,
-                                                          static_cast<Shader::Hint::Value>(Shader::Hint::FILE_CACHE_SUPPORT | Shader::Hint::INTERNAL),
-                                                          ToDaliStringView(shaderName));
+    const Dali::StringView vertexShaderView   = ToDaliStringView(vertexShader);
+    const Dali::StringView fragmentShaderView = ToDaliStringView(fragmentShader);
+    shader                                    = Shader::New(vertexShaderView,
+                                                            fragmentShaderView,
+                                                            static_cast<Shader::Hint::Value>(Shader::Hint::FILE_CACHE_SUPPORT | Shader::Hint::INTERNAL),
+                                                            ToDaliStringView(shaderName));
+  }
 
   shader.RegisterUniqueProperty("viewEffectiveScale", 1.0f);
   shader.RegisterUniqueProperty("visualTransformUseEffectiveScale", 1.0f);
@@ -566,6 +570,11 @@ void TextScroller::SetParameters(Actor scrollingTextActor, Renderer renderer, Te
   shader.RegisterProperty("uHorizontalAlign", horizontalAlign);
   shader.RegisterProperty("uVerticalAlign", verticalAlign);
   shader.RegisterProperty("uGap", wrapGap);
+  if(paintShader)
+  {
+    mRenderer.RegisterProperty("uMarqueeGradientCoordinates", Vector2(textGradient.useTextureCoordinates ? 1.f : 0.f,
+                                                                      textGradient.overlayUseTextureCoordinates ? 1.f : 0.f));
+  }
   if(textGradient.enabled)
   {
     mGradientEnabled = true;

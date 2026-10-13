@@ -24,6 +24,7 @@
 #include <memory.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -40,6 +41,7 @@
 #include <dali-ui-foundation/internal/text/rendering/styles/strikethrough-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/text-raster-coordinate.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-geometry.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-run-snapshot.h>
@@ -166,11 +168,19 @@ inline uint8_t MultiplyAndNormalizeColor(const uint8_t x, const uint8_t y) noexc
 /**
  * @brief Prepare decode glyph bitmap data. It must be call END_GLYPH_BITMAP end of same scope.
  */
-#define BEGIN_GLYPH_BITMAP(data)                                                                                                                \
-{                                                                                                                                               \
-  uint32_t   glyphOffet               = 0u;                                                                                                     \
-  const bool useLocalScanline         = data.glyphBitmap.compressionType != TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;  \
-  uint8_t* __restrict__ glyphScanline = useLocalScanline ? (uint8_t*)malloc(data.glyphBitmap.width * glyphPixelSize) : data.glyphBitmap.buffer; \
+#define BEGIN_GLYPH_BITMAP(data, checked, failureAction)                                                                                         \
+{                                                                                                                                                \
+  uint32_t   glyphOffet               = 0u;                                                                                                      \
+  const bool useLocalScanline         = data.glyphBitmap.compressionType != TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;   \
+  uint8_t* __restrict__ glyphScanline = useLocalScanline ? (uint8_t*)malloc(data.glyphBitmap.width * glyphPixelSize) : data.glyphBitmap.buffer;  \
+  if constexpr(checked)                                                                                                                          \
+  {                                                                                                                                              \
+    if(!glyphScanline)                                                                                                                           \
+    {                                                                                                                                            \
+      failureAction;                                                                                                                             \
+      return;                                                                                                                                    \
+    }                                                                                                                                            \
+  }                                                                                                                                              \
   DALI_ASSERT_ALWAYS(glyphScanline && "Glyph scanline for buffer is nullptr!");
 
 /**
@@ -227,17 +237,107 @@ else                                                                            
  */
 struct GlyphData
 {
-  PixelBuffer                      bitmapBuffer;                      ///< The buffer of the whole bitmap. The format is RGBA8888.
-  Vector2*                         position;                          ///< The position of the glyph.
-  TextAbstraction::GlyphBufferData glyphBitmap;                       ///< The glyph's bitmap.
-  uint32_t                         width;                             ///< The bitmap's width.
-  uint32_t                         height;                            ///< The bitmap's height.
-  int32_t                          horizontalOffset;                  ///< The horizontal offset to be added to the 'x' glyph's position.
-  int32_t                          verticalOffset;                    ///< The vertical offset to be added to the 'y' glyph's position.
+  PixelBuffer                      bitmapBuffer;     ///< The buffer of the whole bitmap. The format is RGBA8888.
+  Vector2*                         position;         ///< The position of the glyph.
+  TextAbstraction::GlyphBufferData glyphBitmap;      ///< The glyph's bitmap.
+  uint32_t                         width;            ///< The bitmap's width.
+  uint32_t                         height;           ///< The bitmap's height.
+  int32_t                          horizontalOffset; ///< The horizontal offset to be added to the 'x' glyph's position.
+  int32_t                          verticalOffset;   ///< The vertical offset to be added to the 'y' glyph's position.
+  const Raster::SourceClip*        sourceClip{nullptr};
+  Raster::GlyphClip                sourceRange{};
+  Raster::BoundsAccumulator*       sourceBounds{nullptr};
+  int32_t                          sourceHorizontalOffset{0};
+  int32_t                          sourceVerticalOffset{0};
+  int32_t                          effectVerticalOffset{0};
   RevealRasterContext*             revealContext;                     ///< Optional reveal metadata target for this traversal.
   bool                             verticalOffsetValid{true};         ///< Stop vertical accumulation after malformed line metrics.
   uint8_t*                         rawOverlapCoverageBuffer{nullptr}; ///< Optional image-wide raw glyph coverage/source-alpha scratch buffer.
+  uint8_t*                         recolorMaskBuffer{nullptr};        ///< Effective coefficient of the final monochrome write.
 };
+
+// Restrict source indices before placement; destination storage never defines eligibility.
+bool ClipGlyphSource(const Raster::SourceClip& source, int64_t x, int64_t y,
+                     uint32_t width, uint32_t height, Raster::GlyphClip& range)
+{
+  int64_t l = x, t = y, r = x + width, b = y + height;
+  source.Clip(l, t, r, b);
+  if(l >= r || t >= b)
+  {
+    range = {};
+    return false;
+  }
+  range.left   = static_cast<int32_t>(l - x);
+  range.right  = static_cast<int32_t>(r - x);
+  range.top    = static_cast<int32_t>(t - y);
+  range.bottom = static_cast<int32_t>(b - y);
+  return true;
+}
+
+bool HasGlyphSource(const TextAbstraction::GlyphBufferData& bitmap, const Raster::GlyphClip& range)
+{
+  const auto           bytes      = Pixel::GetBytesPerPixel(bitmap.format);
+  const bool           compressed = bitmap.compressionType != TextAbstraction::GlyphBufferData::CompressionType::NO_COMPRESSION;
+  std::vector<uint8_t> scanline;
+  if(compressed) scanline.resize(static_cast<size_t>(bitmap.width) * bytes);
+  uint32_t offset = 0u;
+  for(int32_t y = 0; y < range.bottom; ++y)
+  {
+    const uint8_t* row;
+    if(compressed)
+    {
+      TextAbstraction::GlyphBufferData::DecompressScanline(bitmap, scanline.data(), offset);
+      row = scanline.data();
+    }
+    else
+      row = bitmap.buffer + static_cast<size_t>(y) * bitmap.width * bytes;
+    if(y < range.top) continue;
+    for(int32_t x = range.left; x < range.right; ++x)
+      if(row[static_cast<size_t>(x) * bytes + bytes - 1u]) return true;
+  }
+  return false;
+}
+
+bool ResolveGlyphSource(TextAbstraction::FontClient fontClient, const GlyphInfo& glyph,
+                        const Vector2& position, uint32_t outlineWidth, GlyphData& data)
+{
+  auto&                                   bitmap = data.glyphBitmap;
+  TextAbstraction::GlyphBufferData        fill;
+  const TextAbstraction::GlyphBufferData* original = &bitmap;
+  if(outlineWidth)
+  {
+    fill.width  = static_cast<uint32_t>(glyph.width);
+    fill.height = static_cast<uint32_t>(glyph.height);
+    fontClient.CreateBitmap(glyph.fontId, glyph.index, glyph.isItalicRequired, glyph.isBoldRequired, fill, 0u);
+    original = &fill;
+  }
+  int32_t x, y;
+  if(!original->buffer || !Raster::ResolveGlyphPosition(position.x, position.y, data.sourceHorizontalOffset, data.sourceVerticalOffset,
+                                                        original->width, original->height, Pixel::GetBytesPerPixel(original->format), x, y)) return false;
+  Raster::GlyphClip eligible{};
+  data.sourceRange = {};
+  if(!ClipGlyphSource(*data.sourceClip, x, y, original->width, original->height, eligible)) return true;
+  // Only boundary intersections need an ink query; a stroke must not resurrect a hidden glyph.
+  if(outlineWidth && (eligible.left || eligible.top || eligible.right != static_cast<int32_t>(original->width) || eligible.bottom != static_cast<int32_t>(original->height)) &&
+     !HasGlyphSource(*original, eligible)) return true;
+  if(!Raster::GlyphBufferFits(bitmap.width, bitmap.height, Pixel::GetBytesPerPixel(bitmap.format))) return false;
+  const uint32_t strokeWidth = Internal::IsColorGlyphBuffer(bitmap) ? 0u : outlineWidth;
+  const int64_t  intrinsicX  = static_cast<int64_t>(x) - strokeWidth - (strokeWidth ? bitmap.outlineOffsetX : 0);
+  const int64_t  intrinsicY  = static_cast<int64_t>(y) - strokeWidth - (strokeWidth ? bitmap.outlineOffsetY : 0);
+  ClipGlyphSource(*data.sourceClip, intrinsicX, intrinsicY, bitmap.width, bitmap.height, data.sourceRange);
+  return true;
+}
+
+void IntersectGlyphSource(const GlyphData& data, Raster::GlyphClip& clip)
+{
+  if(data.sourceClip)
+  {
+    clip.left   = std::max(clip.left, data.sourceRange.left);
+    clip.right  = std::min(clip.right, data.sourceRange.right);
+    clip.top    = std::max(clip.top, data.sourceRange.top);
+    clip.bottom = std::min(clip.bottom, data.sourceRange.bottom);
+  }
+}
 
 // A horizontal rejection must still consume this line's vertical advance.
 // Keep the two original truncations separate, including on early returns.
@@ -266,6 +366,7 @@ struct GradientRasterPaint
   Internal::Gradient::RenderData        renderData{};
   Dali::Ui::Gradient::SpreadMethod      spreadMethod{Dali::Ui::Gradient::SpreadMethod::PAD};
   std::vector<Internal::Gradient::Stop> stops;
+  Vector2                               inverseRasterSize{Vector2::ZERO};
 };
 
 float ApplyGradientSpread(float position, Dali::Ui::Gradient::SpreadMethod spreadMethod)
@@ -362,10 +463,10 @@ Vector4 SampleGradient(const GradientRasterPaint& paint, float textureX, float t
  * @param[in] pixelFormat The format of the pixel in the image that the text is rendered as (i.e. either Pixel::BGRA8888
  * or Pixel::L8).
  */
-template<bool RECORD_REVEAL, bool PIXEL_REVEAL = false>
+template<bool RECORD_REVEAL, bool PIXEL_REVEAL = false, bool TRANSLATE = false>
 void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict__ position,
                   const Vector4* const __restrict__ color, const Typesetter::Style style,
-                  const Pixel::Format pixelFormat)
+                  const Pixel::Format pixelFormat, RasterTarget* target = nullptr)
 {
   if((0u == data.glyphBitmap.width) || (0u == data.glyphBitmap.height))
   {
@@ -375,9 +476,30 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
 
   const uint32_t    glyphPixelSize = Pixel::GetBytesPerPixel(data.glyphBitmap.format);
   Raster::GlyphClip clip;
-  if(!Raster::ClipGlyph(position->x, position->y, data.horizontalOffset, data.verticalOffset,
-                        data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize,
-                        data.width, data.height, clip, Pixel::GetBytesPerPixel(pixelFormat)))
+  bool              visible;
+  if constexpr(TRANSLATE)
+  {
+    int32_t x, y;
+    if(!Raster::ResolveGlyphPosition(position->x, position->y, data.horizontalOffset, data.verticalOffset,
+                                     data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize, x, y) ||
+       !Raster::Add(x, -static_cast<int64_t>(target->bounds.left), x) ||
+       !Raster::Add(y, -static_cast<int64_t>(target->bounds.top), y))
+    {
+      target->valid = false;
+      return;
+    }
+    visible = Raster::ClipPositionedGlyph(x, y, data.glyphBitmap.width, data.glyphBitmap.height,
+                                          data.width, data.height, clip);
+  }
+  else
+  {
+    visible = Raster::ClipGlyph(position->x, position->y, data.horizontalOffset, data.verticalOffset,
+                                data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize,
+                                data.width, data.height, clip, Pixel::GetBytesPerPixel(pixelFormat));
+  }
+  if(!visible) return;
+  IntersectGlyphSource(data, clip);
+  if(clip.left >= clip.right || clip.top >= clip.bottom)
   {
     return;
   }
@@ -417,7 +539,7 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
     // overwrite policy; monochrome glyphs retain raw coverage, including when
     // their foreground is painted by a GradientSpan.
     const uint8_t inputAlpha = static_cast<uint8_t>(color->a * 255);
-    BEGIN_GLYPH_BITMAP(data);
+    BEGIN_GLYPH_BITMAP(data, TRANSLATE, target->valid = false);
     SKIP_GLYPH_SCANLINE(lineIndexRangeMin);
 
     for(int32_t lineIndex = lineIndexRangeMin; lineIndex < lineIndexRangeMax; ++lineIndex)
@@ -485,7 +607,7 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
     *(packedInputColorBuffer)      = static_cast<uint8_t>(color->r * 255);
 
     // Prepare glyph bitmap
-    BEGIN_GLYPH_BITMAP(data);
+    BEGIN_GLYPH_BITMAP(data, TRANSLATE, target->valid = false);
 
     // Skip basic line of glyph.
     SKIP_GLYPH_SCANLINE(lineIndexRangeMin);
@@ -545,8 +667,12 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
             }
           }
 
-          // Set the color into the final pixel buffer.
+          // Native pixels replace the destination, including transparent pixels.
           *(bitmapBuffer + xOffsetIndex) = packedColorGlyph;
+          if(data.recolorMaskBuffer)
+          {
+            data.recolorMaskBuffer[static_cast<size_t>(lineIndex + yOffset) * data.width + xOffsetIndex] = 0u;
+          }
         }
 
         bitmapBuffer += data.width;
@@ -590,6 +716,10 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
             {
               currentAlpha = std::max(*(packedCurrentColorBuffer + 3u), alpha);
             }
+            if(data.recolorMaskBuffer)
+            {
+              data.recolorMaskBuffer[static_cast<size_t>(lineIndex + yOffset) * data.width + xOffsetIndex] = currentAlpha;
+            }
             if(currentAlpha == 255)
             {
               // Fast-cut to avoid float type operation.
@@ -632,7 +762,7 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
       bitmapBuffer += (lineIndexRangeMin + yOffset) * static_cast<int32_t>(data.width);
 
       // Prepare glyph bitmap
-      BEGIN_GLYPH_BITMAP(data);
+      BEGIN_GLYPH_BITMAP(data, TRANSLATE, target->valid = false);
 
       // Skip basic line of glyph.
       SKIP_GLYPH_SCANLINE(lineIndexRangeMin);
@@ -673,11 +803,12 @@ void TypesetGlyph(GlyphData& __restrict__ data, const Vector2* const __restrict_
   }
 }
 
-template<bool RECORD_REVEAL, bool PIXEL_REVEAL = false>
+template<bool RECORD_REVEAL, bool PIXEL_REVEAL = false, bool TRANSLATE = false>
 void TypesetGradientGlyph(GlyphData& __restrict__ data,
                           const Vector2* const __restrict__ position,
                           const Vector4* const __restrict__ fallbackColor,
-                          const GradientRasterPaint& paint)
+                          const GradientRasterPaint& paint,
+                          RasterTarget*              target = nullptr)
 {
   if((0u == data.glyphBitmap.width) || (0u == data.glyphBitmap.height))
   {
@@ -686,15 +817,36 @@ void TypesetGradientGlyph(GlyphData& __restrict__ data,
 
   if(RECORD_REVEAL || Internal::IsColorGlyphBuffer(data.glyphBitmap))
   {
-    TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL>(data, position, fallbackColor, Typesetter::STYLE_NONE, Pixel::RGBA8888);
+    TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL, TRANSLATE>(data, position, fallbackColor, Typesetter::STYLE_NONE, Pixel::RGBA8888, target);
     return;
   }
 
   const uint32_t    glyphPixelSize = Pixel::GetBytesPerPixel(data.glyphBitmap.format);
   Raster::GlyphClip clip;
-  if(!Raster::ClipGlyph(position->x, position->y, data.horizontalOffset, data.verticalOffset,
-                        data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize,
-                        data.width, data.height, clip))
+  bool              visible;
+  if constexpr(TRANSLATE)
+  {
+    int32_t x, y;
+    if(!Raster::ResolveGlyphPosition(position->x, position->y, data.horizontalOffset, data.verticalOffset,
+                                     data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize, x, y) ||
+       !Raster::Add(x, -static_cast<int64_t>(target->bounds.left), x) ||
+       !Raster::Add(y, -static_cast<int64_t>(target->bounds.top), y))
+    {
+      target->valid = false;
+      return;
+    }
+    visible = Raster::ClipPositionedGlyph(x, y, data.glyphBitmap.width, data.glyphBitmap.height,
+                                          data.width, data.height, clip);
+  }
+  else
+  {
+    visible = Raster::ClipGlyph(position->x, position->y, data.horizontalOffset, data.verticalOffset,
+                                data.glyphBitmap.width, data.glyphBitmap.height, glyphPixelSize,
+                                data.width, data.height, clip);
+  }
+  if(!visible) return;
+  IntersectGlyphSource(data, clip);
+  if(clip.left >= clip.right || clip.top >= clip.bottom)
   {
     return;
   }
@@ -709,11 +861,12 @@ void TypesetGradientGlyph(GlyphData& __restrict__ data,
   uint32_t* __restrict__ bitmapBuffer = reinterpret_cast<uint32_t*>(data.bitmapBuffer.GetBuffer());
   bitmapBuffer += (lineIndexRangeMin + yOffset) * static_cast<int32_t>(data.width);
 
-  BEGIN_GLYPH_BITMAP(data);
+  BEGIN_GLYPH_BITMAP(data, TRANSLATE, target->valid = false);
   SKIP_GLYPH_SCANLINE(lineIndexRangeMin);
 
-  const float inverseWidth  = 1.0f / static_cast<float>(data.width);
-  const float inverseHeight = 1.0f / static_cast<float>(data.height);
+  // A tight destination changes storage only; paint stays in the authored raster domain.
+  const int64_t originX = TRANSLATE ? target->bounds.left : 0;
+  const int64_t originY = TRANSLATE ? target->bounds.top : 0;
   for(int32_t lineIndex = lineIndexRangeMin; lineIndex < lineIndexRangeMax; ++lineIndex)
   {
     BEGIN_GLYPH_SCANLINE_DECODE(data);
@@ -737,8 +890,8 @@ void TypesetGradientGlyph(GlyphData& __restrict__ data,
       accumulatedCoverage                     = std::max(accumulatedCoverage, coverage);
       const uint8_t paintCoverage             = accumulatedCoverage;
       const Vector4 gradient                  = SampleGradient(paint,
-                                                               (static_cast<float>(textureX) + 0.5f) * inverseWidth,
-                                                               (static_cast<float>(textureY) + 0.5f) * inverseHeight);
+                                                               (static_cast<float>(textureX + originX) + 0.5f) * paint.inverseRasterSize.x,
+                                                               (static_cast<float>(textureY + originY) + 0.5f) * paint.inverseRasterSize.y);
       uint32_t      packedColor               = 0u;
       uint8_t* __restrict__ packedColorBuffer = reinterpret_cast<uint8_t*>(&packedColor);
       const float normalizedCoverage          = static_cast<float>(paintCoverage) / 255.0f;
@@ -758,16 +911,68 @@ void TypesetGradientGlyph(GlyphData& __restrict__ data,
   END_GLYPH_BITMAP();
 }
 
+// Resolve paint edges before clipping. Raster origins are applied only after
+// this conversion, never inside a floating-point expression.
+struct PaintRectangle
+{
+  int64_t left, top, right, bottom;
+};
+
+bool ResolvePaintRectangle(float left, float top, float right, float bottom, PaintRectangle& rectangle)
+{
+  int32_t l, t, r, b;
+  if(!Raster::Convert(left, l) || !Raster::Convert(top, t) ||
+     !Raster::Convert(right, r) || !Raster::Convert(bottom, b))
+  {
+    return false;
+  }
+  rectangle = {l, t, r, b};
+  return true;
+}
+
+bool ClipPaintRectangle(const PaintRectangle& rectangle, uint32_t width, uint32_t height,
+                        int32_t& left, int32_t& top, int32_t& right, int32_t& bottom)
+{
+  left   = static_cast<int32_t>(std::clamp<int64_t>(rectangle.left, 0, width));
+  top    = static_cast<int32_t>(std::clamp<int64_t>(rectangle.top, 0, height));
+  right  = static_cast<int32_t>(std::clamp<int64_t>(rectangle.right, 0, width));
+  bottom = static_cast<int32_t>(std::clamp<int64_t>(rectangle.bottom, 0, height));
+  return right > left && bottom > top;
+}
+
 /// Draws the background color to the buffer
+template<bool MEASURE = false, bool TRANSLATE = false>
 void DrawBackgroundColor(Vector4 backgroundColor, const uint32_t bufferWidth, const uint32_t bufferHeight,
                          GlyphData& glyphData, const float baseline, const LineRun& line, const float lineExtentLeft,
-                         const float lineExtentRight)
+                         const float lineExtentRight, Raster::BoundsAccumulator* bounds = nullptr, RasterTarget* target = nullptr)
 {
-  int32_t xRangeMin, xRangeMax, yRangeMin, yRangeMax;
-  if(!Raster::ClipRange(static_cast<float>(glyphData.verticalOffset) + baseline - line.ascender,
-                        static_cast<float>(glyphData.verticalOffset) + baseline - line.descender, bufferHeight, yRangeMin, yRangeMax) ||
-     !Raster::ClipRange(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
-                        static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f, bufferWidth, xRangeMin, xRangeMax))
+  int32_t        xRangeMin, xRangeMax, yRangeMin, yRangeMax;
+  PaintRectangle rectangle;
+  if(!ResolvePaintRectangle(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
+                            static_cast<float>(glyphData.verticalOffset) + baseline - line.ascender,
+                            static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f,
+                            static_cast<float>(glyphData.verticalOffset) + baseline - line.descender, rectangle))
+  {
+    if constexpr(MEASURE)
+    {
+      bounds->valid = false;
+    }
+    return;
+  }
+  if(glyphData.sourceClip) glyphData.sourceClip->Clip(rectangle.left, rectangle.top, rectangle.right, rectangle.bottom);
+  if constexpr(MEASURE)
+  {
+    bounds->Include(rectangle.left, rectangle.top, rectangle.right, rectangle.bottom);
+    return;
+  }
+  if constexpr(TRANSLATE)
+  {
+    rectangle.left -= target->bounds.left;
+    rectangle.right -= target->bounds.left;
+    rectangle.top -= target->bounds.top;
+    rectangle.bottom -= target->bounds.top;
+  }
+  if(!ClipPaintRectangle(rectangle, glyphData.width, glyphData.height, xRangeMin, yRangeMin, xRangeMax, yRangeMax))
   {
     return;
   }
@@ -812,11 +1017,39 @@ void DrawBackgroundColor(Vector4 backgroundColor, const uint32_t bufferWidth, co
   }
 }
 
+// The same dash state machine emits painted pixels for bounds and rasterization.
+// In particular, preserve fractional widths/gaps and the legacy reset pixel.
+template<typename PaintPixel>
+void VisitUnderlineDashes(int32_t left, int32_t right, float initialWidth, float initialGap,
+                          float width, float gap, PaintPixel paint)
+{
+  float dashWidth = initialWidth;
+  float dashGap   = initialGap;
+  for(int32_t x = left; x < right; ++x)
+  {
+    if(Dali::EqualsZero(dashGap) && dashWidth > 0)
+    {
+      paint(x);
+      dashWidth--;
+    }
+    else if(dashGap < gap)
+    {
+      dashGap++;
+    }
+    else
+    {
+      dashWidth = width;
+      dashGap   = 0;
+    }
+  }
+}
+
 /// Draws the specified underline color to the buffer
+template<bool MEASURE = false, bool TRANSLATE = false>
 void DrawUnderline(const uint32_t bufferWidth, const uint32_t bufferHeight, GlyphData& glyphData, const float baseline,
                    const float currentUnderlinePosition, const float maxUnderlineHeight, const float lineExtentLeft,
                    const float lineExtentRight, const UnderlineStyleProperties& commonUnderlineProperties,
-                   const UnderlineStyleProperties& currentUnderlineProperties, const LineRun& line)
+                   const UnderlineStyleProperties& currentUnderlineProperties, const LineRun& line, Raster::BoundsAccumulator* bounds = nullptr, RasterTarget* target = nullptr)
 {
   const Vector4& underlineColor =
     currentUnderlineProperties.colorDefined ? currentUnderlineProperties.color : commonUnderlineProperties.color;
@@ -832,38 +1065,134 @@ void DrawUnderline(const uint32_t bufferWidth, const uint32_t bufferHeight, Glyp
   if(!Raster::AddCoordinate(glyphData.verticalOffset, baseline + currentUnderlinePosition, underlineYOffset) ||
      !Raster::Convert(maxUnderlineHeight, underlineHeight) || underlineHeight < 0 ||
      !Raster::Convert(ONE_AND_A_HALF * maxUnderlineHeight, secondOffset) ||
-     !Raster::ClipRange(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
-                        static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f, bufferWidth, xRangeMin, xRangeMax))
+     !Raster::Convert(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft, xRangeMin) ||
+     !Raster::Convert(static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f, xRangeMax))
+  {
+    if constexpr(MEASURE)
+    {
+      bounds->valid = false;
+    }
+    return;
+  }
+  int64_t secondUnderlineYOffset = static_cast<int64_t>(underlineYOffset) - secondOffset;
+  if(glyphData.sourceClip)
+  {
+    PaintRectangle lineRectangle;
+    if(!ResolvePaintRectangle(static_cast<float>(xRangeMin),
+                              static_cast<float>(glyphData.verticalOffset) + baseline - line.ascender,
+                              static_cast<float>(xRangeMax),
+                              static_cast<float>(glyphData.verticalOffset) + baseline - line.descender, lineRectangle))
+    {
+      if constexpr(MEASURE) bounds->valid = false;
+      if constexpr(TRANSLATE) target->valid = false;
+      return;
+    }
+    glyphData.sourceClip->Clip(lineRectangle.left, lineRectangle.top, lineRectangle.right, lineRectangle.bottom);
+    if(lineRectangle.left >= lineRectangle.right || lineRectangle.top >= lineRectangle.bottom) return;
+    if constexpr(MEASURE)
+    {
+      auto include = [&](int64_t y)
+      {
+        int64_t l = xRangeMin, t = y, r = xRangeMax, b = y + underlineHeight;
+        glyphData.sourceClip->Clip(l, t, r, b);
+        if(l >= r || t >= b) return;
+        if(underlineType == Text::Underline::Type::DASHED)
+        {
+          if(!std::isfinite(dashedUnderlineWidth) || !std::isfinite(dashedUnderlineGap))
+          {
+            bounds->valid = false;
+            return;
+          }
+          VisitUnderlineDashes(xRangeMin, xRangeMax, dashedUnderlineWidth, 0.f, dashedUnderlineWidth, dashedUnderlineGap,
+                               [&](int32_t x)
+          {if(x>=l && x<r) bounds->Include(x,t,static_cast<int64_t>(x)+1,b); });
+        }
+        else
+          bounds->Include(l, t, r, b);
+      };
+      include(underlineYOffset);
+      if(underlineType == Text::Underline::Type::DOUBLE) include(secondUnderlineYOffset);
+      return;
+    }
+  }
+  if constexpr(MEASURE)
+  {
+    int64_t right = xRangeMax;
+    if(underlineType == Text::Underline::Type::DASHED)
+    {
+      if(!std::isfinite(dashedUnderlineWidth) || !std::isfinite(dashedUnderlineGap))
+      {
+        bounds->valid = false;
+        return;
+      }
+      right = xRangeMin;
+      VisitUnderlineDashes(xRangeMin, xRangeMax, dashedUnderlineWidth, 0.0f, dashedUnderlineWidth, dashedUnderlineGap,
+                           [&](int32_t x)
+      { right = static_cast<int64_t>(x) + 1; });
+    }
+    bounds->Include(xRangeMin, underlineYOffset, right, static_cast<int64_t>(underlineYOffset) + underlineHeight);
+    if(underlineType == Text::Underline::Type::DOUBLE)
+    {
+      bounds->Include(xRangeMin, secondUnderlineYOffset, right, secondUnderlineYOffset + underlineHeight);
+    }
+    return;
+  }
+  const int32_t paintLeft  = xRangeMin;
+  const int32_t paintRight = xRangeMax;
+  int64_t       firstTop = underlineYOffset, firstBottom = firstTop + underlineHeight;
+  int64_t       secondTop = secondUnderlineYOffset, secondBottom = secondTop + underlineHeight;
+  if(glyphData.sourceClip)
+  {
+    int64_t l = xRangeMin, r = xRangeMax;
+    glyphData.sourceClip->Clip(l, firstTop, r, firstBottom);
+    int64_t secondLeft = xRangeMin, secondRight = xRangeMax;
+    glyphData.sourceClip->Clip(secondLeft, secondTop, secondRight, secondBottom);
+    xRangeMin = static_cast<int32_t>(l);
+    xRangeMax = static_cast<int32_t>(r);
+  }
+  if constexpr(TRANSLATE)
+  {
+    if(!Raster::Add(xRangeMin, -static_cast<int64_t>(target->bounds.left), xRangeMin) ||
+       !Raster::Add(xRangeMax, -static_cast<int64_t>(target->bounds.left), xRangeMax) ||
+       !Raster::Add(underlineYOffset, -static_cast<int64_t>(target->bounds.top), underlineYOffset))
+    {
+      target->valid = false;
+      return;
+    }
+    secondUnderlineYOffset -= target->bounds.top;
+  }
+  xRangeMin = std::max(0, std::min(xRangeMin, static_cast<int32_t>(glyphData.width)));
+  xRangeMax = std::max(0, std::min(xRangeMax, static_cast<int32_t>(glyphData.width)));
+  if(xRangeMax <= xRangeMin)
   {
     return;
   }
   // Widen before adding thickness or subtracting the second underline offset.
-  const auto clipY = [bufferHeight](int64_t y)
+  const auto clipY = [&glyphData](int64_t y)
   {
-    return static_cast<uint32_t>(std::max<int64_t>(0, std::min<int64_t>(bufferHeight, y)));
+    return static_cast<uint32_t>(std::max<int64_t>(0, std::min<int64_t>(glyphData.height, y)));
   };
-  const uint32_t yRangeMin              = clipY(underlineYOffset);
-  const uint32_t yRangeMax              = clipY(static_cast<int64_t>(underlineYOffset) + underlineHeight);
-  const int64_t  secondUnderlineYOffset = static_cast<int64_t>(underlineYOffset) - secondOffset;
-  const uint32_t secondYRangeMin        = clipY(secondUnderlineYOffset);
-  const uint32_t secondYRangeMax        = clipY(secondUnderlineYOffset + underlineHeight);
+  const int64_t  rasterTop       = TRANSLATE ? target->bounds.top : 0;
+  const uint32_t yRangeMin       = clipY(firstTop - rasterTop);
+  const uint32_t yRangeMax       = clipY(firstBottom - rasterTop);
+  const uint32_t secondYRangeMin = clipY(secondTop - rasterTop);
+  const uint32_t secondYRangeMax = clipY(secondBottom - rasterTop);
   if(yRangeMax <= yRangeMin &&
      (underlineType != Text::Underline::Type::DOUBLE || secondYRangeMax <= secondYRangeMin))
   {
     return;
   }
 
-  float       initialDashWidth = dashedUnderlineWidth;
-  float       initialDashGap   = 0.0f;
-  const float unclippedLeft    = static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft;
-  if(underlineType == Text::Underline::Type::DASHED && unclippedLeft < 0.0f &&
+  float initialDashWidth = dashedUnderlineWidth;
+  float initialDashGap   = 0.0f;
+  if(!TRANSLATE && underlineType == Text::Underline::Type::DASHED && xRangeMin > paintLeft &&
      std::isfinite(dashedUnderlineWidth) && std::isfinite(dashedUnderlineGap))
   {
     // Skip the hidden part of the existing dash cycle without restarting it
     // at the clipped edge. The legacy loop consumes one extra reset pixel.
     const double widthPixels  = std::max(0.0, std::ceil(static_cast<double>(dashedUnderlineWidth)));
     const double gapPixels    = std::max(0.0, std::ceil(static_cast<double>(dashedUnderlineGap)));
-    const double hiddenPixels = -static_cast<double>(static_cast<int32_t>(unclippedLeft)); // Validated by ClipRange.
+    const double hiddenPixels = static_cast<double>(xRangeMin) - paintLeft;
     const double phase        = std::fmod(hiddenPixels, widthPixels + gapPixels + 1.0);
     initialDashWidth          = static_cast<float>(dashedUnderlineWidth - std::min(phase, widthPixels));
     initialDashGap            = static_cast<float>(std::max(0.0, phase - widthPixels));
@@ -915,27 +1244,24 @@ void DrawUnderline(const uint32_t bufferWidth, const uint32_t bufferHeight, Glyp
     {
       if(underlineType == Text::Underline::Type::DASHED)
       {
-        float dashWidth = initialDashWidth;
-        float dashGap   = initialDashGap;
-
-        for(int32_t x = xRangeMin; x < xRangeMax; x++)
+        if constexpr(TRANSLATE)
         {
-          if(Dali::EqualsZero(dashGap) && dashWidth > 0)
+          VisitUnderlineDashes(paintLeft, paintRight, dashedUnderlineWidth, 0.0f,
+                               dashedUnderlineWidth, dashedUnderlineGap, [&](int32_t paintX)
           {
-            // Note : this is same logic as bitmap[y][x] = underlineColor;
-            *(bitmapBuffer + x) = packedUnderlineColor;
-            dashWidth--;
-          }
-          else if(dashGap < dashedUnderlineGap)
-          {
-            dashGap++;
-          }
-          else
-          {
-            // reset
-            dashWidth = dashedUnderlineWidth;
-            dashGap   = 0;
-          }
+            const int64_t x = static_cast<int64_t>(paintX) - target->bounds.left;
+            if(x >= xRangeMin && x < xRangeMax)
+            {
+              bitmapBuffer[x] = packedUnderlineColor;
+            }
+          });
+        }
+        else
+        {
+          VisitUnderlineDashes(xRangeMin, xRangeMax, initialDashWidth, initialDashGap,
+                               dashedUnderlineWidth, dashedUnderlineGap,
+                               [&](int32_t x)
+          { *(bitmapBuffer + x) = packedUnderlineColor; });
         }
       }
       else
@@ -968,20 +1294,58 @@ void DrawUnderline(const uint32_t bufferWidth, const uint32_t bufferHeight, Glyp
 }
 
 /// Draws the specified strikethrough color to the buffer
+template<bool MEASURE = false, bool TRANSLATE = false>
 void DrawStrikethrough(const uint32_t bufferWidth, const uint32_t bufferHeight, GlyphData& glyphData,
                        const float baseline, const float strikethroughStartingYPosition,
                        const float maxStrikethroughHeight, const float lineExtentLeft, const float lineExtentRight,
                        const StrikethroughStyleProperties& commonStrikethroughProperties,
-                       const StrikethroughStyleProperties& currentStrikethroughProperties, const LineRun& line)
+                       const StrikethroughStyleProperties& currentStrikethroughProperties, const LineRun& line, Raster::BoundsAccumulator* bounds = nullptr, RasterTarget* target = nullptr)
 {
+  if(glyphData.sourceClip)
+  {
+    PaintRectangle lineRectangle;
+    if(!ResolvePaintRectangle(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
+                              static_cast<float>(glyphData.verticalOffset) + baseline - line.ascender,
+                              static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.f,
+                              static_cast<float>(glyphData.verticalOffset) + baseline - line.descender, lineRectangle))
+    {
+      if constexpr(MEASURE) bounds->valid = false;
+      if constexpr(TRANSLATE) target->valid = false;
+      return;
+    }
+    glyphData.sourceClip->Clip(lineRectangle.left, lineRectangle.top, lineRectangle.right, lineRectangle.bottom);
+    if(lineRectangle.left >= lineRectangle.right || lineRectangle.top >= lineRectangle.bottom) return;
+  }
   const Vector4& strikethroughColor = currentStrikethroughProperties.colorDefined ? currentStrikethroughProperties.color
                                                                                   : commonStrikethroughProperties.color;
 
-  int32_t xRangeMin, xRangeMax, yRangeMin, yRangeMax;
-  if(!Raster::ClipRange(strikethroughStartingYPosition, strikethroughStartingYPosition + maxStrikethroughHeight,
-                        bufferHeight, yRangeMin, yRangeMax) ||
-     !Raster::ClipRange(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
-                        static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f, bufferWidth, xRangeMin, xRangeMax))
+  int32_t        xRangeMin, xRangeMax, yRangeMin, yRangeMax;
+  PaintRectangle rectangle;
+  if(!ResolvePaintRectangle(static_cast<float>(glyphData.horizontalOffset) + lineExtentLeft,
+                            strikethroughStartingYPosition,
+                            static_cast<float>(glyphData.horizontalOffset) + lineExtentRight + 1.0f,
+                            strikethroughStartingYPosition + maxStrikethroughHeight, rectangle))
+  {
+    if constexpr(MEASURE)
+    {
+      bounds->valid = false;
+    }
+    return;
+  }
+  if(glyphData.sourceClip) glyphData.sourceClip->Clip(rectangle.left, rectangle.top, rectangle.right, rectangle.bottom);
+  if constexpr(MEASURE)
+  {
+    bounds->Include(rectangle.left, rectangle.top, rectangle.right, rectangle.bottom);
+    return;
+  }
+  if constexpr(TRANSLATE)
+  {
+    rectangle.left -= target->bounds.left;
+    rectangle.right -= target->bounds.left;
+    rectangle.top -= target->bounds.top;
+    rectangle.bottom -= target->bounds.top;
+  }
+  if(!ClipPaintRectangle(rectangle, glyphData.width, glyphData.height, xRangeMin, yRangeMin, xRangeMax, yRangeMax))
   {
     return;
   }
@@ -1304,9 +1668,10 @@ std::vector<GradientRasterPaint> ResolveGradientRasterPaints(ViewModel&         
                                           std::max(pixels.maxY - pixels.minY, Math::MACHINE_EPSILON_1000) / coordinateSize.height);
     }
 
-    result[index].renderData   = Internal::Gradient::ResolveRenderData(source.style, bounds, coordinateSize);
-    result[index].spreadMethod = source.style.spreadMethod;
-    result[index].stops        = PrepareGradientStops(source.style);
+    result[index].renderData        = Internal::Gradient::ResolveRenderData(source.style, bounds, coordinateSize);
+    result[index].spreadMethod      = source.style.spreadMethod;
+    result[index].stops             = PrepareGradientStops(source.style);
+    result[index].inverseRasterSize = Vector2(1.0f / coordinateSize.width, 1.0f / coordinateSize.height);
   }
   return result;
 }
@@ -1332,11 +1697,11 @@ struct OutputParameterForEachGlyph
   FontId& lastFontId;
 };
 
-template<bool RECORD_REVEAL, bool APPLY_GRADIENT_SPAN, bool PIXEL_REVEAL = false>
+template<bool RECORD_REVEAL, bool APPLY_GRADIENT_SPAN, bool PIXEL_REVEAL = false, bool MEASURE = false, bool TRANSLATE = false>
 void CreateImageBufferForEachGlyph(TextAbstraction::FontClient fontClient, GlyphData& glyphData, GlyphIndex& glyphIndex,
                                    const GlyphIndex elidedGlyphIndex, const GlyphInfo* glyphInfo, const bool addHyphen,
                                    const InputParameterForEachGlyph& inputParamsForGlyph,
-                                   OutputParameterForEachGlyph&      outputParamsForGlyph)
+                                   OutputParameterForEachGlyph& outputParamsForGlyph, Raster::BoundsAccumulator* bounds = nullptr, RasterTarget* target = nullptr)
 {
   const GlyphIndex           styleGlyphIndex = inputParamsForGlyph.finalGlyphStyleSourceBuffer
                                                  ? ResolveFinalStyleSourceGlyph(inputParamsForGlyph.finalGlyphStyleSourceBuffer,
@@ -1550,35 +1915,97 @@ void CreateImageBufferForEachGlyph(TextAbstraction::FontClient fontClient, Glyph
                             glyphData.glyphBitmap, integerOutlineWidth);
   }
 
+  if constexpr(MEASURE || TRANSLATE)
+  {
+    if(!glyphData.glyphBitmap.buffer && inputParamsForGlyph.style != Typesetter::STYLE_UNDERLINE &&
+       inputParamsForGlyph.style != Typesetter::STYLE_STRIKETHROUGH)
+    {
+      if constexpr(MEASURE)
+      {
+        bounds->valid = false;
+      }
+      else
+      {
+        target->valid = false;
+      }
+      return;
+    }
+  }
+
+  if(glyphData.sourceBounds)
+  {
+    const auto& bitmap = glyphData.glyphBitmap;
+    int32_t     x, y;
+    if(!bitmap.buffer || !Raster::ResolveGlyphPosition(position.x, position.y, glyphData.horizontalOffset, glyphData.verticalOffset,
+                                                       bitmap.width, bitmap.height, Pixel::GetBytesPerPixel(bitmap.format), x, y))
+    {
+      glyphData.sourceBounds->valid = false;
+    }
+    else
+    {
+      glyphData.sourceBounds->Include(x, y, static_cast<int64_t>(x) + bitmap.width, static_cast<int64_t>(y) + bitmap.height);
+    }
+  }
+
   // Sets the glyph's bitmap into the bitmap of the whole text.
   if(nullptr != glyphData.glyphBitmap.buffer)
   {
     const int32_t savedHorizontalOffset = glyphData.horizontalOffset;
     const int32_t savedVerticalOffset   = glyphData.verticalOffset;
-    const bool    validOffset           = inputParamsForGlyph.style != Typesetter::STYLE_OUTLINE ||
-                             (Raster::Add(savedHorizontalOffset, -static_cast<int64_t>(glyphData.glyphBitmap.outlineOffsetX), glyphData.horizontalOffset) &&
-                              Raster::Add(savedVerticalOffset, -static_cast<int64_t>(glyphData.glyphBitmap.outlineOffsetY), glyphData.verticalOffset));
+    bool          validOffset           = inputParamsForGlyph.style != Typesetter::STYLE_OUTLINE ||
+                       (Raster::Add(savedHorizontalOffset, -static_cast<int64_t>(glyphData.glyphBitmap.outlineOffsetX), glyphData.horizontalOffset) &&
+                        Raster::Add(savedVerticalOffset, -static_cast<int64_t>(glyphData.glyphBitmap.outlineOffsetY), glyphData.verticalOffset));
 
+    if(validOffset && glyphData.sourceClip)
+    {
+      validOffset = ResolveGlyphSource(fontClient, *glyphInfo, position, static_cast<uint32_t>(integerOutlineWidth), glyphData);
+      if(!validOffset)
+      {
+        if constexpr(MEASURE) bounds->valid = false;
+        if constexpr(TRANSLATE) target->valid = false;
+      }
+    }
     if(validOffset)
     {
       // Set the buffer of the glyph's bitmap into the final bitmap's buffer
       // The caller selects the specialization once per line. The ordinary Label
       // instantiation contains no reveal-specific branch in either its glyph or
       // per-pixel raster loops.
-      if constexpr(APPLY_GRADIENT_SPAN)
+      if constexpr(MEASURE)
       {
-        if(gradientPaint)
+        int32_t     x, y;
+        const auto& bitmap = glyphData.glyphBitmap;
+        if(Raster::ResolveGlyphPosition(position.x, position.y, glyphData.horizontalOffset, glyphData.verticalOffset,
+                                        bitmap.width, bitmap.height, Pixel::GetBytesPerPixel(bitmap.format), x, y))
         {
-          TypesetGradientGlyph<RECORD_REVEAL, PIXEL_REVEAL>(glyphData, &position, &color, *gradientPaint);
+          if(glyphData.sourceClip)
+          {
+            const auto& range = glyphData.sourceRange;
+            bounds->Include(static_cast<int64_t>(x) + range.left, static_cast<int64_t>(y) + range.top,
+                            static_cast<int64_t>(x) + range.right, static_cast<int64_t>(y) + range.bottom);
+          }
+          else
+            bounds->Include(x, y, static_cast<int64_t>(x) + bitmap.width, static_cast<int64_t>(y) + bitmap.height);
         }
         else
         {
-          TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL>(glyphData, &position, &color, inputParamsForGlyph.style, inputParamsForGlyph.pixelFormat);
+          bounds->valid = false;
+        }
+      }
+      else if constexpr(APPLY_GRADIENT_SPAN)
+      {
+        if(gradientPaint)
+        {
+          TypesetGradientGlyph<RECORD_REVEAL, PIXEL_REVEAL, TRANSLATE>(glyphData, &position, &color, *gradientPaint, target);
+        }
+        else
+        {
+          TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL, TRANSLATE>(glyphData, &position, &color, inputParamsForGlyph.style, inputParamsForGlyph.pixelFormat, target);
         }
       }
       else
       {
-        TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL>(glyphData, &position, &color, inputParamsForGlyph.style, inputParamsForGlyph.pixelFormat);
+        TypesetGlyph<RECORD_REVEAL, PIXEL_REVEAL, TRANSLATE>(glyphData, &position, &color, inputParamsForGlyph.style, inputParamsForGlyph.pixelFormat, target);
       }
     }
     glyphData.horizontalOffset = savedHorizontalOffset;
@@ -1594,11 +2021,11 @@ void CreateImageBufferForEachGlyph(TextAbstraction::FontClient fontClient, Glyph
   }
 }
 
-template<bool RECORD_REVEAL, bool APPLY_GRADIENT_SPAN, bool PIXEL_REVEAL = false>
+template<bool RECORD_REVEAL, bool APPLY_GRADIENT_SPAN, bool PIXEL_REVEAL = false, bool MEASURE = false, bool TRANSLATE = false>
 void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphData& glyphData, Length& hyphenIndex,
                                   const LineRun& line, const bool isFirstLine,
                                   const InputParameterForEachLine&  inputParamsForLine,
-                                  const InputParameterForEachGlyph& inputParamsForGlyph)
+                                  const InputParameterForEachGlyph& inputParamsForGlyph, Raster::BoundsAccumulator* bounds = nullptr, RasterTarget* target = nullptr)
 {
   LineVerticalAdvance advance(glyphData, line, inputParamsForLine.verticalLineAlignType);
   if(!glyphData.verticalOffsetValid)
@@ -1610,6 +2037,13 @@ void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphD
                                                                                    : (line.ellipsis ? inputParamsForLine.elidedOffset : line.alignmentOffset);
   bool        horizontalOffsetValid = Raster::Convert(alignment, glyphData.horizontalOffset) &&
                                Raster::Add(glyphData.horizontalOffset, inputParamsForLine.horizontalOffset, glyphData.horizontalOffset);
+
+  glyphData.sourceHorizontalOffset = glyphData.horizontalOffset;
+  if(!Raster::Add(glyphData.verticalOffset, -static_cast<int64_t>(glyphData.effectVerticalOffset), glyphData.sourceVerticalOffset))
+  {
+    glyphData.verticalOffsetValid = false;
+    return;
+  }
 
   if(inputParamsForGlyph.style == Typesetter::STYLE_OUTLINE)
   {
@@ -1644,6 +2078,12 @@ void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphD
   }
   if(!horizontalOffsetValid)
   {
+    return;
+  }
+
+  if(!Raster::Add(glyphData.verticalOffset, -static_cast<int64_t>(glyphData.sourceVerticalOffset), glyphData.effectVerticalOffset))
+  {
+    glyphData.verticalOffsetValid = false;
     return;
   }
 
@@ -1738,8 +2178,15 @@ void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphD
                                                      lastFontId};
     // clang-format on
 
-    CreateImageBufferForEachGlyph<RECORD_REVEAL, APPLY_GRADIENT_SPAN, PIXEL_REVEAL>(
-      fontClient, glyphData, glyphIndex, elidedGlyphIndex, glyphInfo, addHyphen, inputParamsForGlyph, outputParamsForGlyph);
+    CreateImageBufferForEachGlyph<RECORD_REVEAL, APPLY_GRADIENT_SPAN, PIXEL_REVEAL, MEASURE, TRANSLATE>(
+      fontClient, glyphData, glyphIndex, elidedGlyphIndex, glyphInfo, addHyphen, inputParamsForGlyph, outputParamsForGlyph, bounds, target);
+    if constexpr(TRANSLATE)
+    {
+      if(!target->valid)
+      {
+        return;
+      }
+    }
 
     if(inputParamsForLine.hyphenIndices)
     {
@@ -1761,16 +2208,16 @@ void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphD
   // Draw the underline from the leftmost glyph to the rightmost glyph
   if(thereAreUnderlinedGlyphs && inputParamsForGlyph.style == Typesetter::STYLE_UNDERLINE)
   {
-    DrawUnderline(inputParamsForLine.bufferWidth, inputParamsForLine.bufferHeight, glyphData, baseline,
-                  currentUnderlinePosition, maxUnderlineHeight, lineExtentLeft, lineExtentRight,
-                  inputParamsForGlyph.modelUnderlineProperties, currentUnderlineProperties, line);
+    DrawUnderline<MEASURE, TRANSLATE>(inputParamsForLine.bufferWidth, inputParamsForLine.bufferHeight, glyphData, baseline,
+                                      currentUnderlinePosition, maxUnderlineHeight, lineExtentLeft, lineExtentRight,
+                                      inputParamsForGlyph.modelUnderlineProperties, currentUnderlineProperties, line, bounds, target);
   }
 
   // Draw the background color from the leftmost glyph to the rightmost glyph
   if(inputParamsForGlyph.style == Typesetter::STYLE_BACKGROUND)
   {
-    DrawBackgroundColor(inputParamsForGlyph.defaultColor, inputParamsForLine.bufferWidth,
-                        inputParamsForLine.bufferHeight, glyphData, baseline, line, lineExtentLeft, lineExtentRight);
+    DrawBackgroundColor<MEASURE, TRANSLATE>(inputParamsForGlyph.defaultColor, inputParamsForLine.bufferWidth,
+                                            inputParamsForLine.bufferHeight, glyphData, baseline, line, lineExtentLeft, lineExtentRight, bounds, target);
   }
 
   // Draw the strikethrough from the leftmost glyph to the rightmost glyph
@@ -1783,9 +2230,9 @@ void CreateImageBufferForEachLine(TextAbstraction::FontClient fontClient, GlyphD
       ((line.ascender) *
        HALF); // Since Free Type font doesn't contain the strikethrough-position property, strikethrough position will
               // be calculated by moving the underline position upwards by half the value of the line height.
-    DrawStrikethrough(inputParamsForLine.bufferWidth, inputParamsForLine.bufferHeight, glyphData, baseline,
-                      strikethroughStartingYPosition, maxStrikethroughHeight, lineExtentLeft, lineExtentRight,
-                      inputParamsForGlyph.modelStrikethroughProperties, currentStrikethroughProperties, line);
+    DrawStrikethrough<MEASURE, TRANSLATE>(inputParamsForLine.bufferWidth, inputParamsForLine.bufferHeight, glyphData, baseline,
+                                          strikethroughStartingYPosition, maxStrikethroughHeight, lineExtentLeft, lineExtentRight,
+                                          inputParamsForGlyph.modelStrikethroughProperties, currentStrikethroughProperties, line, bounds, target);
   }
 }
 
@@ -1797,11 +2244,13 @@ void CreateTextGradientMaskImageBufferForEachLine(TextAbstraction::FontClient   
                                                   const InputParameterForEachLine&  inputParamsForLine,
                                                   const InputParameterForEachGlyph& inputParamsForGlyph,
                                                   const ColorIndex*                 gradientColorIndexBuffer,
-                                                  const bool                        renderGradientTargets)
+                                                  const bool                        renderGradientTargets,
+                                                  RasterTarget*                     target)
 {
   LineVerticalAdvance advance(glyphData, line, inputParamsForLine.verticalLineAlignType);
   if(!glyphData.verticalOffsetValid)
   {
+    if(target) target->valid = false;
     return;
   }
 
@@ -1810,8 +2259,12 @@ void CreateTextGradientMaskImageBufferForEachLine(TextAbstraction::FontClient   
   if(!Raster::Convert(alignment, glyphData.horizontalOffset) ||
      !Raster::Add(glyphData.horizontalOffset, inputParamsForLine.horizontalOffset, glyphData.horizontalOffset))
   {
+    if(target) target->valid = false;
     return;
   }
+
+  glyphData.sourceHorizontalOffset = glyphData.horizontalOffset;
+  glyphData.sourceVerticalOffset   = glyphData.verticalOffset;
 
   UnderlineStyleProperties currentUnderlineProperties = inputParamsForGlyph.modelUnderlineProperties;
   float                    maxUnderlineHeight         = currentUnderlineProperties.height;
@@ -1925,8 +2378,16 @@ void CreateTextGradientMaskImageBufferForEachLine(TextAbstraction::FontClient   
 
                                                      lastFontId};
 
-    CreateImageBufferForEachGlyph<false, APPLY_GRADIENT_SPAN>(
-      fontClient, glyphData, glyphIndex, elidedGlyphIndex, glyphInfo, addHyphen, inputParamsForGlyph, outputParamsForGlyph);
+    if(target)
+    {
+      CreateImageBufferForEachGlyph<false, APPLY_GRADIENT_SPAN, false, false, true>(
+        fontClient, glyphData, glyphIndex, elidedGlyphIndex, glyphInfo, addHyphen, inputParamsForGlyph, outputParamsForGlyph, nullptr, target);
+    }
+    else
+    {
+      CreateImageBufferForEachGlyph<false, APPLY_GRADIENT_SPAN>(
+        fontClient, glyphData, glyphIndex, elidedGlyphIndex, glyphInfo, addHyphen, inputParamsForGlyph, outputParamsForGlyph);
+    }
 
     if(inputParamsForLine.hyphenIndices)
     {
@@ -2136,9 +2597,10 @@ PixelBuffer Typesetter::Impl::CreateTransparentImageBuffer(const uint32_t      b
   return Dali::Ui::Text::CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
 }
 
-void Typesetter::Impl::DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth,
-                                            const uint32_t bufferHeight, const bool ignoreHorizontalAlignment,
-                                            const int32_t horizontalOffset, const int32_t verticalOffset)
+template<bool MEASURE, bool TRANSLATE>
+void Typesetter::Impl::ProcessGlyphsBackground(PixelBuffer& buffer, const uint32_t bufferWidth,
+                                               const uint32_t bufferHeight, const bool ignoreHorizontalAlignment,
+                                               const int32_t horizontalOffset, const int32_t verticalOffset, Raster::BoundsAccumulator* bounds, RasterTarget* target, const Raster::SourceClip* sourceClip)
 {
   if(!Raster::BufferFits(bufferWidth, bufferHeight, 4u))
   {
@@ -2169,6 +2631,13 @@ void Typesetter::Impl::DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t 
   glyphData.bitmapBuffer     = buffer;
   glyphData.horizontalOffset = 0;
   glyphData.revealContext    = mRevealRasterContext.get();
+  glyphData.sourceClip       = sourceClip;
+
+  if constexpr(TRANSLATE)
+  {
+    glyphData.width  = buffer.GetWidth();
+    glyphData.height = buffer.GetHeight();
+  }
 
   ColorIndex prevBackgroundColorIndex = 0;
   ColorIndex backgroundColorIndex     = 0;
@@ -2227,7 +2696,7 @@ void Typesetter::Impl::DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t 
       if((backgroundColorIndex != prevBackgroundColorIndex) && (prevBackgroundColorIndex != 0u))
       {
         const Vector4& backgroundColor = *(backgroundColorsBuffer + prevBackgroundColorIndex - 1u);
-        DrawBackgroundColor(backgroundColor, bufferWidth, bufferHeight, glyphData, baseline, line, left, right);
+        DrawBackgroundColor<MEASURE, TRANSLATE>(backgroundColor, bufferWidth, bufferHeight, glyphData, baseline, line, left, right, bounds, target);
       }
 
       if(backgroundColorIndex == 0u)
@@ -2283,18 +2752,35 @@ void Typesetter::Impl::DrawGlyphsBackground(PixelBuffer& buffer, const uint32_t 
     if(backgroundColorIndex != 0u)
     {
       const Vector4& backgroundColor = *(backgroundColorsBuffer + backgroundColorIndex - 1u);
-      DrawBackgroundColor(backgroundColor, bufferWidth, bufferHeight, glyphData, baseline, line, left, right);
+      DrawBackgroundColor<MEASURE, TRANSLATE>(backgroundColor, bufferWidth, bufferHeight, glyphData, baseline, line, left, right, bounds, target);
     }
   }
 }
 
-PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,
-                                                const Typesetter::Style style,
-                                                const bool              ignoreHorizontalAlignment,
-                                                const Pixel::Format pixelFormat, const int32_t horizontalOffset,
-                                                const int32_t verticalOffset, const GlyphIndex fromGlyphIndex,
-                                                const GlyphIndex toGlyphIndex,
-                                                uint32_t revealOffsetY, uint32_t revealFullHeight)
+void Typesetter::Impl::DrawGlyphsBackground(PixelBuffer& buffer, uint32_t width, uint32_t height,
+                                            bool ignoreHorizontalAlignment, int32_t x, int32_t y, const Raster::SourceClip* sourceClip)
+{
+  ProcessGlyphsBackground<false>(buffer, width, height, ignoreHorizontalAlignment, x, y, nullptr, nullptr, sourceClip);
+}
+
+bool Typesetter::Impl::ResolveBackgroundBounds(uint32_t width, uint32_t height, bool ignoreHorizontalAlignment,
+                                               int32_t x, int32_t y, Raster::Bounds& result, const Raster::SourceClip* sourceClip)
+{
+  Raster::BoundsAccumulator bounds;
+  PixelBuffer               buffer;
+  ProcessGlyphsBackground<true>(buffer, width, height, ignoreHorizontalAlignment, x, y, &bounds, nullptr, sourceClip);
+  result = bounds.valid ? bounds.bounds : Raster::Bounds{};
+  return bounds.valid;
+}
+
+template<bool MEASURE, bool TRANSLATE>
+PixelBuffer Typesetter::Impl::ProcessImage(const uint32_t bufferWidth, const uint32_t bufferHeight,
+                                           const Typesetter::Style style,
+                                           const bool              ignoreHorizontalAlignment,
+                                           const Pixel::Format pixelFormat, const int32_t horizontalOffset,
+                                           const int32_t verticalOffset, const GlyphIndex fromGlyphIndex,
+                                           const GlyphIndex toGlyphIndex,
+                                           uint32_t revealOffsetY, uint32_t revealFullHeight, Raster::BoundsAccumulator* bounds, const StyleRuns* runs, RasterTarget* target, PixelBuffer* recolorMask, const Raster::SourceClip* sourceClip, Raster::BoundsAccumulator* sourceBounds)
 {
   if(!Raster::BufferFits(bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
   {
@@ -2323,11 +2809,19 @@ PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, cons
   glyphData.height           = bufferHeight;
   glyphData.horizontalOffset = 0;
   glyphData.revealContext    = mRevealRasterContext.get();
-  if(glyphData.revealContext)
+  glyphData.sourceClip       = sourceClip;
+  glyphData.sourceBounds     = sourceBounds;
+  if constexpr(TRANSLATE)
+  {
+    glyphData.bitmapBuffer = target->buffer;
+    glyphData.width        = target->buffer.GetWidth();
+    glyphData.height       = target->buffer.GetHeight();
+  }
+  else if(!MEASURE && glyphData.revealContext)
   {
     DALI_ASSERT_DEBUG(style == Typesetter::STYLE_NONE && pixelFormat == Pixel::RGBA8888);
   }
-  else
+  else if constexpr(!MEASURE)
   {
     glyphData.bitmapBuffer = CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
   }
@@ -2338,24 +2832,27 @@ PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, cons
   const Vector<CharacterIndex>& __restrict__ glyphToCharacterMap = viewModel.GetGlyphsToCharacters();
   const CharacterIndex* __restrict__ glyphToCharacterMapBuffer   = glyphToCharacterMap.Begin();
 
-  // Get the underline runs.
-  const Length               numberOfUnderlineRuns = viewModel.GetNumberOfUnderlineRuns();
-  Vector<UnderlinedGlyphRun> underlineRuns;
-  underlineRuns.Resize(numberOfUnderlineRuns);
-  viewModel.GetUnderlineRuns(underlineRuns.Begin(), 0u, numberOfUnderlineRuns);
-
-  // Get the strikethrough runs.
-  const Length                  numberOfStrikethroughRuns = viewModel.GetNumberOfStrikethroughRuns();
-  Vector<StrikethroughGlyphRun> strikethroughRuns;
-  strikethroughRuns.Resize(numberOfStrikethroughRuns);
-  viewModel.GetStrikethroughRuns(strikethroughRuns.Begin(), 0u, numberOfStrikethroughRuns);
+  // Drawing owns the same short-lived run copies as before. Measurement shares
+  // one request-local set across all planes and range passes.
+  StyleRuns localRuns;
+  if constexpr(!MEASURE && !TRANSLATE)
+  {
+    const Length underlines = viewModel.GetNumberOfUnderlineRuns();
+    localRuns.underline.Resize(underlines);
+    viewModel.GetUnderlineRuns(localRuns.underline.Begin(), 0u, underlines);
+    const Length strikethroughs = viewModel.GetNumberOfStrikethroughRuns();
+    localRuns.strikethrough.Resize(strikethroughs);
+    viewModel.GetStrikethroughRuns(localRuns.strikethrough.Begin(), 0u, strikethroughs);
+  }
+  const auto& underlineRuns     = (MEASURE || TRANSLATE) ? runs->underline : localRuns.underline;
+  const auto& strikethroughRuns = (MEASURE || TRANSLATE) ? runs->strikethrough : localRuns.strikethrough;
 
   // Get the character-spacing runs.
   const Vector<CharacterSpacingGlyphRun>& __restrict__ characterSpacingGlyphRuns =
     viewModel.GetCharacterSpacingGlyphRuns();
 
   const Internal::GradientSpanModelData* gradientSpanData =
-    (!glyphData.revealContext && style == Typesetter::STYLE_NONE && pixelFormat == Pixel::RGBA8888)
+    (!MEASURE && !glyphData.revealContext && style == Typesetter::STYLE_NONE && pixelFormat == Pixel::RGBA8888)
       ? viewModel.GetGradientSpanModelData()
       : nullptr;
   std::vector<GradientRasterPaint> gradientRasterPaints;
@@ -2464,11 +2961,26 @@ PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, cons
                                                        (nullptr == colorsBuffer)};
   // clang-format on
 
+  if(recolorMask)
+  {
+    *recolorMask                = PixelBuffer::New(glyphData.width, glyphData.height, Pixel::L8);
+    glyphData.recolorMaskBuffer = recolorMask->GetBuffer();
+    if(!glyphData.recolorMaskBuffer)
+    {
+      if(target)
+      {
+        target->valid = false;
+      }
+      return {};
+    }
+    memset(glyphData.recolorMaskBuffer, 0, static_cast<size_t>(glyphData.width) * glyphData.height);
+  }
+
   const bool           applyGradientSpan = gradientSpanData && !gradientRasterPaints.empty();
   std::vector<uint8_t> rawOverlapCoverageBuffer;
   if(applyGradientSpan)
   {
-    rawOverlapCoverageBuffer.resize(static_cast<std::size_t>(bufferWidth) * static_cast<std::size_t>(bufferHeight), 0u);
+    rawOverlapCoverageBuffer.resize(static_cast<std::size_t>(glyphData.width) * static_cast<std::size_t>(glyphData.height), 0u);
     glyphData.rawOverlapCoverageBuffer = rawOverlapCoverageBuffer.data();
   }
 
@@ -2477,7 +2989,29 @@ PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, cons
   {
     const LineRun& line = *(modelLinesBuffer + lineIndex);
 
-    if(glyphData.revealContext)
+    if constexpr(MEASURE)
+    {
+      CreateImageBufferForEachLine<false, false, false, true>(GetFontClient(), glyphData, hyphenIndex, line, lineIndex == 0u,
+                                                              inputParamsForLine, inputParamsForGlyph, bounds);
+    }
+    else if constexpr(TRANSLATE)
+    {
+      if(applyGradientSpan)
+      {
+        CreateImageBufferForEachLine<false, true, false, false, true>(GetFontClient(), glyphData, hyphenIndex, line, lineIndex == 0u,
+                                                                      inputParamsForLine, inputParamsForGlyph, nullptr, target);
+      }
+      else
+      {
+        CreateImageBufferForEachLine<false, false, false, false, true>(GetFontClient(), glyphData, hyphenIndex, line, lineIndex == 0u,
+                                                                       inputParamsForLine, inputParamsForGlyph, nullptr, target);
+      }
+      if(!target->valid)
+      {
+        break;
+      }
+    }
+    else if(glyphData.revealContext)
     {
       // Metadata tiling only needs glyph bitmaps for lines intersecting this
       // tile. Preserve the exact vertical accumulation for skipped lines so a
@@ -2527,7 +3061,110 @@ PixelBuffer Typesetter::Impl::CreateImageBuffer(const uint32_t bufferWidth, cons
     }
   }
 
+  if(sourceBounds && !glyphData.verticalOffsetValid) sourceBounds->valid = false;
   return glyphData.bitmapBuffer;
+}
+
+PixelBuffer Typesetter::Impl::CreateImageBuffer(uint32_t width, uint32_t height, Typesetter::Style style,
+                                                bool ignoreHorizontalAlignment, Pixel::Format format,
+                                                int32_t x, int32_t y, GlyphIndex first, GlyphIndex last,
+                                                uint32_t revealOffsetY, uint32_t revealFullHeight, PixelBuffer* recolorMask, const Raster::SourceClip* sourceClip, Raster::BoundsAccumulator* sourceBounds)
+{
+  return ProcessImage<false>(width, height, style, ignoreHorizontalAlignment, format, x, y, first, last,
+                             revealOffsetY, revealFullHeight, nullptr, nullptr, nullptr, recolorMask, sourceClip, sourceBounds);
+}
+
+bool Typesetter::Impl::ResolveStyleBounds(uint32_t width, uint32_t height, Typesetter::Style style,
+                                          bool ignoreHorizontalAlignment, int32_t x, int32_t y,
+                                          GlyphIndex first, GlyphIndex last, const StyleRuns& runs, Raster::Bounds& result, const Raster::SourceClip* sourceClip)
+{
+  Raster::BoundsAccumulator bounds;
+  ProcessImage<true>(width, height, style, ignoreHorizontalAlignment, Pixel::RGBA8888, x, y, first, last, 0u, 0u, &bounds, &runs, nullptr, nullptr, sourceClip);
+  result = bounds.valid ? bounds.bounds : Raster::Bounds{};
+  return bounds.valid;
+}
+
+// Place an effect ROI into a plane. The existing destination is the top layer,
+// as in CombineImageBuffer(..., true); range passes retain their original order.
+bool Typesetter::Impl::CompositeBehind(RasterTarget& destination, const RasterTarget& source)
+{
+  if(source.bounds.Empty())
+  {
+    return !source.buffer;
+  }
+  // Validate each allocation and the translated rectangle once before drawing.
+  const auto valid = [](const RasterTarget& target)
+  {
+    if(target.bounds.Empty() || !target.valid || !target.buffer || !target.buffer.GetBuffer() ||
+       target.buffer.GetPixelFormat() != Pixel::RGBA8888 ||
+       reinterpret_cast<std::uintptr_t>(target.buffer.GetBuffer()) % alignof(uint32_t) != 0u)
+    {
+      return false;
+    }
+    const uint64_t width  = static_cast<int64_t>(target.bounds.right) - target.bounds.left;
+    const uint64_t height = static_cast<int64_t>(target.bounds.bottom) - target.bounds.top;
+    return width == target.buffer.GetWidth() && height == target.buffer.GetHeight() &&
+           Raster::BufferFits(target.buffer.GetWidth(), target.buffer.GetHeight(), 4u) &&
+           width * 4u == target.buffer.GetStrideBytes() &&
+           width * height * 4u <= target.buffer.GetBufferSize();
+  };
+  if(!valid(destination) || !valid(source) || source.bounds.left < destination.bounds.left ||
+     source.bounds.top < destination.bounds.top || source.bounds.right > destination.bounds.right ||
+     source.bounds.bottom > destination.bounds.bottom)
+  {
+    return false;
+  }
+  const int64_t dx = static_cast<int64_t>(source.bounds.left) - destination.bounds.left;
+  const int64_t dy = static_cast<int64_t>(source.bounds.top) - destination.bounds.top;
+  if(dx < 0 || dy < 0 || static_cast<uint64_t>(dx) + source.buffer.GetWidth() > destination.buffer.GetWidth() ||
+     static_cast<uint64_t>(dy) + source.buffer.GetHeight() > destination.buffer.GetHeight())
+  {
+    return false;
+  }
+  auto*          target = reinterpret_cast<uint32_t*>(destination.buffer.GetBuffer());
+  const auto*    src    = reinterpret_cast<const uint32_t*>(source.buffer.GetBuffer());
+  const uint32_t width  = source.buffer.GetWidth();
+  const uint32_t height = source.buffer.GetHeight();
+  for(uint32_t y = 0; y < height; ++y)
+  {
+    auto* row = target + (static_cast<size_t>(dy) + y) * destination.buffer.GetWidth() + static_cast<size_t>(dx);
+    for(uint32_t x = 0; x < width; ++x)
+    {
+      const uint8_t alpha = reinterpret_cast<uint8_t*>(row + x)[3];
+      if(alpha == 0u)
+      {
+        row[x] = src[x];
+      }
+      else if(alpha != 255u)
+      {
+        uint32_t bottom   = src[x];
+        auto*    channels = reinterpret_cast<uint8_t*>(&bottom);
+        for(unsigned channel = 0; channel < 4; ++channel)
+        {
+          channels[channel] = MultiplyAndNormalizeColor(channels[channel], 255u - alpha);
+        }
+        row[x] += bottom;
+      }
+    }
+    src += width;
+  }
+  return true;
+}
+
+bool Typesetter::Impl::RasterizeStyle(uint32_t width, uint32_t height, Typesetter::Style style,
+                                      bool ignoreHorizontalAlignment, int32_t x, int32_t y,
+                                      GlyphIndex first, GlyphIndex last, const StyleRuns& runs, RasterTarget& target, PixelBuffer* recolorMask, const Raster::SourceClip* sourceClip)
+{
+  ProcessImage<false, true>(width, height, style, ignoreHorizontalAlignment, target.buffer.GetPixelFormat(),
+                            x, y, first, last, 0u, 0u, nullptr, &runs, &target, recolorMask, sourceClip);
+  return target.valid;
+}
+
+bool Typesetter::Impl::RasterizeBackground(uint32_t width, uint32_t height, bool ignoreHorizontalAlignment,
+                                           int32_t x, int32_t y, RasterTarget& target, const Raster::SourceClip* sourceClip)
+{
+  ProcessGlyphsBackground<false, true>(target.buffer, width, height, ignoreHorizontalAlignment, x, y, nullptr, &target, sourceClip);
+  return target.valid;
 }
 
 PixelBuffer Typesetter::Impl::CreateTextGradientMaskImageBuffer(const uint32_t      bufferWidth,
@@ -2537,7 +3174,8 @@ PixelBuffer Typesetter::Impl::CreateTextGradientMaskImageBuffer(const uint32_t  
                                                                 const int32_t       horizontalOffset,
                                                                 const int32_t       verticalOffset,
                                                                 const GlyphIndex    fromGlyphIndex,
-                                                                const GlyphIndex    toGlyphIndex)
+                                                                const GlyphIndex    toGlyphIndex,
+                                                                RasterTarget* target, const Raster::SourceClip* sourceClip)
 {
   if(!Raster::BufferFits(bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
   {
@@ -2556,10 +3194,12 @@ PixelBuffer Typesetter::Impl::CreateTextGradientMaskImageBuffer(const uint32_t  
   const Length hyphensCount                             = viewModel.GetHyphensCount();
 
   GlyphData glyphData;
-  glyphData.verticalOffset   = verticalOffset;
-  glyphData.width            = bufferWidth;
-  glyphData.height           = bufferHeight;
-  glyphData.bitmapBuffer     = CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
+  glyphData.verticalOffset = verticalOffset;
+  glyphData.width          = target ? target->buffer.GetWidth() : bufferWidth;
+  glyphData.height         = target ? target->buffer.GetHeight() : bufferHeight;
+  glyphData.bitmapBuffer   = target ? target->buffer : CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
+  glyphData.sourceClip     = sourceClip;
+  if(!glyphData.bitmapBuffer || (glyphData.width && glyphData.height && !glyphData.bitmapBuffer.GetBuffer())) return {};
   glyphData.horizontalOffset = 0;
   glyphData.revealContext    = mRevealRasterContext.get();
 
@@ -2661,17 +3301,18 @@ PixelBuffer Typesetter::Impl::CreateTextGradientMaskImageBuffer(const uint32_t  
     {
       CreateTextGradientMaskImageBufferForEachLine<true>(GetFontClient(), glyphData, hyphenIndex, line,
                                                          inputParamsForLine, inputParamsForGlyph,
-                                                         colorIndexBuffer, true);
+                                                         colorIndexBuffer, true, target);
     }
     else
     {
       CreateTextGradientMaskImageBufferForEachLine<false>(GetFontClient(), glyphData, hyphenIndex, line,
                                                           inputParamsForLine, inputParamsForGlyph,
-                                                          colorIndexBuffer, true);
+                                                          colorIndexBuffer, true, target);
     }
   }
 
-  return glyphData.bitmapBuffer;
+  if(target && !glyphData.verticalOffsetValid) target->valid = false;
+  return target && !target->valid ? PixelBuffer{} : glyphData.bitmapBuffer;
 }
 
 PixelBuffer Typesetter::Impl::CreateTextGradientPreservedImageBuffer(const uint32_t      bufferWidth,
@@ -2681,7 +3322,8 @@ PixelBuffer Typesetter::Impl::CreateTextGradientPreservedImageBuffer(const uint3
                                                                      const int32_t       horizontalOffset,
                                                                      const int32_t       verticalOffset,
                                                                      const GlyphIndex    fromGlyphIndex,
-                                                                     const GlyphIndex    toGlyphIndex)
+                                                                     const GlyphIndex    toGlyphIndex,
+                                                                     RasterTarget* target, const Raster::SourceClip* sourceClip)
 {
   if(!Raster::BufferFits(bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
   {
@@ -2701,10 +3343,12 @@ PixelBuffer Typesetter::Impl::CreateTextGradientPreservedImageBuffer(const uint3
   const Length hyphensCount                             = viewModel.GetHyphensCount();
 
   GlyphData glyphData;
-  glyphData.verticalOffset   = verticalOffset;
-  glyphData.width            = bufferWidth;
-  glyphData.height           = bufferHeight;
-  glyphData.bitmapBuffer     = CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
+  glyphData.verticalOffset = verticalOffset;
+  glyphData.width          = target ? target->buffer.GetWidth() : bufferWidth;
+  glyphData.height         = target ? target->buffer.GetHeight() : bufferHeight;
+  glyphData.bitmapBuffer   = target ? target->buffer : CreateTransparentImageBuffer(bufferWidth, bufferHeight, pixelFormat);
+  glyphData.sourceClip     = sourceClip;
+  if(!glyphData.bitmapBuffer || (glyphData.width && glyphData.height && !glyphData.bitmapBuffer.GetBuffer())) return {};
   glyphData.horizontalOffset = 0;
   glyphData.revealContext    = mRevealRasterContext.get();
 
@@ -2813,7 +3457,7 @@ PixelBuffer Typesetter::Impl::CreateTextGradientPreservedImageBuffer(const uint3
   std::vector<uint8_t> rawOverlapCoverageBuffer;
   if(applyGradientSpan)
   {
-    rawOverlapCoverageBuffer.resize(static_cast<std::size_t>(bufferWidth) * static_cast<std::size_t>(bufferHeight), 0u);
+    rawOverlapCoverageBuffer.resize(static_cast<std::size_t>(glyphData.width) * static_cast<std::size_t>(glyphData.height), 0u);
     glyphData.rawOverlapCoverageBuffer = rawOverlapCoverageBuffer.data();
   }
 
@@ -2824,17 +3468,18 @@ PixelBuffer Typesetter::Impl::CreateTextGradientPreservedImageBuffer(const uint3
     {
       CreateTextGradientMaskImageBufferForEachLine<true>(GetFontClient(), glyphData, hyphenIndex, line,
                                                          inputParamsForLine, inputParamsForGlyph,
-                                                         colorIndexBuffer, false);
+                                                         colorIndexBuffer, false, target);
     }
     else
     {
       CreateTextGradientMaskImageBufferForEachLine<false>(GetFontClient(), glyphData, hyphenIndex, line,
                                                           inputParamsForLine, inputParamsForGlyph,
-                                                          colorIndexBuffer, false);
+                                                          colorIndexBuffer, false, target);
     }
   }
 
-  return glyphData.bitmapBuffer;
+  if(target && !glyphData.verticalOffsetValid) target->valid = false;
+  return target && !target->valid ? PixelBuffer{} : glyphData.bitmapBuffer;
 }
 
 Typesetter::Impl::Impl(const ModelInterface* const model)

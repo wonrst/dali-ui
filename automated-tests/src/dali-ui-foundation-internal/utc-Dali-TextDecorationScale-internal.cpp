@@ -765,8 +765,8 @@ int UtcDaliTextDecorationScaleOutlineLayoutP(void)
       expected.GetCursorPosition(character, expectedCursor);
       DALI_TEST_EQUALS(cursor.primaryPosition, expectedCursor.primaryPosition, EPSILON, TEST_LOCATION);
     }
-    // Preserve the atlas View's existing unsupported outline-offset behavior.
-    DALI_TEST_EQUALS(ControllerFor(field)->GetView().GetOutlineOffset(), Vector2::ZERO, TEST_LOCATION);
+    // Outline offset is paint-only and resolves through the same UI scale.
+    DALI_TEST_EQUALS(ControllerFor(field)->GetView().GetOutlineOffset(), Vector2(2.0f, -3.0f) * scale, TEST_LOCATION);
   }
   auto model = Text::Model::New();
   model->mVisualModel->SetOutlineWidth(std::numeric_limits<uint16_t>::max());

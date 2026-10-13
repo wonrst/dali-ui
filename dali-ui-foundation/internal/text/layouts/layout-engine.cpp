@@ -711,8 +711,6 @@ struct Engine::Impl
     const GlyphInfo* const  glyphsBuffer             = parameters.textModel->mVisualModel->mGlyphs.Begin();
     const GlyphIndex* const charactersToGlyphsBuffer = parameters.textModel->mVisualModel->mCharactersToGlyph.Begin();
 
-    const float outlineWidth =
-      parameters.textModel->IsOutlineEnabled() ? static_cast<float>(parameters.textModel->GetOutlineWidth()) : 0.0f;
     const GlyphIndex lastGlyphOfParagraphPlusOne = parameters.startGlyphIndex + parameters.numberOfGlyphs;
     const float      modelCharacterSpacing       = parameters.textModel->mVisualModel->GetCharacterSpacing();
 
@@ -815,7 +813,7 @@ struct Engine::Impl
                                              (*(glyphsBuffer + glyphIndex)).advance);
     GetGlyphsMetrics(glyphIndex, numberOfGLyphsInGroup, glyphMetrics, glyphsBuffer, mMetrics, calculatedAdvance);
 
-    float penX = -glyphMetrics.xBearing + GetCursorInsetWidth() + outlineWidth;
+    float penX = -glyphMetrics.xBearing + GetCursorInsetWidth();
 
     // Traverses the characters of the right to left paragraph.
     // Continue in the second half of line, because in it the first index of character that is not WhiteSpace.
@@ -1109,8 +1107,6 @@ struct Engine::Impl
       parameters.textModel->mVisualModel->mGlyphsToCharacters.Begin();
     const LineBreakInfo* const lineBreakInfoBuffer = parameters.textModel->mLogicalModel->mLineBreakInfo.Begin();
 
-    const float outlineWidth =
-      parameters.textModel->IsOutlineEnabled() ? static_cast<float>(parameters.textModel->GetOutlineWidth()) : 0.0f;
     const Length totalNumberOfGlyphs = static_cast<Dali::Ui::Text::Length>(parameters.textModel->mVisualModel->mGlyphs.Count());
 
     const bool isMultiline = !enforceEllipsisInSingleLine && (mLayout == MULTI_LINE_BOX);
@@ -1170,10 +1166,9 @@ struct Engine::Impl
 
     // The initial start point is zero. However it needs a correction according the 'x' bearing of the first glyph.
     // i.e. if the bearing of the first glyph is negative it may exceed the boundaries of the text area.
-    // It needs to add as well space for the cursor if the text is in edit mode and extra space in case the text is
-    // outlined.
+    // Reserve space for the cursor when the text is editable. Decorations do not affect layout.
 
-    tmpLineLayout.penX = GetCursorInsetWidth() + outlineWidth;
+    tmpLineLayout.penX = GetCursorInsetWidth();
     if(parameters.textModel->mRemoveFrontInset)
     {
       tmpLineLayout.penX -= glyphMetrics.xBearing;
@@ -1569,13 +1564,9 @@ struct Engine::Impl
   {
     // Traverse the glyphs and set the positions.
 
-    const GlyphInfo* const glyphsBuffer = layoutParameters.textModel->mVisualModel->mGlyphs.Begin();
-    const float            outlineWidth =
-      layoutParameters.textModel->IsOutlineEnabled()
-                   ? static_cast<float>(layoutParameters.textModel->GetOutlineWidth())
-                   : 0.0f;
-    const Length numberOfGlyphs         = layout.numberOfGlyphs;
-    const float  interGlyphExtraAdvance = layoutParameters.interGlyphExtraAdvance;
+    const GlyphInfo* const glyphsBuffer           = layoutParameters.textModel->mVisualModel->mGlyphs.Begin();
+    const Length           numberOfGlyphs         = layout.numberOfGlyphs;
+    const float            interGlyphExtraAdvance = layoutParameters.interGlyphExtraAdvance;
 
     const GlyphIndex startIndexForGlyph          = layout.glyphIndex;
     const GlyphIndex startIndexForGlyphPositions = startIndexForGlyph - layoutParameters.startGlyphIndex;
@@ -1584,7 +1575,7 @@ struct Engine::Impl
     // If it has a negative x bearing, it will exceed the boundaries of the actor,
     // so the penX position needs to be moved to the right.
     const GlyphInfo& glyph = *(glyphsBuffer + startIndexForGlyph);
-    float            penX  = GetCursorInsetWidth() + outlineWidth;
+    float            penX  = GetCursorInsetWidth();
 
     if(layoutParameters.textModel->mRemoveFrontInset)
     {

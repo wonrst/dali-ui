@@ -95,6 +95,11 @@ private:
   void Load();
 
   /**
+   * Load one advanced or legacy request.
+   */
+  void LoadRequest();
+
+  /**
    * Release AsyncTextLoader
    */
   void ReleaseLoader();

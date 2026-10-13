@@ -240,6 +240,11 @@ public:
    */
   Shader GetShader(VisualFactoryCache& factoryCache, const TextVisualShaderFeature::FeatureBuilder& featureBuilder);
 
+  /** @brief Gets a lazily cached shader for independent L8/RGBA effect planes. */
+  Shader GetIndependentPlanesShader(VisualFactoryCache& factoryCache, bool multipleColors, bool colorGlyphMask, bool style, bool overlay,
+                                    bool gradient = false, bool gradientMixed = false, bool gradientOverlay = false, bool emboss = false,
+                                    bool marquee = false, bool horizontal = true);
+
   /**
    * @brief Gets the foreground-only Reveal shader for prepared source atlases.
    *
@@ -260,6 +265,7 @@ public: // Implementation of VisualShaderFactoryInterface
   void GetPreCompiledShader(ShaderPreCompiler::RawShaderData& shaders) override;
 
 private:
+  std::unordered_map<uint32_t, VisualFactoryCache::ExternalShaderId> mIndependentPlaneShaderIds;
   std::unordered_map<uint32_t, VisualFactoryCache::ExternalShaderId> mRevealShaderIds;
   std::unordered_map<uint32_t, VisualFactoryCache::ExternalShaderId> mRevealSourceShaderIds;
 

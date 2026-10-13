@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 // INTERNAL INCLUDES
@@ -33,7 +34,10 @@
 #include <dali-ui-foundation/internal/text/decoration-scale.h>
 #include <dali-ui-foundation/internal/text/ellipsis/ellipsis-resolver.h>
 #include <dali-ui-foundation/internal/text/hyphenator.h>
+#include <dali-ui-foundation/internal/text/marquee/marquee-paint.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-start-geometry.h>
+#include <dali-ui-foundation/internal/text/rendering/text-effect-overflow.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-geometry.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-layout-data.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-placement.h>
@@ -61,6 +65,13 @@ const float VERTICAL_ALIGNMENT_TABLE[static_cast<int>(Text::Alignment::END) + 1]
   0.5f, // Text::Alignment::CENTER
   1.0f  // Text::Alignment::END
 };
+
+// Reveal retains its bounded raster's decoration scale, including supersampling.
+bool UsesBoundedReveal(const Text::AsyncTextParameters& parameters)
+{
+  return parameters.isTextRevealEnabled && !parameters.isMarqueeEnabled &&
+         !parameters.isCutoutEnabled && !parameters.isBackgroundWithCutoutEnabled;
+}
 
 float ConvertToEven(float value)
 {
@@ -550,6 +561,41 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
     mTextModel->mVisualModel->SetOutlineEnabled(false);
   }
 
+  if(parameters.isEffectOverflowRequested && !UsesBoundedReveal(parameters) && parameters.renderScale > 1.0f)
+  {
+    // The advanced worker model uses raster pixels for layout and paint. Resolve
+    // UI geometry first, then supersample it together with the glyphs. Blur is
+    // independent of UI scale but still needs the raster conversion.
+    auto&       visualModel = *mTextModel->mVisualModel;
+    const float rasterScale = parameters.renderScale;
+    if(parameters.isUnderlineEnabled)
+    {
+      visualModel.SetUnderlineHeight(visualModel.GetEffectiveUnderlineHeight() * rasterScale);
+      visualModel.SetDashedUnderlineWidth(visualModel.GetEffectiveDashedUnderlineWidth() * rasterScale);
+      visualModel.SetDashedUnderlineGap(visualModel.GetEffectiveDashedUnderlineGap() * rasterScale);
+    }
+    if(parameters.isStrikethroughEnabled)
+    {
+      visualModel.SetStrikethroughHeight(visualModel.GetEffectiveStrikethroughHeight() * rasterScale);
+    }
+    if(parameters.isShadowEnabled)
+    {
+      visualModel.SetShadowOffset(visualModel.GetEffectiveShadowOffset() * rasterScale);
+      visualModel.SetShadowBlurRadius(parameters.shadowBlurRadius * rasterScale);
+    }
+    if(parameters.isOutlineEnabled)
+    {
+      const double width = std::round(static_cast<double>(visualModel.GetEffectiveOutlineWidth()) * rasterScale);
+      visualModel.SetOutlineWidth(static_cast<uint16_t>(std::min(width, static_cast<double>(std::numeric_limits<uint16_t>::max()))));
+      visualModel.SetOutlineOffset(visualModel.GetEffectiveOutlineOffset() * rasterScale);
+      visualModel.SetOutlineBlurRadius(parameters.outlineBlurRadius * rasterScale);
+    }
+    // All enabled common decoration distances are now in raster pixels; keep
+    // their model scale neutral. Span runs resolve authored properties separately
+    // below. Request snapshots and logical spans remain unchanged.
+    visualModel.SetDecorationUiScale(1.0f);
+  }
+
   mTextModel->mVisualModel->SetCutoutEnabled(parameters.isCutoutEnabled);
   mTextModel->mVisualModel->SetBackgroundWithCutoutEnabled(parameters.isBackgroundWithCutoutEnabled);
   mTextModel->mVisualModel->SetBackgroundColorWithCutout(parameters.backgroundColorWithCutout);
@@ -883,7 +929,23 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
       // Create one run for all glyphs of all run's characters that has same properties
       // This enhance performance and reduce the needed memory to store glyphs-runs
       UnderlinedGlyphRun underlineGlyphRun;
-      underlineGlyphRun.properties              = ResolveDecorationProperties(it->properties, parameters.decorationUiScale);
+      underlineGlyphRun.properties = ResolveDecorationProperties(it->properties, parameters.decorationUiScale);
+      if(parameters.isEffectOverflowRequested && !UsesBoundedReveal(parameters) && parameters.renderScale > 1.0f)
+      {
+        auto& properties = underlineGlyphRun.properties;
+        if(properties.heightDefined)
+        {
+          properties.height *= parameters.renderScale;
+        }
+        if(properties.dashWidthDefined)
+        {
+          properties.dashWidth *= parameters.renderScale;
+        }
+        if(properties.dashGapDefined)
+        {
+          properties.dashGap *= parameters.renderScale;
+        }
+      }
       underlineGlyphRun.glyphRun.glyphIndex     = charactersToGlyph[characterIndex];
       underlineGlyphRun.glyphRun.numberOfGlyphs = glyphsPerCharacter[characterIndex];
 
@@ -915,7 +977,11 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
       }
 
       StrikethroughGlyphRun strikethroughGlyphRun;
-      strikethroughGlyphRun.properties              = ResolveDecorationProperties(it->properties, parameters.decorationUiScale);
+      strikethroughGlyphRun.properties = ResolveDecorationProperties(it->properties, parameters.decorationUiScale);
+      if(parameters.isEffectOverflowRequested && !UsesBoundedReveal(parameters) && parameters.renderScale > 1.0f && strikethroughGlyphRun.properties.heightDefined)
+      {
+        strikethroughGlyphRun.properties.height *= parameters.renderScale;
+      }
       strikethroughGlyphRun.glyphRun.glyphIndex     = charactersToGlyph[characterIndex];
       strikethroughGlyphRun.glyphRun.numberOfGlyphs = glyphsPerCharacter[characterIndex];
 
@@ -1585,33 +1651,220 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
   // Set the direction of text.
   renderInfo.isTextDirectionRTL = mIsTextDirectionRTL;
 
-  PixelBuffer cutoutData;
-  if(cutoutEnabled)
-  {
-    cutoutData = mTypesetter->RenderWithPixelBuffer(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
-                                                    ignoreHorizontalAlignment, textPixelFormat);
-
-    // Make transparent buffer.
-    // If the cutout is enabled, a separate texture is not used for the text.
-    PixelBuffer buffer       = mTypesetter->CreateFullBackgroundBuffer(1, 1, Color::TRANSPARENT);
-    renderInfo.textPixelData = PixelBuffer::Convert(buffer);
-
-    // Set the flag of cutout.
-    renderInfo.isCutoutEnabled = cutoutEnabled && (cutoutData != nullptr);
-  }
-  else
-  {
-    // Create a pixel data for the text without any styles
-    renderInfo.textPixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES, ignoreHorizontalAlignment, textPixelFormat);
-  }
+  // Use only this worker request's logical viewport and publication transform.
+  // Supersampling's ceil/even storage dimensions are not the source domain.
+  const float               sourceScale   = isRenderScale ? parameters.renderScale : 1.f;
+  const float               sourceWidth   = isRenderScale ? parameters.renderScaleWidth : parameters.textWidth;
+  const float               sourceHeight  = isRenderScale ? parameters.renderScaleHeight : parameters.textHeight;
+  const float               displayHeight = layoutSize.y / sourceScale;
+  const float               alignmentY    = (sourceHeight - displayHeight) * VERTICAL_ALIGNMENT_TABLE[static_cast<int>(parameters.verticalAlignment)];
+  const float               offsetX       = std::round(parameters.padding.start);
+  const float               offsetY       = isRenderScale ? std::round((displayHeight + parameters.padding.top + alignmentY) * 2.f) * .5f - displayHeight
+                                                          : std::round(parameters.padding.top + alignmentY);
+  const Vector4             sourceViewport((parameters.padding.start - offsetX) * sourceScale,
+                                           (parameters.padding.top - offsetY) * sourceScale, sourceWidth * sourceScale, sourceHeight * sourceScale);
+  const bool                sourcePolicy = IsEffectOverflowSupported(*renderModel, layoutSize, parameters.maxTextureSize,
+                                                                     parameters.isMarqueeEnabled,
+                                                                     parameters.isTextRevealEnabled);
+  Raster::SourceClip        resolvedSource;
+  const Raster::SourceClip* sourceClip = nullptr;
 
   std::unique_ptr<Internal::Reveal::Plan> blurPlan;
-  const bool                              prepareBlur = parameters.isTextRevealBlurRequested &&
+  const bool                              marqueePaint = parameters.isMarqueeEnabled && !cutoutEnabled && !backgroundWithCutoutEnabled &&
+                            parameters.maxTextureSize > 2 && layoutSize.x < parameters.maxTextureSize && layoutSize.y < parameters.maxTextureSize;
+  if(parameters.isEffectOverflowRequested && (sourcePolicy || marqueePaint))
+  {
+    TextRasterResult result;
+    Vector2          marqueeSupport;
+    if(mTypesetter->RenderRasterPlanes(layoutSize, textDirection, textPixelFormat,
+                                       static_cast<uint32_t>(parameters.maxTextureSize - 2), result, containsColorGlyph && !hasMultipleTextColors && !parameters.isTextGradientRequested && !embossEnabled, marqueePaint ? nullptr : &sourceViewport,
+                                       parameters.isTextGradientRequested && !embossEnabled && (hasMultipleTextColors || containsColorGlyph),
+                                       embossEnabled && containsColorGlyph && !hasMultipleTextColors,
+                                       marqueePaint && ignoreHorizontalAlignment,
+                                       marqueePaint ? Vector2(parameters.originWidth, parameters.originHeight) : Size::ZERO) &&
+       result.fill && (!marqueePaint || ResolveMarqueePaintSupport(result.geometry.composition, result.geometry.fill, result.legacyRasterSize, parameters.marqueeOrientation == Text::MarqueeOrientation::HORIZONTAL, embossEnabled, parameters.embossDirection, parameters.embossStrength * sourceScale, marqueeSupport)))
+    {
+      renderInfo.effectOverflow = std::make_shared<const TextRasterResult>(std::move(result));
+      if(marqueePaint && ignoreHorizontalAlignment)
+      {
+        renderInfo.marqueeStartAnchor   = parameters.marqueeStartAnchor;
+        renderInfo.marqueeTextureAnchor = mTypesetter->ResolveMarqueeTextureAnchor(parameters.marqueeStartAnchor);
+        if(renderInfo.marqueeTextureAnchor.valid) renderInfo.marqueeTextureAnchor.textureX /= sourceScale;
+      }
+    }
+  }
+
+  if(parameters.isEffectOverflowRequested && UsesBoundedReveal(parameters))
+  {
+    TextRasterResult result;
+    if(mTypesetter->RenderRevealPlanes(layoutSize, textDirection, textPixelFormat,
+                                       parameters.maxTextureSize > 0 ? static_cast<uint32_t>(parameters.maxTextureSize) : 0u,
+                                       result, containsColorGlyph && !hasMultipleTextColors && !parameters.isTextGradientRequested && !embossEnabled,
+                                       parameters.isTextGradientRequested && !styleBlocksTextGradient && !embossEnabled && (hasMultipleTextColors || containsColorGlyph),
+                                       embossEnabled && containsColorGlyph && !hasMultipleTextColors))
+    {
+      renderInfo.effectOverflow = std::make_shared<const TextRasterResult>(std::move(result));
+    }
+  }
+
+  bool nonMarqueeTextGradientMixedPayload = renderInfo.effectOverflow && static_cast<bool>(renderInfo.effectOverflow->textGradientMask);
+  // A successful advanced render owns all its planes. Only unsupported or
+  // checked-failure requests enter the established legacy raster path.
+  // A supersampled advanced model has different effect geometry from legacy.
+  // Let TextLoadingTask rebuild from the original request before falling back.
+  if(!renderInfo.effectOverflow && !(parameters.isEffectOverflowRequested && parameters.renderScale > 1.0f))
+  {
+    PixelBuffer cutoutData;
+    const bool  recolor = containsColorGlyph && !hasMultipleTextColors && !embossEnabled && !cutoutEnabled;
+    if(cutoutEnabled)
+    {
+      cutoutData = mTypesetter->RenderWithPixelBuffer(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
+                                                      ignoreHorizontalAlignment, textPixelFormat);
+
+      // Make transparent buffer.
+      // If the cutout is enabled, a separate texture is not used for the text.
+      PixelBuffer buffer       = mTypesetter->CreateFullBackgroundBuffer(1, 1, Color::TRANSPARENT);
+      renderInfo.textPixelData = PixelBuffer::Convert(buffer);
+
+      // Set the flag of cutout.
+      renderInfo.isCutoutEnabled = cutoutEnabled && (cutoutData != nullptr);
+    }
+    else
+    {
+      // Create a pixel data for the text without any styles
+      renderInfo.textPixelData =
+        sourcePolicy ? mTypesetter->RenderFill(layoutSize, textDirection, textPixelFormat, &sourceViewport,
+                                               resolvedSource, recolor ? &renderInfo.maskPixelData : nullptr)
+                     : mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES, ignoreHorizontalAlignment, textPixelFormat,
+                                           Size::ZERO, recolor ? &renderInfo.maskPixelData : nullptr);
+      if(sourcePolicy && !renderInfo.textPixelData) return renderInfo;
+      sourceClip = resolvedSource.planes ? &resolvedSource : nullptr;
+    }
+
+    if(styleEnabled)
+    {
+      if(renderInfo.isCutoutEnabled)
+      {
+        float cutoutAlpha         = renderModel->GetDefaultColor().a;
+        renderInfo.stylePixelData = mTypesetter->RenderWithCutout(
+          layoutSize, textDirection, cutoutData, Text::Typesetter::RENDER_NO_TEXT, ignoreHorizontalAlignment, Pixel::RGBA8888, cutoutAlpha);
+      }
+      else
+      {
+        // Create RGBA pixel data for all the text styles (without the text itself)
+        renderInfo.stylePixelData =
+          mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_TEXT, ignoreHorizontalAlignment, Pixel::RGBA8888, Size::ZERO, nullptr, sourceClip);
+      }
+    }
+    if(isOverlayStyle)
+    {
+      // Create RGBA pixel data for all the overlay styles
+      renderInfo.overlayStylePixelData =
+        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE, ignoreHorizontalAlignment, Pixel::RGBA8888, Size::ZERO, nullptr, sourceClip);
+    }
+    if(containsColorGlyph && !hasMultipleTextColors && !recolor)
+    {
+      // Emboss retains the existing raw coverage; cutout has no foreground.
+      if(cutoutEnabled && !embossEnabled)
+      {
+        PixelBuffer emptyMask    = PixelBuffer::New(1u, 1u, Pixel::L8);
+        emptyMask.GetBuffer()[0] = 0u;
+        renderInfo.maskPixelData = PixelBuffer::Convert(emptyMask);
+      }
+      else
+      {
+        renderInfo.maskPixelData =
+          mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_MASK, ignoreHorizontalAlignment, Pixel::L8, Size::ZERO, nullptr, sourceClip);
+      }
+    }
+    const bool textGradientMixedPayloadBaseAllowed =
+      parameters.isTextGradientRequested &&
+      !styleBlocksTextGradient &&
+      !embossEnabled &&
+      !cutoutEnabled;
+    const bool hasMixedColorTarget = hasMultipleTextColors || containsColorGlyph;
+    nonMarqueeTextGradientMixedPayload =
+      textGradientMixedPayloadBaseAllowed &&
+      !parameters.isMarqueeEnabled &&
+      hasMixedColorTarget;
+    const bool marqueeTextGradientMixedPayload =
+      textGradientMixedPayloadBaseAllowed &&
+      parameters.isMarqueeEnabled &&
+      hasMixedColorTarget;
+    // Mixed preserved/mask payload is driven by the base TextGradient. Overlay-only
+    // mixed targets keep the simple overlay path instead of allocating mixed payloads.
+    if(nonMarqueeTextGradientMixedPayload || marqueeTextGradientMixedPayload)
+    {
+      const Vector2 originSize = parameters.isMarqueeEnabled ? Size(parameters.originWidth, parameters.originHeight)
+                                                             : Size::ZERO;
+      renderInfo.textGradientPreservedPixelData =
+        mTypesetter->RenderTextGradientPreserved(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::RGBA8888, originSize, sourceClip);
+      renderInfo.textGradientMaskPixelData =
+        mTypesetter->RenderTextGradientMask(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::L8, originSize, sourceClip);
+    }
+
+    const bool marqueeStylePayload =
+      parameters.isMarqueeEnabled &&
+      styleTextureEnabled &&
+      !styleBlocksTextGradient &&
+      !embossEnabled &&
+      !cutoutEnabled &&
+      !backgroundWithCutoutEnabled &&
+      (hasMixedColorTarget ? parameters.isTextGradientRequested
+                           : (parameters.isTextGradientRequested || parameters.isTextGradientOverlayRequested));
+    if(marqueeStylePayload)
+    {
+      const Vector2 originSize(parameters.originWidth, parameters.originHeight);
+      if(!hasMixedColorTarget)
+      {
+        renderInfo.marqueeFillPixelData =
+          mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
+                              ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
+      }
+      renderInfo.marqueeStylePixelData =
+        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_TEXT,
+                            ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
+    }
+
+    if(parameters.isMarqueeEnabled && isOverlayStyle)
+    {
+      const Vector2 originSize(parameters.originWidth, parameters.originHeight);
+      renderInfo.marqueeOverlayStylePixelData =
+        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE,
+                            ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
+    }
+
+    if(parameters.isMarqueeEnabled)
+    {
+      // This will be uploaded in async text interface's setup marquee.
+      // Resolve immediately after the primary text render. Later supplemental
+      // render passes must not replace the texture geometry used by the delta.
+      renderInfo.marqueePixelData =
+        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_TEXT_AND_STYLES,
+                            ignoreHorizontalAlignment, Pixel::RGBA8888,
+                            Size(parameters.originWidth, parameters.originHeight));
+      if(parameters.marqueeOrientation == Text::MarqueeOrientation::HORIZONTAL)
+      {
+        renderInfo.marqueeStartAnchor = parameters.marqueeStartAnchor;
+        renderInfo.marqueeTextureAnchor =
+          mTypesetter->ResolveMarqueeTextureAnchor(parameters.marqueeStartAnchor);
+        if(renderInfo.marqueeTextureAnchor.valid)
+        {
+          const float geometryScale = std::max(parameters.renderScale, 1.0f);
+          renderInfo.marqueeTextureAnchor.textureX /= geometryScale;
+        }
+      }
+    }
+  }
+
+  // Timing is derived from the same final model after all foreground/style
+  // passes. Both bounded shared payloads and tiled fallback use this one plan.
+  const PixelData revealFill  = renderInfo.effectOverflow ? renderInfo.effectOverflow->fill : renderInfo.textPixelData;
+  const bool      prepareBlur = parameters.isTextRevealBlurRequested &&
                            parameters.textRevealBlurRadius > 0.0f && parameters.textRevealBlurDurationRatio > 0.0f &&
                            !embossEnabled;
   renderInfo.isTextRevealEnabled = parameters.isTextRevealEnabled && !cutoutEnabled && !parameters.isMarqueeEnabled;
-  if(renderInfo.isTextRevealEnabled && renderInfo.textPixelData)
+  if(renderInfo.isTextRevealEnabled && revealFill)
   {
     const bool hasReplacementProjection = replacementState && replacementState->processingModel &&
                                           replacementState->projection.HasReplacements() &&
@@ -1668,8 +1921,8 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
                                                             parameters.textRevealSequence,
                                                             parameters.textRevealSequenceStaggerRatio);
     }
-    const uint32_t metadataWidth  = renderInfo.textPixelData.GetWidth();
-    const uint32_t metadataHeight = renderInfo.textPixelData.GetHeight();
+    const uint32_t metadataWidth  = revealFill.GetWidth();
+    const uint32_t metadataHeight = revealFill.GetHeight();
     const uint32_t tileLimit      = parameters.maxTextureSize > 0
                                       ? static_cast<uint32_t>(parameters.maxTextureSize)
                                       : metadataHeight;
@@ -1699,112 +1952,6 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     }
   }
 
-  if(styleEnabled)
-  {
-    if(renderInfo.isCutoutEnabled)
-    {
-      float cutoutAlpha         = renderModel->GetDefaultColor().a;
-      renderInfo.stylePixelData = mTypesetter->RenderWithCutout(
-        layoutSize, textDirection, cutoutData, Text::Typesetter::RENDER_NO_TEXT, ignoreHorizontalAlignment, Pixel::RGBA8888, cutoutAlpha);
-    }
-    else
-    {
-      // Create RGBA pixel data for all the text styles (without the text itself)
-      renderInfo.stylePixelData =
-        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_TEXT, ignoreHorizontalAlignment, Pixel::RGBA8888);
-    }
-  }
-  if(isOverlayStyle)
-  {
-    // Create RGBA pixel data for all the overlay styles
-    renderInfo.overlayStylePixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE, ignoreHorizontalAlignment, Pixel::RGBA8888);
-  }
-  if(containsColorGlyph && !hasMultipleTextColors)
-  {
-    // Create a L8 pixel data as a mask to avoid color glyphs (e.g. emojis) to be affected by text color animation
-    renderInfo.maskPixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_MASK, ignoreHorizontalAlignment, Pixel::L8);
-  }
-  const bool textGradientMixedPayloadBaseAllowed =
-    parameters.isTextGradientRequested &&
-    !styleBlocksTextGradient &&
-    !embossEnabled &&
-    !cutoutEnabled;
-  const bool hasMixedColorTarget = hasMultipleTextColors || containsColorGlyph;
-  const bool nonMarqueeTextGradientMixedPayload =
-    textGradientMixedPayloadBaseAllowed &&
-    !parameters.isMarqueeEnabled &&
-    hasMixedColorTarget;
-  const bool marqueeTextGradientMixedPayload =
-    textGradientMixedPayloadBaseAllowed &&
-    parameters.isMarqueeEnabled &&
-    hasMixedColorTarget;
-  // Mixed preserved/mask payload is driven by the base TextGradient. Overlay-only
-  // mixed targets keep the simple overlay path instead of allocating mixed payloads.
-  if(nonMarqueeTextGradientMixedPayload || marqueeTextGradientMixedPayload)
-  {
-    const Vector2 originSize = parameters.isMarqueeEnabled ? Size(parameters.originWidth, parameters.originHeight)
-                                                           : Size::ZERO;
-    renderInfo.textGradientPreservedPixelData =
-      mTypesetter->RenderTextGradientPreserved(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
-    renderInfo.textGradientMaskPixelData =
-      mTypesetter->RenderTextGradientMask(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::L8, originSize);
-  }
-
-  const bool marqueeStylePayload =
-    parameters.isMarqueeEnabled &&
-    styleTextureEnabled &&
-    !styleBlocksTextGradient &&
-    !embossEnabled &&
-    !cutoutEnabled &&
-    !backgroundWithCutoutEnabled &&
-    (hasMixedColorTarget ? parameters.isTextGradientRequested
-                         : (parameters.isTextGradientRequested || parameters.isTextGradientOverlayRequested));
-  if(marqueeStylePayload)
-  {
-    const Vector2 originSize(parameters.originWidth, parameters.originHeight);
-    if(!hasMixedColorTarget)
-    {
-      renderInfo.marqueeFillPixelData =
-        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
-                            ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
-    }
-    renderInfo.marqueeStylePixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_TEXT,
-                          ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
-  }
-
-  if(parameters.isMarqueeEnabled && isOverlayStyle)
-  {
-    const Vector2 originSize(parameters.originWidth, parameters.originHeight);
-    renderInfo.marqueeOverlayStylePixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE,
-                          ignoreHorizontalAlignment, Pixel::RGBA8888, originSize);
-  }
-
-  if(parameters.isMarqueeEnabled)
-  {
-    // This will be uploaded in async text interface's setup marquee.
-    // Resolve immediately after the primary text render. Later supplemental
-    // render passes must not replace the texture geometry used by the delta.
-    renderInfo.marqueePixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_TEXT_AND_STYLES,
-                          ignoreHorizontalAlignment, Pixel::RGBA8888,
-                          Size(parameters.originWidth, parameters.originHeight));
-    if(parameters.marqueeOrientation == Text::MarqueeOrientation::HORIZONTAL)
-    {
-      renderInfo.marqueeStartAnchor = parameters.marqueeStartAnchor;
-      renderInfo.marqueeTextureAnchor =
-        mTypesetter->ResolveMarqueeTextureAnchor(parameters.marqueeStartAnchor);
-      if(renderInfo.marqueeTextureAnchor.valid)
-      {
-        const float geometryScale = std::max(parameters.renderScale, 1.0f);
-        renderInfo.marqueeTextureAnchor.textureX /= geometryScale;
-      }
-    }
-  }
-
   renderInfo.hasMultipleTextColors   = hasMultipleTextColors;
   renderInfo.containsColorGlyph      = containsColorGlyph;
   renderInfo.styleEnabled            = styleEnabled;
@@ -1830,8 +1977,8 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     // Use only this request's Typesetter and worker FontClient. Ordinary planes
     // and timing stay intact until the event thread accepts the whole blur result.
     Ui::Internal::RevealBlurPreparationOptions options;
-    options.rasterSize = Vector2(static_cast<float>(renderInfo.textPixelData.GetWidth()),
-                                 static_cast<float>(renderInfo.textPixelData.GetHeight()));
+    options.rasterSize = Vector2(static_cast<float>(revealFill.GetWidth()),
+                                 static_cast<float>(revealFill.GetHeight()));
     // Raster dimensions include renderScale; the capture target uses the same
     // displayed coordinates as TextVisual, including already-scaled UI padding.
     options.controlSize      = Vector2((isRenderScale ? parameters.renderScaleWidth : parameters.textWidth) + parameters.padding.start + parameters.padding.end,
@@ -1976,6 +2123,14 @@ Size AsyncTextLoader::SetupRenderScale(AsyncTextParameters& parameters, bool& ca
   // Set render scale to 1.0 to compute the original scale natural size.
   parameters.renderScale   = 1.0f;
   Size originalNaturalSize = ComputeNaturalSize(parameters);
+  if(parameters.isEffectOverflowRequested &&
+     (parameters.isMarqueeEnabled || (!parameters.suppressAutoMarquee && parameters.marqueeTriggerPolicy == Text::MarqueeTriggerPolicy::ON_OVERFLOW)))
+  {
+    parameters.marqueeLogicalSourceSize = parameters.marqueeOrientation == Text::MarqueeOrientation::HORIZONTAL
+                                            ? Size(ConvertToEven(originalNaturalSize.x), ConvertToEven(originalNaturalSize.y))
+                                            : Size(parameters.textWidth, ComputeHeightForWidth(parameters, parameters.textWidth, true));
+    parameters.marqueeLogicalGap        = parameters.marqueeGap;
+  }
 
   // Restore render scale.
   parameters.renderScale = renderScale;
@@ -2290,6 +2445,35 @@ AsyncTextRenderInfo AsyncTextLoader::RenderMarquee(AsyncTextParameters& paramete
   renderInfo.renderedSize             = Size(renderedWidth, renderedHeight);
   renderInfo.marqueeWrapGap           = wrapGap;
   renderInfo.isMarqueeContentOverflow = isTextContentOverflow;
+  if(renderInfo.effectOverflow && isRenderScale)
+  {
+    // Font hinting and ceil/even raster storage must not redefine the logical
+    // animation period or gap. The source remains in its worker raster space.
+    const auto& logicalSource = parameters.marqueeLogicalSourceSize;
+    if(logicalSource.x > 0.f && logicalSource.y > 0.f)
+    {
+      const float extent    = isHorizontal ? logicalSource.x : logicalSource.y;
+      const float viewport  = isHorizontal ? renderedWidth : renderedHeight;
+      const float gap       = std::max(parameters.marqueeLogicalGap, static_cast<int>(std::max(viewport - extent, 0.f)));
+      const float oldPeriod = isHorizontal ? renderInfo.size.x : renderInfo.size.y;
+      const float period    = extent + gap;
+      if(isHorizontal)
+      {
+        renderInfo.size = Size(period, logicalSource.y);
+        if(renderInfo.marqueeTextureAnchor.valid) renderInfo.marqueeTextureAnchor.textureX *= period / oldPeriod;
+        renderInfo.isMarqueeContentOverflow = extent > viewport;
+      }
+      else
+      {
+        renderInfo.size.y = period;
+      }
+      renderInfo.marqueeWrapGap = gap;
+    }
+    else
+    {
+      renderInfo.marqueeWrapGap /= parameters.renderScale;
+    }
+  }
   return renderInfo;
 }
 

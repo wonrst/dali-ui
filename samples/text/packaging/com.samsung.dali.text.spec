@@ -130,6 +130,7 @@ exit 0
 %{app_exe_dir}/text-colrv1.example
 %{app_exe_dir}/text-emoji.example
 %{app_exe_dir}/text-render-scale.example
+%{app_exe_dir}/text-advanced-style.example
 %{app_exe_dir}/text-input-field.example
 %{app_exe_dir}/text-clipboard.example
 %{app_exe_dir}/text-typing-style.example

@@ -23,7 +23,12 @@
 #include <dali/public-api/math/math-utils.h>
 #include <memory.h>
 #include <cmath>
+#include <initializer_list>
+#include <limits>
+#include <new>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/text/glyph-metrics-helper.h>
@@ -60,6 +65,110 @@ bool ResolveRasterSize(const Vector2& size, uint32_t& width, uint32_t& height, u
   }
   width  = static_cast<uint32_t>(x);
   height = static_cast<uint32_t>(y);
+  return true;
+}
+
+// Alignment is resolved in the legacy target, before any paint-origin change.
+bool ResolveRasterPen(ViewModel& viewModel, const Vector2& size,
+                      const Vector2& originSize, int32_t& penX, int32_t& penY)
+{
+  const Size& layoutSize = viewModel.GetLayoutSize();
+
+  // Horizontal alignment is already part of the line layout.
+  penX = 0;
+
+  // Consider the case where pen y needs to be calculated based on the original size when rendering marquee texture.
+  bool  isOriginHeight = originSize.height > 0.0f ? true : false;
+  float controlHeight  = isOriginHeight ? viewModel.GetControlSize().height : size.height;
+  float layoutHeight   = isOriginHeight ? originSize.height : layoutSize.height;
+
+  // Set the offset for the vertical alignment.
+  penY = 0;
+  switch(viewModel.GetVerticalAlignment())
+  {
+    case Alignment::START:
+    {
+      // No offset to add.
+      break;
+    }
+    case Alignment::CENTER:
+    {
+      if(!Raster::Convert(std::round(0.5f * (controlHeight - layoutHeight)), penY))
+      {
+        return false;
+      }
+      break;
+    }
+    case Alignment::END:
+    {
+      if(!Raster::Convert(controlHeight - layoutHeight, penY))
+      {
+        return false;
+      }
+      break;
+    }
+  }
+
+  const bool isCutoutEnabled = viewModel.IsCutoutEnabled();
+  if(isCutoutEnabled)
+  {
+    Vector2 offset = viewModel.GetOffsetWithCutout();
+    if(!Raster::Convert(offset.x, penX) || !Raster::Convert(offset.y, penY))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ResolveSourcePlanes(const Vector4* viewport, bool elide, const Raster::Bounds& raw,
+                         Raster::SourceClip& clip)
+{
+  clip = {};
+  if(!viewport || elide) return true;
+  if(viewport->z < 0.f || viewport->w < 0.f ||
+     !Raster::Convert(viewport->x, clip.viewport.left) ||
+     !Raster::Convert(viewport->y, clip.viewport.top) ||
+     !Raster::Convert(viewport->x + viewport->z, clip.viewport.right) ||
+     !Raster::Convert(viewport->y + viewport->w, clip.viewport.bottom)) return false;
+  if(!raw.Empty())
+  {
+    if(raw.left < clip.viewport.left) clip.planes |= Raster::SourceClip::LEFT;
+    if(raw.right > clip.viewport.right) clip.planes |= Raster::SourceClip::RIGHT;
+    if(raw.top < clip.viewport.top) clip.planes |= Raster::SourceClip::TOP;
+    if(raw.bottom > clip.viewport.bottom) clip.planes |= Raster::SourceClip::BOTTOM;
+  }
+  return true;
+}
+
+// PixelBuffer's CPU Gaussian kernel spans [-ceil(radius), ceil(radius)].
+// Keep its full support, including taps below the convolution threshold; bounds
+// must not depend on color, 8-bit quantization or mirror-repeat target clipping.
+// Adaptor owns the kernel implementation; this is its raster-support contract.
+bool ExpandBlurSupport(Raster::Bounds& bounds, float radius)
+{
+  if(!std::isfinite(radius))
+  {
+    return false;
+  }
+  if(bounds.Empty() || radius <= Math::MACHINE_EPSILON_1)
+  {
+    return true;
+  }
+  int32_t support;
+  if(!Raster::Convert(std::ceil(radius), support) || support < 0)
+  {
+    return false;
+  }
+  Raster::BoundsAccumulator expanded;
+  expanded.Include(static_cast<int64_t>(bounds.left) - support, static_cast<int64_t>(bounds.top) - support,
+                   static_cast<int64_t>(bounds.right) + support, static_cast<int64_t>(bounds.bottom) + support);
+  if(!expanded.valid)
+  {
+    return false;
+  }
+  bounds = expanded.bounds;
   return true;
 }
 
@@ -237,10 +346,15 @@ TextAbstraction::FontClient Typesetter::GetFontClient()
 
 PixelData Typesetter::Render(const Vector2& size, Direction textDirection,
                              RenderBehaviour behaviour, bool ignoreHorizontalAlignment, Pixel::Format pixelFormat,
-                             const Vector2& originSize)
+                             const Vector2& originSize, PixelData* recolorMask, const Raster::SourceClip* sourceClip)
 {
+  PixelBuffer mask;
   PixelBuffer result =
-    RenderWithPixelBuffer(size, textDirection, behaviour, ignoreHorizontalAlignment, pixelFormat, originSize);
+    RenderWithPixelBuffer(size, textDirection, behaviour, ignoreHorizontalAlignment, pixelFormat, originSize, recolorMask ? &mask : nullptr, sourceClip);
+  if(recolorMask)
+  {
+    *recolorMask = result && mask ? PixelBuffer::Convert(mask) : PixelData{};
+  }
   PixelData pixelData = result ? PixelBuffer::Convert(result) : PixelData{};
 
   return pixelData;
@@ -292,9 +406,9 @@ MarqueeTextureAnchor Typesetter::ResolveMarqueeTextureAnchor(const MarqueeStartA
   return {};
 }
 
-PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction textDirection,
+PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction,
                                              bool ignoreHorizontalAlignment, Pixel::Format pixelFormat,
-                                             const Vector2& originSize)
+                                             const Vector2& originSize, const Raster::SourceClip* sourceClip)
 {
   uint32_t bufferWidth, bufferHeight;
   if(!ResolveRasterSize(size, bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
@@ -308,27 +422,8 @@ PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction text
 
   viewModel.ElideGlyphs(mImpl->GetFontClient());
 
-  const Size&   layoutSize   = viewModel.GetLayoutSize();
-  const int32_t outlineWidth = static_cast<int32_t>(viewModel.GetOutlineWidth());
-
-  int32_t penX = 0;
-  switch(viewModel.GetHorizontalAlignment())
-  {
-    case Alignment::START:
-    {
-      break;
-    }
-    case Alignment::CENTER:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth : outlineWidth;
-      break;
-    }
-    case Alignment::END:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth * 2 : outlineWidth * 2;
-      break;
-    }
-  }
+  const Size& layoutSize = viewModel.GetLayoutSize();
+  int32_t     penX       = 0;
 
   const bool  isOriginHeight = originSize.height > 0.0f ? true : false;
   const float controlHeight  = isOriginHeight ? viewModel.GetControlSize().height : size.height;
@@ -373,14 +468,14 @@ PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction text
 
   PixelBuffer result =
     mImpl->CreateTextGradientMaskImageBuffer(bufferWidth, bufferHeight, ignoreHorizontalAlignment, pixelFormat, penX,
-                                             penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                             penY, startIndexOfGlyphs, endIndexOfGlyphs, nullptr, sourceClip);
 
   return result ? PixelBuffer::Convert(result) : PixelData{};
 }
 
-PixelData Typesetter::RenderTextGradientPreserved(const Vector2& size, Direction textDirection,
+PixelData Typesetter::RenderTextGradientPreserved(const Vector2& size, Direction,
                                                   bool ignoreHorizontalAlignment, Pixel::Format pixelFormat,
-                                                  const Vector2& originSize)
+                                                  const Vector2& originSize, const Raster::SourceClip* sourceClip)
 {
   uint32_t bufferWidth, bufferHeight;
   if(!ResolveRasterSize(size, bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
@@ -394,27 +489,8 @@ PixelData Typesetter::RenderTextGradientPreserved(const Vector2& size, Direction
 
   viewModel.ElideGlyphs(mImpl->GetFontClient());
 
-  const Size&   layoutSize   = viewModel.GetLayoutSize();
-  const int32_t outlineWidth = static_cast<int32_t>(viewModel.GetOutlineWidth());
-
-  int32_t penX = 0;
-  switch(viewModel.GetHorizontalAlignment())
-  {
-    case Alignment::START:
-    {
-      break;
-    }
-    case Alignment::CENTER:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth : outlineWidth;
-      break;
-    }
-    case Alignment::END:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth * 2 : outlineWidth * 2;
-      break;
-    }
-  }
+  const Size& layoutSize = viewModel.GetLayoutSize();
+  int32_t     penX       = 0;
 
   const bool  isOriginHeight = originSize.height > 0.0f ? true : false;
   const float controlHeight  = isOriginHeight ? viewModel.GetControlSize().height : size.height;
@@ -459,7 +535,7 @@ PixelData Typesetter::RenderTextGradientPreserved(const Vector2& size, Direction
 
   PixelBuffer result =
     mImpl->CreateTextGradientPreservedImageBuffer(bufferWidth, bufferHeight, ignoreHorizontalAlignment, pixelFormat,
-                                                  penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                                  penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, nullptr, sourceClip);
 
   return result ? PixelBuffer::Convert(result) : PixelData{};
 }
@@ -482,11 +558,629 @@ PixelData Typesetter::RenderWithCutout(const Vector2& size, Direction textDirect
   return pixelData;
 }
 
-PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
-                                              Direction       textDirection,
-                                              RenderBehaviour behaviour, bool ignoreHorizontalAlignment,
-                                              Pixel::Format pixelFormat, const Vector2& originSize)
+// Request-local geometry needed to rasterize effects without a common working
+// canvas. Each effect ROI is resolved during the same geometry operation.
+struct Typesetter::RasterPlan
 {
+  struct OverlayPass
+  {
+    Style          style;
+    GlyphIndex     first;
+    GlyphIndex     last;
+    Raster::Bounds bounds;
+  };
+  std::vector<OverlayPass> overlayPasses;
+  TextRasterGeometry       geometry;
+  Impl::StyleRuns          runs;
+  Raster::Bounds           outline;
+  Raster::Bounds           shadow;
+  Raster::Bounds           background;
+  Raster::SourceClip       sourceClip;
+};
+
+bool Typesetter::ResolveSourceClip(const Vector2& size, const Vector4& viewport, Raster::SourceClip& sourceClip)
+{
+  sourceClip  = {};
+  auto& model = *mImpl->GetViewModel();
+  if(model.IsTextElideEnabled()) return true;
+  uint32_t width, height;
+  int32_t  x, y;
+  if(!ResolveRasterSize(size, width, height) || !ResolveRasterPen(model, size, Size::ZERO, x, y)) return false;
+  if(!ResolveSourcePlanes(&viewport, false, Raster::Bounds{}, sourceClip)) return false;
+  model.ElideGlyphs(mImpl->GetFontClient());
+  Impl::StyleRuns runs;
+  Raster::Bounds  raw;
+  if(!mImpl->ResolveStyleBounds(width, height, STYLE_NONE, false, x, y,
+                                model.GetStartIndexOfElidedGlyphs(), model.GetEndIndexOfElidedGlyphs(), runs, raw)) return false;
+  return ResolveSourcePlanes(&viewport, false, raw, sourceClip);
+}
+
+PixelData Typesetter::RenderFill(const Vector2& size, Direction direction, Pixel::Format format,
+                                 const Vector4* viewport, Raster::SourceClip& clip, PixelData* recolorMask)
+{
+  clip = {};
+  if(recolorMask) *recolorMask = {};
+  auto& model = *mImpl->GetViewModel();
+  if(!viewport || model.IsTextElideEnabled())
+  {
+    return Render(size, direction, RENDER_NO_STYLES, false, format, Size::ZERO, recolorMask);
+  }
+  if(!ResolveSourcePlanes(viewport, false, Raster::Bounds{}, clip)) return {};
+  const bool storageInsideSource = viewport->x <= 0.f && viewport->y <= 0.f &&
+                                   viewport->x + viewport->z >= size.x && viewport->y + viewport->w >= size.y;
+  if(!storageInsideSource)
+  {
+    if(!ResolveSourceClip(size, *viewport, clip)) return {};
+    return Render(size, direction, RENDER_NO_STYLES, false, format, Size::ZERO, recolorMask, clip.planes ? &clip : nullptr);
+  }
+  // Storage already clips fill. Collect its original bitmap support in the
+  // same traversal to classify source planes before rendering shifted effects.
+  Raster::BoundsAccumulator bounds;
+  PixelBuffer               mask;
+  auto                      fill = RenderWithPixelBuffer(size, direction, RENDER_NO_STYLES, false, format, Size::ZERO,
+                                    recolorMask ? &mask : nullptr, nullptr, &bounds);
+  if(!fill || !bounds.valid || !ResolveSourcePlanes(viewport, false, bounds.bounds, clip)) return {};
+  if(recolorMask) *recolorMask = mask ? PixelBuffer::Convert(mask) : PixelData{};
+  return PixelBuffer::Convert(fill);
+}
+
+bool Typesetter::ResolveRasterGeometry(const Vector2& size, Direction textDirection, TextRasterGeometry& result,
+                                       bool ignoreHorizontalAlignment, const Vector2& originSize, const Vector4* sourceViewport)
+{
+  result = {};
+  uint32_t width, height;
+  if(!ResolveRasterSize(size, width, height))
+  {
+    return false;
+  }
+  if(width == 0u || height == 0u)
+  {
+    return true;
+  }
+  mImpl->GetViewModel()->ElideGlyphs(mImpl->GetFontClient());
+  RasterPlan plan;
+  if(!ResolveRasterPlan(size, textDirection, plan, ignoreHorizontalAlignment, originSize, sourceViewport))
+  {
+    return false;
+  }
+  result = plan.geometry;
+  return true;
+}
+
+bool Typesetter::ResolveRasterPlan(const Vector2& size, Direction, RasterPlan& plan,
+                                   bool ignoreHorizontalAlignment, const Vector2& originSize, const Vector4* sourceViewport)
+{
+  plan = {};
+  uint32_t width, height;
+  if(!ResolveRasterSize(size, width, height))
+  {
+    return false;
+  }
+  if(width == 0u || height == 0u)
+  {
+    return true;
+  }
+
+  auto& model = *mImpl->GetViewModel();
+  // Both request entry points prepare the final ViewModel before this step.
+  int32_t x, y;
+  if(!ResolveRasterPen(model, size, originSize, x, y))
+  {
+    return false;
+  }
+
+  auto& runs = plan.runs;
+  runs.underline.Resize(model.GetNumberOfUnderlineRuns());
+  model.GetUnderlineRuns(runs.underline.Begin(), 0u, runs.underline.Count());
+  runs.strikethrough.Resize(model.GetNumberOfStrikethroughRuns());
+  model.GetStrikethroughRuns(runs.strikethrough.Begin(), 0u, runs.strikethrough.Count());
+
+  auto&      geometry = plan.geometry;
+  const auto first    = model.GetStartIndexOfElidedGlyphs();
+  const auto last     = model.GetEndIndexOfElidedGlyphs();
+  const auto resolve  = [&](Style style, GlyphIndex begin, GlyphIndex end, Raster::Bounds& bounds)
+  {
+    return mImpl->ResolveStyleBounds(width, height, style, ignoreHorizontalAlignment, x, y, begin, end, runs, bounds, plan.sourceClip.planes ? &plan.sourceClip : nullptr);
+  };
+  if(!resolve(STYLE_NONE, first, last, geometry.fill))
+  {
+    return false;
+  }
+
+  if(!ResolveSourcePlanes(sourceViewport, model.IsTextElideEnabled(), geometry.fill, plan.sourceClip)) return false;
+  if(plan.sourceClip.planes && !resolve(STYLE_NONE, first, last, geometry.fill))
+  {
+    return false;
+  }
+
+  Raster::BoundsAccumulator underlay;
+  for(Style style : {STYLE_OUTLINE, STYLE_SHADOW})
+  {
+    const bool  outline = style == STYLE_OUTLINE;
+    const bool  enabled = outline ? model.IsOutlineEnabled() : model.IsShadowEnabled();
+    const float alpha   = outline ? model.GetOutlineColor().a : model.GetShadowColor().a;
+    if(enabled && fabsf(alpha) > Math::MACHINE_EPSILON_1)
+    {
+      Raster::Bounds bounds;
+      if(!resolve(style, first, last, bounds) ||
+         !ExpandBlurSupport(bounds, outline ? model.GetOutlineBlurRadius() : model.GetShadowBlurRadius()))
+      {
+        return false;
+      }
+      (outline ? plan.outline : plan.shadow) = bounds;
+      underlay.Include(bounds);
+    }
+  }
+  Raster::BoundsAccumulator background;
+  if(model.IsBackgroundEnabled())
+  {
+    Raster::Bounds bounds;
+    if(!resolve(STYLE_BACKGROUND, first, last, bounds))
+    {
+      return false;
+    }
+    background.Include(bounds);
+    underlay.Include(bounds);
+  }
+  if(model.IsMarkupBackgroundColorSet())
+  {
+    Raster::Bounds bounds;
+    if(!mImpl->ResolveBackgroundBounds(width, height, ignoreHorizontalAlignment, x, y, bounds, plan.sourceClip.planes ? &plan.sourceClip : nullptr))
+    {
+      return false;
+    }
+    background.Include(bounds);
+    underlay.Include(bounds);
+  }
+  plan.background = background.bounds;
+  if(model.IsBackgroundWithCutoutEnabled())
+  {
+    underlay.Include(0, 0, width, height);
+  }
+
+  Raster::BoundsAccumulator overlay;
+  const auto                addOverlayPass = [&](Style style, GlyphIndex begin, GlyphIndex end)
+  {
+    Raster::Bounds bounds;
+    if(!resolve(style, begin, end, bounds))
+    {
+      return false;
+    }
+    overlay.Include(bounds);
+    if(!bounds.Empty())
+    {
+      plan.overlayPasses.push_back({style, begin, end, bounds});
+    }
+    return true;
+  };
+  for(Style style : {STYLE_UNDERLINE, STYLE_STRIKETHROUGH})
+  {
+    const bool underline = style == STYLE_UNDERLINE;
+    if(underline ? model.IsUnderlineEnabled() : model.IsStrikethroughEnabled())
+    {
+      if(!addOverlayPass(style, underline ? first : 0u, last))
+      {
+        return false;
+      }
+    }
+  }
+  const auto resolveRun = [&](Style style, const GlyphRun& run)
+  {
+    const uint64_t end = static_cast<uint64_t>(run.glyphIndex) + run.numberOfGlyphs - 1u;
+    return end <= std::numeric_limits<GlyphIndex>::max() &&
+           addOverlayPass(style, run.glyphIndex, static_cast<GlyphIndex>(end));
+  };
+  // Range passes use the same source-domain ranges as their existing drawing
+  // passes. The ViewModel traversal resolves them into final visible glyphs.
+  if(model.IsMarkupUnderlineSet())
+  {
+    for(const auto& run : runs.underline)
+    {
+      if(run.glyphRun.numberOfGlyphs == 0u)
+      {
+        continue;
+      }
+      if(!resolveRun(STYLE_UNDERLINE, run.glyphRun))
+      {
+        return false;
+      }
+    }
+  }
+  if(model.IsMarkupStrikethroughSet())
+  {
+    for(const auto& run : runs.strikethrough)
+    {
+      if(run.glyphRun.numberOfGlyphs == 0u)
+      {
+        continue;
+      }
+      if(!resolveRun(STYLE_STRIKETHROUGH, run.glyphRun))
+      {
+        return false;
+      }
+    }
+  }
+  if(!underlay.valid || !overlay.valid)
+  {
+    return false;
+  }
+  geometry.underlay = underlay.bounds;
+  geometry.overlay  = overlay.bounds;
+  Raster::BoundsAccumulator composition;
+  composition.Include(geometry.fill);
+  composition.Include(geometry.underlay);
+  composition.Include(geometry.overlay);
+  if(!composition.valid)
+  {
+    return false;
+  }
+  geometry.composition = composition.bounds;
+  return true;
+}
+
+namespace
+{
+bool PlaneSize(const Raster::Bounds& bounds, Pixel::Format format, uint32_t limit, uint32_t& width, uint32_t& height)
+{
+  if(bounds.Empty())
+  {
+    width = height = 0u;
+    return true;
+  }
+  const int64_t w = static_cast<int64_t>(bounds.right) - bounds.left;
+  const int64_t h = static_cast<int64_t>(bounds.bottom) - bounds.top;
+  if(w > limit || h > limit || w > std::numeric_limits<int32_t>::max() || h > std::numeric_limits<int32_t>::max())
+  {
+    return false;
+  }
+  width  = static_cast<uint32_t>(w);
+  height = static_cast<uint32_t>(h);
+  return Raster::BufferFits(width, height, Pixel::GetBytesPerPixel(format));
+}
+
+bool AllocatePlane(const Raster::Bounds& bounds, Pixel::Format format, uint32_t limit, RasterTarget& target)
+{
+  uint32_t width, height;
+  if(!PlaneSize(bounds, format, limit, width, height))
+  {
+    return false;
+  }
+  target.bounds = bounds;
+  if(bounds.Empty())
+  {
+    return true;
+  }
+  target.buffer = PixelBuffer::New(width, height, format);
+  if(!target.buffer || !target.buffer.GetBuffer())
+  {
+    return false;
+  }
+  memset(target.buffer.GetBuffer(), 0, static_cast<size_t>(width) * height * Pixel::GetBytesPerPixel(format));
+  return true;
+}
+
+} // namespace
+
+bool Typesetter::RenderRasterPlanes(const Vector2& size, Direction textDirection, Pixel::Format fillFormat,
+                                    uint32_t maxDimension, TextRasterResult& result, bool colorGlyphMask, const Vector4* sourceViewport, bool textGradientMixed, bool embossMask, bool ignoreHorizontalAlignment, const Vector2& originSize)
+{
+  result = {};
+  if(maxDimension == 0u || maxDimension > static_cast<uint32_t>(std::numeric_limits<int32_t>::max() / 2) ||
+     (fillFormat != Pixel::L8 && fillFormat != Pixel::RGBA8888) || (colorGlyphMask && fillFormat != Pixel::RGBA8888))
+  {
+    return false;
+  }
+  uint32_t width, height;
+  if(!ResolveRasterSize(size, width, height))
+  {
+    return false;
+  }
+  auto& model = *mImpl->GetViewModel();
+  if(model.IsCutoutEnabled() || model.IsBackgroundWithCutoutEnabled())
+  {
+    return false;
+  }
+  // The existing Gaussian implementation uses int32 radius*radius and mirrored
+  // int32 indexing. Validate before bitmap creation or any blur allocation.
+  for(Style style : {STYLE_OUTLINE, STYLE_SHADOW})
+  {
+    const bool  outline = style == STYLE_OUTLINE;
+    const bool  enabled = outline ? model.IsOutlineEnabled() : model.IsShadowEnabled();
+    const float alpha   = outline ? model.GetOutlineColor().a : model.GetShadowColor().a;
+    if(!enabled || fabsf(alpha) <= Math::MACHINE_EPSILON_1)
+    {
+      continue;
+    }
+    const float radius = outline ? model.GetOutlineBlurRadius() : model.GetShadowBlurRadius();
+    const auto& offset = outline ? model.GetOutlineOffset() : model.GetShadowOffset();
+    if(!std::isfinite(radius) || radius < 0.f || std::ceil(radius) > 46340.f || std::ceil(radius) * 2.0 > maxDimension ||
+       !std::isfinite(offset.x) || !std::isfinite(offset.y) ||
+       std::abs(static_cast<double>(offset.x)) > maxDimension || std::abs(static_cast<double>(offset.y)) > maxDimension)
+    {
+      return false;
+    }
+  }
+  const uint32_t outline = model.IsOutlineEnabled() ? model.GetOutlineWidth() : 0u;
+  if(static_cast<uint64_t>(outline) * 2u >= maxDimension)
+  {
+    return false;
+  }
+
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+  try
+#endif
+  {
+    // Prepare once, after scalar admission and before inspecting final glyphs.
+    model.ElideGlyphs(mImpl->GetFontClient());
+    for(GlyphIndex i = 0; i < model.GetNumberOfGlyphs(); ++i)
+    {
+      const auto& glyph = model.GetGlyphs()[i];
+      if(IsSyntheticReplacementGlyph(glyph))
+      {
+        continue;
+      }
+      const double w = static_cast<double>(glyph.width) + 2.0 * outline;
+      const double h = static_cast<double>(glyph.height) + 2.0 * outline;
+      if(!(w >= 0.0 && h >= 0.0 && w <= maxDimension && h <= maxDimension))
+      {
+        return false;
+      }
+    }
+    // Reject malformed final coordinates before extent/dash traversal. Empty
+    // text and layout-only replacement glyphs remain valid inputs.
+    for(GlyphIndex i = 0; i < model.GetNumberOfGlyphs(); ++i)
+    {
+      if(IsSyntheticReplacementGlyph(model.GetGlyphs()[i]))
+      {
+        continue;
+      }
+      int32_t coordinate;
+      if(!Raster::Convert(model.GetLayout()[i].x, coordinate) || !Raster::Convert(model.GetLayout()[i].y, coordinate) ||
+         std::abs(static_cast<double>(model.GetLayout()[i].x)) > maxDimension ||
+         std::abs(static_cast<double>(model.GetLayout()[i].y)) > maxDimension)
+      {
+        return false;
+      }
+    }
+    RasterPlan plan;
+    if(!ResolveRasterPlan(size, textDirection, plan, ignoreHorizontalAlignment, originSize, sourceViewport))
+    {
+      return false;
+    }
+    uint32_t w, h;
+    if(!PlaneSize(plan.geometry.fill, fillFormat, maxDimension, w, h))
+    {
+      return false;
+    }
+    for(const auto& bounds : {plan.geometry.underlay, plan.geometry.overlay, plan.shadow, plan.outline, plan.background})
+    {
+      if(!PlaneSize(bounds, Pixel::RGBA8888, maxDimension, w, h))
+      {
+        return false;
+      }
+    }
+    int32_t penX, penY;
+    if(!ResolveRasterPen(model, size, originSize, penX, penY))
+    {
+      return false;
+    }
+    const auto first = model.GetStartIndexOfElidedGlyphs();
+    const auto last  = model.GetEndIndexOfElidedGlyphs();
+    const auto draw  = [&](RasterTarget& target, Style style, GlyphIndex begin, GlyphIndex end)
+    {
+      return target.bounds.Empty() || mImpl->RasterizeStyle(width, height, style, ignoreHorizontalAlignment, penX, penY, begin, end, plan.runs, target, nullptr, plan.sourceClip.planes ? &plan.sourceClip : nullptr);
+    };
+    TextRasterResult pending;
+    pending.geometry         = plan.geometry;
+    pending.layoutSize       = model.GetLayoutSize();
+    pending.legacyRasterSize = size;
+    RasterTarget fill;
+    PixelBuffer  mask;
+    const auto*  sourceClip = plan.sourceClip.planes ? &plan.sourceClip : nullptr;
+    if(textGradientMixed && (fillFormat != Pixel::RGBA8888 || colorGlyphMask || embossMask)) return false;
+    if(embossMask && (fillFormat != Pixel::RGBA8888 || colorGlyphMask)) return false;
+    if(!AllocatePlane(plan.geometry.fill, fillFormat, maxDimension, fill)) return false;
+    if(!fill.bounds.Empty())
+    {
+      if(textGradientMixed)
+      {
+        RasterTarget gradientMask;
+        if(!AllocatePlane(plan.geometry.fill, Pixel::L8, maxDimension, gradientMask) ||
+           !mImpl->CreateTextGradientPreservedImageBuffer(width, height, ignoreHorizontalAlignment, fillFormat, penX, penY, first, last, &fill, sourceClip) ||
+           !mImpl->CreateTextGradientMaskImageBuffer(width, height, ignoreHorizontalAlignment, Pixel::L8, penX, penY, first, last, &gradientMask, sourceClip))
+        {
+          return false;
+        }
+        pending.textGradientMask = PixelBuffer::Convert(gradientMask.buffer);
+      }
+      else if(!mImpl->RasterizeStyle(width, height, STYLE_NONE, ignoreHorizontalAlignment, penX, penY, first, last,
+                                     plan.runs, fill, colorGlyphMask ? &mask : nullptr, sourceClip))
+      {
+        return false;
+      }
+    }
+    if(embossMask && !fill.bounds.Empty())
+    {
+      RasterTarget rawMask;
+      if(!AllocatePlane(plan.geometry.fill, Pixel::L8, maxDimension, rawMask) ||
+         !mImpl->RasterizeStyle(width, height, STYLE_MASK, ignoreHorizontalAlignment, penX, penY, first, last,
+                                plan.runs, rawMask, nullptr, sourceClip))
+      {
+        return false;
+      }
+      pending.embossMask = PixelBuffer::Convert(rawMask.buffer);
+    }
+    if(fill.buffer) pending.fill = PixelBuffer::Convert(fill.buffer);
+    if(mask) pending.colorGlyphMask = PixelBuffer::Convert(mask);
+
+    RasterTarget underlay;
+    if(!AllocatePlane(plan.geometry.underlay, Pixel::RGBA8888, maxDimension, underlay))
+    {
+      return false;
+    }
+    // Preserve outline, then shadow, then background, each behind the prior
+    // result. An effect temporary and its blur scratch die before the next ROI.
+    for(Style style : {STYLE_OUTLINE, STYLE_SHADOW})
+    {
+      const bool  isOutline = style == STYLE_OUTLINE;
+      const auto& bounds    = isOutline ? plan.outline : plan.shadow;
+      if(bounds.Empty())
+      {
+        continue;
+      }
+      RasterTarget effect;
+      if(!AllocatePlane(bounds, Pixel::RGBA8888, maxDimension, effect) || !draw(effect, style, first, last))
+      {
+        return false;
+      }
+      const float radius = isOutline ? model.GetOutlineBlurRadius() : model.GetShadowBlurRadius();
+      if(radius > Math::MACHINE_EPSILON_1 && !effect.buffer.ApplyGaussianBlur(radius))
+      {
+        return false;
+      }
+      if(!mImpl->CompositeBehind(underlay, effect))
+      {
+        return false;
+      }
+    }
+    if(!plan.background.Empty())
+    {
+      RasterTarget background;
+      if(!AllocatePlane(plan.background, Pixel::RGBA8888, maxDimension, background))
+      {
+        return false;
+      }
+      if(model.IsBackgroundEnabled() && !draw(background, STYLE_BACKGROUND, first, last))
+      {
+        return false;
+      }
+      if(model.IsMarkupBackgroundColorSet() && !mImpl->RasterizeBackground(width, height, ignoreHorizontalAlignment, penX, penY, background, plan.sourceClip.planes ? &plan.sourceClip : nullptr))
+      {
+        return false;
+      }
+      if(!mImpl->CompositeBehind(underlay, background))
+      {
+        return false;
+      }
+    }
+    if(underlay.buffer)
+    {
+      pending.underlay = PixelBuffer::Convert(underlay.buffer);
+    }
+
+    RasterTarget overlay;
+    if(!AllocatePlane(plan.geometry.overlay, Pixel::RGBA8888, maxDimension, overlay))
+    {
+      return false;
+    }
+    // Reuse the per-pass bounds already measured by the geometry plan. Small
+    // spans need only their own ROI, even when the final overlay is very wide.
+    for(const auto& pass : plan.overlayPasses)
+    {
+      RasterTarget effect;
+      if(!AllocatePlane(pass.bounds, Pixel::RGBA8888, maxDimension, effect) ||
+         !draw(effect, pass.style, pass.first, pass.last) ||
+         !mImpl->CompositeBehind(overlay, effect))
+      {
+        return false;
+      }
+    }
+    if(overlay.buffer)
+    {
+      pending.overlay = PixelBuffer::Convert(overlay.buffer);
+    }
+    result = std::move(pending);
+    return true;
+  }
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+  // Recover from the existing allocating APIs when exceptions are enabled.
+  // Backing-buffer failures use explicit return values in either build mode.
+  catch(const std::bad_alloc&)
+  {
+    return false;
+  }
+#endif
+}
+
+bool Typesetter::RenderRevealPlanes(const Vector2& size, Direction direction, Pixel::Format format,
+                                    uint32_t maxDimension, TextRasterResult& result, bool colorGlyphMask,
+                                    bool textGradientMixed, bool embossMask)
+{
+  result = {};
+  uint32_t width, height;
+  auto&    model = *mImpl->GetViewModel();
+  if(!ResolveRasterSize(size, width, height, 4u) || width >= maxDimension || height >= maxDimension ||
+     model.IsCutoutEnabled() || model.IsBackgroundWithCutoutEnabled() ||
+     (format != Pixel::L8 && format != Pixel::RGBA8888) ||
+     ((colorGlyphMask || textGradientMixed || embossMask) && format != Pixel::RGBA8888) ||
+     (static_cast<unsigned>(colorGlyphMask) + textGradientMixed + embossMask > 1u))
+  {
+    return false;
+  }
+
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+  try
+#endif
+  {
+    TextRasterResult pending;
+    pending.legacyRasterSize = size;
+    pending.layoutSize       = model.GetLayoutSize();
+    const Raster::Bounds bounded{0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height)};
+    pending.geometry.fill = pending.geometry.composition = bounded;
+    if(textGradientMixed)
+    {
+      pending.fill             = RenderTextGradientPreserved(size, direction, false, Pixel::RGBA8888);
+      pending.textGradientMask = RenderTextGradientMask(size, direction);
+      if(!pending.textGradientMask) return false;
+    }
+    else
+    {
+      pending.fill = Render(size, direction, RENDER_NO_STYLES, false, format, Size::ZERO,
+                            colorGlyphMask ? &pending.colorGlyphMask : nullptr);
+      if(colorGlyphMask && !pending.colorGlyphMask) return false;
+    }
+    if(!pending.fill) return false;
+    if(embossMask)
+    {
+      pending.embossMask = Render(size, direction, RENDER_MASK, false, Pixel::L8);
+      if(!pending.embossMask) return false;
+    }
+    if(model.IsShadowEnabled() || model.IsOutlineEnabled() || model.IsBackgroundEnabled() || model.IsMarkupBackgroundColorSet())
+    {
+      pending.underlay = Render(size, direction, RENDER_NO_TEXT, false, Pixel::RGBA8888);
+      if(!pending.underlay) return false;
+      pending.geometry.underlay = bounded;
+    }
+    if(model.IsUnderlineEnabled() || model.IsMarkupUnderlineSet() || model.IsStrikethroughEnabled() || model.IsMarkupStrikethroughSet())
+    {
+      pending.overlay = Render(size, direction, RENDER_OVERLAY_STYLE, false, Pixel::RGBA8888);
+      if(!pending.overlay) return false;
+      pending.geometry.overlay = bounded;
+    }
+    result = std::move(pending);
+    return true;
+  }
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+  catch(const std::bad_alloc&)
+  {
+    return false;
+  }
+#endif
+}
+
+PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2& size,
+                                              Direction,
+                                              RenderBehaviour behaviour, bool ignoreHorizontalAlignment,
+                                              Pixel::Format pixelFormat, const Vector2& originSize, PixelBuffer* recolorMask, const Raster::SourceClip* sourceClip, Raster::BoundsAccumulator* sourceBounds)
+{
+  if(recolorMask)
+  {
+    recolorMask->Reset();
+    if(behaviour != RENDER_NO_STYLES || pixelFormat != Pixel::RGBA8888)
+    {
+      return {};
+    }
+  }
   uint32_t       bufferWidth, bufferHeight;
   const uint32_t bytesPerPixel = (behaviour == RENDER_NO_STYLES || behaviour == RENDER_MASK)
                                    ? Pixel::GetBytesPerPixel(pixelFormat)
@@ -505,71 +1199,10 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
   // Elides the text if needed.
   viewModel.ElideGlyphs(mImpl->GetFontClient());
 
-  // Retrieves the layout size.
-  const Size&   layoutSize   = viewModel.GetLayoutSize();
-  const int32_t outlineWidth = viewModel.IsOutlineEnabled() ? static_cast<int32_t>(viewModel.GetOutlineWidth()) : 0;
-
-  // Set the offset for the horizontal alignment according to the text direction and outline width.
-  int32_t penX = 0;
-  switch(viewModel.GetHorizontalAlignment())
+  int32_t penX, penY;
+  if(!ResolveRasterPen(viewModel, size, originSize, penX, penY))
   {
-    case Alignment::START:
-    {
-      // No offset to add.
-      break;
-    }
-    case Alignment::CENTER:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth : outlineWidth;
-      break;
-    }
-    case Alignment::END:
-    {
-      penX += (textDirection == Direction::LEFT_TO_RIGHT) ? -outlineWidth * 2 : outlineWidth * 2;
-      break;
-    }
-  }
-
-  // Consider the case where pen y needs to be calculated based on the original size when rendering marquee texture.
-  bool  isOriginHeight = originSize.height > 0.0f ? true : false;
-  float controlHeight  = isOriginHeight ? viewModel.GetControlSize().height : size.height;
-  float layoutHeight   = isOriginHeight ? originSize.height : layoutSize.height;
-
-  // Set the offset for the vertical alignment.
-  int32_t penY = 0u;
-  switch(viewModel.GetVerticalAlignment())
-  {
-    case Alignment::START:
-    {
-      // No offset to add.
-      break;
-    }
-    case Alignment::CENTER:
-    {
-      if(!Raster::Convert(std::round(0.5f * (controlHeight - layoutHeight)), penY))
-      {
-        return {};
-      }
-      break;
-    }
-    case Alignment::END:
-    {
-      if(!Raster::Convert(controlHeight - layoutHeight, penY))
-      {
-        return {};
-      }
-      break;
-    }
-  }
-
-  const bool isCutoutEnabled = viewModel.IsCutoutEnabled();
-  if(isCutoutEnabled)
-  {
-    Vector2 offset = viewModel.GetOffsetWithCutout();
-    if(!Raster::Convert(offset.x, penX) || !Raster::Convert(offset.y, penY))
-    {
-      return {};
-    }
+    return {};
   }
 
   // Generate the image buffers of the text for each different style first,
@@ -598,7 +1231,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
   {
     // Generate the image buffer as an alpha mask for color glyphs.
     imageBuffer = mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_MASK, ignoreHorizontalAlignment,
-                                           pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                           pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
   }
   else if(RENDER_NO_TEXT == behaviour || RENDER_OVERLAY_STYLE == behaviour)
   {
@@ -610,7 +1243,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
   {
     // Generate the image buffer for the text with no style.
     imageBuffer = mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_NONE, ignoreHorizontalAlignment,
-                                           pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                           pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, recolorMask, sourceClip, sourceBounds);
   }
 
   if((RENDER_NO_STYLES != behaviour) && (RENDER_MASK != behaviour))
@@ -622,7 +1255,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       // Create the image buffer for outline
       PixelBuffer outlineImageBuffer =
         mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_OUTLINE, ignoreHorizontalAlignment,
-                                 pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                 pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
 
       const float& blurRadius = viewModel.GetOutlineBlurRadius();
 
@@ -645,7 +1278,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       // Create the image buffer for shadow
       PixelBuffer shadowImageBuffer =
         mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_SHADOW, ignoreHorizontalAlignment,
-                                 pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                 pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
 
       // Check whether it will be a soft shadow
       const float& blurRadius = viewModel.GetShadowBlurRadius();
@@ -670,7 +1303,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       {
         backgroundImageBuffer =
           mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_BACKGROUND, ignoreHorizontalAlignment,
-                                   pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                   pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
       }
       else
       {
@@ -680,7 +1313,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       if(backgroundMarkupSet)
       {
         mImpl->DrawGlyphsBackground(backgroundImageBuffer, bufferWidth, bufferHeight, ignoreHorizontalAlignment, penX,
-                                    penY);
+                                    penY, sourceClip);
       }
 
       // Combine the two buffers
@@ -707,7 +1340,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
         // Create the image buffer for underline
         PixelBuffer underlineImageBuffer =
           mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_UNDERLINE, ignoreHorizontalAlignment,
-                                   pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs);
+                                   pixelFormat, penX, penY, startIndexOfGlyphs, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
 
         // Combine the two buffers
         CombineImageBuffer(imageBuffer, underlineImageBuffer, bufferWidth, bufferHeight, true);
@@ -718,7 +1351,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
         // Create the image buffer for strikethrough
         PixelBuffer strikethroughImageBuffer =
           mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_STRIKETHROUGH,
-                                   ignoreHorizontalAlignment, pixelFormat, penX, penY, 0u, endIndexOfGlyphs);
+                                   ignoreHorizontalAlignment, pixelFormat, penX, penY, 0u, endIndexOfGlyphs, 0u, 0u, nullptr, sourceClip);
 
         // Combine the two buffers
         CombineImageBuffer(imageBuffer, strikethroughImageBuffer, bufferWidth, bufferHeight, true);
@@ -729,13 +1362,13 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       if(viewModel.IsMarkupUnderlineSet())
       {
         imageBuffer = ApplyUnderlineMarkupImageBuffer(imageBuffer, bufferWidth, bufferHeight,
-                                                      ignoreHorizontalAlignment, pixelFormat, penX, penY);
+                                                      ignoreHorizontalAlignment, pixelFormat, penX, penY, sourceClip);
       }
 
       if(viewModel.IsMarkupStrikethroughSet())
       {
         imageBuffer = ApplyStrikethroughMarkupImageBuffer(imageBuffer, bufferWidth, bufferHeight,
-                                                          ignoreHorizontalAlignment, pixelFormat, penX, penY);
+                                                          ignoreHorizontalAlignment, pixelFormat, penX, penY, sourceClip);
       }
     }
   }
@@ -873,8 +1506,8 @@ bool Typesetter::ExtractReplacementRevealTimings(const Internal::Reveal::Plan&  
 }
 
 PixelData Typesetter::RenderTextRevealMetadata(
-  const Vector2&                tileSize,
-  Direction                     textDirection,
+  const Vector2& tileSize,
+  Direction,
   const Internal::Reveal::Plan& plan,
   float&                        fadeDuration,
   uint32_t                      tileOffsetY,
@@ -892,20 +1525,8 @@ PixelData Typesetter::RenderTextRevealMetadata(
   // The caller projects one canonical final plan before visiting any tile.
   auto& viewModel = *mImpl->GetViewModel();
 
-  const Size&   layoutSize   = viewModel.GetLayoutSize();
-  const int32_t outlineWidth = viewModel.IsOutlineEnabled() ? static_cast<int32_t>(viewModel.GetOutlineWidth()) : 0;
-  int32_t       penX         = 0;
-  switch(viewModel.GetHorizontalAlignment())
-  {
-    case Alignment::START:
-      break;
-    case Alignment::CENTER:
-      penX += textDirection == Direction::LEFT_TO_RIGHT ? -outlineWidth : outlineWidth;
-      break;
-    case Alignment::END:
-      penX += textDirection == Direction::LEFT_TO_RIGHT ? -outlineWidth * 2 : outlineWidth * 2;
-      break;
-  }
+  const Size& layoutSize = viewModel.GetLayoutSize();
+  int32_t     penX       = 0;
 
   const Vector2 renderSize    = fullSize.height > 0.0f ? fullSize : tileSize;
   const bool    useOriginSize = originSize.height > 0.0f;
@@ -1021,8 +1642,16 @@ PixelData Typesetter::RenderRuntimeBlurLine(const Vector2& size, LineIndex lineI
                                             RuntimeBlurPlane plane, Pixel::Format format,
                                             const Internal::Reveal::Plan& plan,
                                             uint32_t rasterOffsetY, uint32_t rasterHeight,
-                                            uint32_t rasterOffsetX, uint32_t rasterWidth)
+                                            uint32_t rasterOffsetX, uint32_t rasterWidth, PixelData* recolorMask)
 {
+  if(recolorMask)
+  {
+    *recolorMask = {};
+    if(plane != RuntimeBlurPlane::TEXT || format != Pixel::RGBA8888)
+    {
+      return {};
+    }
+  }
   const auto& model = *mImpl->GetViewModel();
   if(lineIndex >= model.GetNumberOfLines())
   {
@@ -1065,6 +1694,7 @@ PixelData Typesetter::RenderRuntimeBlurLine(const Vector2& size, LineIndex lineI
   }
   penY -= static_cast<int32_t>(rasterOffsetY);
   PixelBuffer buffer;
+  PixelBuffer mask;
   switch(plane)
   {
     case RuntimeBlurPlane::GRADIENT_PRESERVED:
@@ -1082,10 +1712,14 @@ PixelData Typesetter::RenderRuntimeBlurLine(const Vector2& size, LineIndex lineI
     default:
       buffer = mImpl->CreateImageBuffer(width, rasterHeight,
                                         plane == RuntimeBlurPlane::COLOR_MASK ? STYLE_MASK : STYLE_NONE,
-                                        false, format, 0, penY, first, last);
+                                        false, format, 0, penY, first, last, 0u, 0u, recolorMask ? &mask : nullptr);
       break;
   }
-  return PixelBuffer::Convert(buffer);
+  if(recolorMask && buffer && mask)
+  {
+    *recolorMask = PixelBuffer::Convert(mask);
+  }
+  return buffer ? PixelBuffer::Convert(buffer) : PixelData{};
 }
 
 PixelBuffer Typesetter::CreateFullBackgroundBuffer(const uint32_t bufferWidth, const uint32_t bufferHeight,
@@ -1126,7 +1760,7 @@ PixelBuffer Typesetter::ApplyUnderlineMarkupImageBuffer(PixelBuffer    topPixelB
                                                         const bool          ignoreHorizontalAlignment,
                                                         const Pixel::Format pixelFormat,
                                                         const int32_t       horizontalOffset,
-                                                        const int32_t       verticalOffset)
+                                                        const int32_t verticalOffset, const Raster::SourceClip* sourceClip)
 {
   // Use l-value to make ensure it is not nullptr, so compiler happy.
   auto& viewModel = *(mImpl->GetViewModel());
@@ -1152,7 +1786,7 @@ PixelBuffer Typesetter::ApplyUnderlineMarkupImageBuffer(PixelBuffer    topPixelB
     // Create the image buffer for underline
     PixelBuffer underlineImageBuffer =
       mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_UNDERLINE, ignoreHorizontalAlignment,
-                               pixelFormat, horizontalOffset, verticalOffset, startGlyphIndex, endGlyphIndex);
+                               pixelFormat, horizontalOffset, verticalOffset, startGlyphIndex, endGlyphIndex, 0u, 0u, nullptr, sourceClip);
     // Combine the two buffers
     // Result pixel buffer will be stored into topPixelBuffer.
     CombineImageBuffer(underlineImageBuffer, topPixelBuffer, bufferWidth, bufferHeight, false);
@@ -1166,7 +1800,7 @@ PixelBuffer Typesetter::ApplyUnderlineMarkupImageBuffer(PixelBuffer    topPixelB
 PixelBuffer Typesetter::ApplyStrikethroughMarkupImageBuffer(
   PixelBuffer topPixelBuffer, const uint32_t bufferWidth, const uint32_t bufferHeight,
   const bool ignoreHorizontalAlignment, const Pixel::Format pixelFormat, const int32_t horizontalOffset,
-  const int32_t verticalOffset)
+  const int32_t verticalOffset, const Raster::SourceClip* sourceClip)
 {
   // Use l-value to make ensure it is not nullptr, so compiler happy.
   auto& viewModel = *(mImpl->GetViewModel());
@@ -1192,7 +1826,7 @@ PixelBuffer Typesetter::ApplyStrikethroughMarkupImageBuffer(
     // Create the image buffer for strikethrough
     PixelBuffer strikethroughImageBuffer =
       mImpl->CreateImageBuffer(bufferWidth, bufferHeight, Typesetter::STYLE_STRIKETHROUGH, ignoreHorizontalAlignment,
-                               pixelFormat, horizontalOffset, verticalOffset, startGlyphIndex, endGlyphIndex);
+                               pixelFormat, horizontalOffset, verticalOffset, startGlyphIndex, endGlyphIndex, 0u, 0u, nullptr, sourceClip);
     // Combine the two buffers
     // Result pixel buffer will be stored into topPixelBuffer.
     CombineImageBuffer(strikethroughImageBuffer, topPixelBuffer, bufferWidth, bufferHeight, false);

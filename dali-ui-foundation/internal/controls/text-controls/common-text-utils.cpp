@@ -238,12 +238,20 @@ void CommonTextUtils::RenderText(Actor textActor, Ui::Text::RendererPtr renderer
     }
     clippingDecorationActors.clear();
 
+    // The decorator only supplies actors when they are created. On subsequent
+    // text updates the selection highlight is already in the actor tree.
+    if(!highlightActor && decorator && decorator->IsHighlightVisible())
+    {
+      highlightActor = self.FindChildByName("HighlightActor");
+    }
+
     addChild(renderableActor);
 
     if(backgroundActor)
     {
-      if(decorator && decorator->IsHighlightVisible())
+      if(highlightActor && decorator && decorator->IsHighlightVisible())
       {
+        addChild(highlightActor);
         addChild(backgroundActor);
         backgroundActor.SetProperty(
           Actor::Property::POSITION,

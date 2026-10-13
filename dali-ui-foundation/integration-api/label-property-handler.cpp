@@ -246,6 +246,13 @@ void LabelImpl::PropertyHandler::SetProperty(Ui::View view, Property::Index inde
 
 bool LabelImpl::PropertyHandler::OnPropertySet(LabelImpl& impl, Dali::Property::Index index, const Dali::Property::Value& propertyValue)
 {
+  if((index == Ui::View::Property::REQUESTED_WIDTH || index == Ui::View::Property::REQUESTED_HEIGHT) &&
+     impl.mVisual && Internal::TextVisual::CancelAsyncRender(impl.mVisual, true))
+  {
+    impl.mIsManualRenderInProgress = false;
+    impl.RequestAsyncRender();
+    impl.RequestTextRelayout();
+  }
   switch(index)
   {
     case Dali::Actor::Property::SIZE:
@@ -255,6 +262,10 @@ bool LabelImpl::PropertyHandler::OnPropertySet(LabelImpl& impl, Dali::Property::
       {
         impl.mSize                 = size;
         impl.mIsContentLayoutDirty = true;
+        if(Internal::TextVisual::CancelAsyncRender(impl.mVisual, true))
+        {
+          impl.mIsManualRenderInProgress = false;
+        }
       }
       return true;
     }
@@ -265,6 +276,10 @@ bool LabelImpl::PropertyHandler::OnPropertySet(LabelImpl& impl, Dali::Property::
       {
         impl.mSize.width           = width;
         impl.mIsContentLayoutDirty = true;
+        if(Internal::TextVisual::CancelAsyncRender(impl.mVisual, true))
+        {
+          impl.mIsManualRenderInProgress = false;
+        }
       }
       return true;
     }
@@ -275,6 +290,10 @@ bool LabelImpl::PropertyHandler::OnPropertySet(LabelImpl& impl, Dali::Property::
       {
         impl.mSize.height          = height;
         impl.mIsContentLayoutDirty = true;
+        if(Internal::TextVisual::CancelAsyncRender(impl.mVisual, true))
+        {
+          impl.mIsManualRenderInProgress = false;
+        }
       }
       return true;
     }

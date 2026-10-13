@@ -19,6 +19,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
+#include <dali-ui-foundation/internal/text/marquee/marquee-paint.h>
 #include <dali-ui-foundation/internal/visuals/visual-string-constants.h>
 #include <dali/integration-api/adaptor-framework/adaptor.h>
 #include <dali/integration-api/debug.h>
@@ -407,6 +408,47 @@ Shader TextVisualShaderFactory::GetShader(VisualFactoryCache&                   
     shader.RegisterUniqueProperty("visualTransformUseEffectiveScale", 1.0f);
     shader.RegisterProperty(PIXEL_SNAP_FACTOR_UNIFORM_NAME.data(), PIXEL_SNAP_DISABLED_VALUE);
   }
+  return shader;
+}
+
+Shader TextVisualShaderFactory::GetIndependentPlanesShader(VisualFactoryCache& factoryCache, bool multipleColors, bool colorGlyphMask, bool style, bool overlay,
+                                                           bool gradient, bool gradientMixed, bool gradientOverlay, bool emboss, bool marquee, bool horizontal)
+{
+  // Fill, decoration, and gradient variants stay lazy.
+  const uint32_t key = (colorGlyphMask ? 8u : 0u) | (multipleColors ? 4u : 0u) | (style ? 2u : 0u) | (overlay ? 1u : 0u) |
+                       (gradient ? 16u : 0u) | (gradientMixed ? 32u : 0u) | (gradientOverlay ? 64u : 0u) | (emboss ? 128u : 0u);
+  const auto found = mIndependentPlaneShaderIds.find(key);
+  if(!marquee && found != mIndependentPlaneShaderIds.end())
+  {
+    if(auto shader = factoryCache.GetExternalShader(found->second))
+    {
+      return shader;
+    }
+  }
+  std::string prefix;
+  if(multipleColors) prefix += "#define IS_REQUIRED_MULTI_COLOR\n";
+  if(colorGlyphMask) prefix += "#define IS_REQUIRED_EMOJI\n";
+  if(style) prefix += "#define IS_REQUIRED_STYLE\n";
+  if(overlay) prefix += "#define IS_REQUIRED_OVERLAY\n";
+  if(gradient) prefix += "#define IS_REQUIRED_TEXT_GRADIENT\n";
+  if(gradientMixed) prefix += "#define IS_REQUIRED_TEXT_GRADIENT_MIXED\n";
+  if(gradientOverlay) prefix += "#define IS_REQUIRED_TEXT_GRADIENT_OVERLAY\n";
+  if(emboss) prefix += "#define IS_REQUIRED_EMBOSS\n";
+  if(marquee)
+  {
+    prefix += "#define TEXT_MARQUEE_PLANES\n#define TEXT_MARQUEE_MAX_COPIES " + std::to_string(Text::MARQUEE_PAINT_COPIES) + "\n";
+    if(!horizontal) prefix += "#define TEXT_MARQUEE_VERTICAL\n";
+  }
+  else if(gradient || gradientOverlay || emboss)
+    prefix += "#define TEXT_INDEPENDENT_PLANES\n";
+  const std::string vertex   = prefix + (marquee ? (horizontal ? SHADER_TEXT_SCROLLER_SHADER_VERT.data() : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_VERT.data()) : SHADER_TEXT_VISUAL_INDEPENDENT_PLANES_VERT.data());
+  const std::string fragment = prefix + ((marquee || gradient || gradientOverlay || emboss) ? SHADER_TEXT_VISUAL_SHADER_FRAG.data() : SHADER_TEXT_VISUAL_INDEPENDENT_PLANES_FRAG.data());
+  auto              shader   = Shader::New(ToDaliStringView(vertex), ToDaliStringView(fragment), Shader::Hint::NONE, "TEXT_VISUAL_INDEPENDENT_PLANES");
+  shader.ReserveCustomProperties(3);
+  shader.RegisterUniqueProperty("viewEffectiveScale", 1.0f);
+  shader.RegisterUniqueProperty("visualTransformUseEffectiveScale", 1.0f);
+  shader.RegisterProperty(PIXEL_SNAP_FACTOR_UNIFORM_NAME.data(), PIXEL_SNAP_DISABLED_VALUE);
+  if(!marquee) mIndependentPlaneShaderIds[key] = factoryCache.RegisterExternalShader(shader);
   return shader;
 }
 

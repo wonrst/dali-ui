@@ -1529,21 +1529,6 @@ void Controller::Impl::GetCursorPosition(CharacterIndex logical, CursorInfo& cur
     ApplyReplacementCaretGeometry(replacementBoundary, cursorInfo);
   }
 
-  // Adds Outline offset.
-  const float outlineWidth = mModel->IsOutlineEnabled() ? static_cast<float>(mModel->GetOutlineWidth()) : 0.0f;
-  cursorInfo.primaryPosition.x += outlineWidth;
-  cursorInfo.primaryPosition.y += outlineWidth;
-  cursorInfo.secondaryPosition.x += outlineWidth;
-  cursorInfo.secondaryPosition.y += outlineWidth;
-  if(cursorInfo.hasPrimaryCaretGeometry)
-  {
-    cursorInfo.primaryCaretPosition += Vector2(outlineWidth, outlineWidth);
-  }
-  if(cursorInfo.hasSecondaryCaretGeometry)
-  {
-    cursorInfo.secondaryCaretPosition += Vector2(outlineWidth, outlineWidth);
-  }
-
   if(isMultiLine && !cursorInfo.hasPrimaryCaretGeometry)
   {
     // If the text is editable and multi-line, the cursor position after a white space shouldn't exceed the boundaries

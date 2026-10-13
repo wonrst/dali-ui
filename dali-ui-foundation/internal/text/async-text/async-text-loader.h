@@ -78,6 +78,8 @@ struct AsyncAnchorHitRegion
   bool                      isClicked{false};
 };
 
+struct TextRasterResult;
+
 struct AsyncTextParameters
 {
   AsyncTextParameters()
@@ -140,6 +142,8 @@ struct AsyncTextParameters
     marqueeSpeed{1},
     marqueeLoopCount{1},
     marqueeGap{0},
+    marqueeLogicalSourceSize{Size::ZERO},
+    marqueeLogicalGap{0},
     outlineWidth{0u},
     requestType{Ui::Integration::Text::Async::RENDER_FIXED_SIZE},
     horizontalAlignment{Alignment::START},
@@ -177,6 +181,7 @@ struct AsyncTextParameters
     isTextGradientRequested{false},
     isTextGradientOverlayRequested{false},
     isTextRevealEnabled{false},
+    isEffectOverflowRequested{false},
     isTextRevealBlurRequested{false}
   {
   }
@@ -279,6 +284,8 @@ struct AsyncTextParameters
   int      marqueeSpeed;                 ///< marquee properties.
   int      marqueeLoopCount;
   int      marqueeGap;
+  Size     marqueeLogicalSourceSize; ///< Source extent before raster supersampling.
+  int      marqueeLogicalGap;        ///< Gap before raster supersampling.
 
   uint16_t outlineWidth; ///< The width of the outline.
 
@@ -319,6 +326,7 @@ struct AsyncTextParameters
   bool isTextGradientRequested : 1;        ///< Whether async render may generate TextGradient-only payloads.
   bool isTextGradientOverlayRequested : 1; ///< Whether async render may generate TextGradientOverlay-only payloads.
   bool isTextRevealEnabled : 1;            ///< Whether the worker should produce reveal metadata.
+  bool isEffectOverflowRequested : 1;      ///< Independent effect planes requested by this render.
   bool isTextRevealBlurRequested : 1;      ///< Blur requested; worker checks kernel and raster capabilities.
 };
 
@@ -338,6 +346,7 @@ struct AsyncTextRenderInfo
     marqueePixelData(),
     revealMetadataTiles(),
     revealBlur(),
+    effectOverflow(),
     size(),
     textLogicalBounds(0.0f, 0.0f, 1.0f, 1.0f),
     controlSize(),
@@ -386,6 +395,8 @@ struct AsyncTextRenderInfo
   std::vector<PixelData>                    revealMetadataTiles; ///< One RGBA8888 buffer per height tile.
 
   std::shared_ptr<const Ui::Internal::PreparedRevealBlur> revealBlur; ///< Optional CPU-only result; absent for ordinary Reveal.
+
+  std::shared_ptr<const TextRasterResult> effectOverflow; ///< Immutable planes and geometry from the same request; null for legacy.
 
   Size                              size;                     ///< Actual rendered buffer size. For marquee, this is the scrolling texture size.
   Vector4                           textLogicalBounds;        ///< Normalized logical text bounds inside @p size.

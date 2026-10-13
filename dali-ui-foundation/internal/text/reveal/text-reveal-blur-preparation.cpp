@@ -567,15 +567,15 @@ std::shared_ptr<const PreparedRevealBlur> PrepareRevealBlur(
       continue;
     }
     auto sourceBounds = typesetter.GetRuntimeBlurLineRasterBounds(size, sequence.lineIndex, &baselines[sequence.lineIndex]);
-    auto render       = [&](Plane plane, Pixel::Format format, const Rect<uint32_t>& bounds)
+    auto render       = [&](Plane plane, Pixel::Format format, const Rect<uint32_t>& bounds, PixelData* recolorMask = nullptr)
     {
       return typesetter.RenderRuntimeBlurLine(size, sequence.lineIndex, plane, format, plan,
-                                              bounds.y, bounds.height, bounds.x, bounds.width);
+                                              bounds.y, bounds.height, bounds.x, bounds.width, recolorMask);
     };
     auto renderForeground = [&]()
     {
       line.foreground = render(options.gradientMixed ? Plane::GRADIENT_PRESERVED : Plane::TEXT,
-                               options.foregroundFormat, sourceBounds);
+                               options.foregroundFormat, sourceBounds, options.colorMask && !options.gradientMixed ? &line.mask : nullptr);
       if(!line.foreground)
       {
         return false;
@@ -583,7 +583,10 @@ std::shared_ptr<const PreparedRevealBlur> PrepareRevealBlur(
       AccumulateRuntimeRevealBlurCoverage(line.foreground, sequence.coverage);
       if(options.gradientMixed || options.colorMask)
       {
-        line.mask = render(options.gradientMixed ? Plane::GRADIENT_MASK : Plane::COLOR_MASK, Pixel::L8, sourceBounds);
+        if(options.gradientMixed)
+        {
+          line.mask = render(Plane::GRADIENT_MASK, Pixel::L8, sourceBounds);
+        }
         if(!line.mask)
         {
           return false;

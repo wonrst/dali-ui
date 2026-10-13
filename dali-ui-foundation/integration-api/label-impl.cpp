@@ -1348,6 +1348,10 @@ void LabelImpl::SetTextOutline(const Ui::Text::Outline& outline)
 {
   if(outline == Ui::Text::Outline::None())
   {
+    if(mController->IsOutlineEnabled() || mController->GetOutlineWidth() != 0u)
+    {
+      RequestRendererUpdate();
+    }
     UiColorManager::Get().ClearBinding(Self(), "OutlineColor");
     if(mController->IsOutlineEnabled())
     {
@@ -1366,6 +1370,7 @@ void LabelImpl::SetTextOutline(const Ui::Text::Outline& outline)
 
   if(Ui::Text::ApplyOutlineStyle(mController, outline))
   {
+    RequestRendererUpdate();
     RequestTextRelayout();
     RequestAsyncRender();
   }
@@ -1793,6 +1798,15 @@ void LabelImpl::SetAsyncRendering(bool asyncRendering)
 bool LabelImpl::IsAsyncRendering() const
 {
   return mController->IsAsyncRendering();
+}
+
+void LabelImpl::SetEffectOverflowEnabled(bool enabled)
+{
+  Internal::TextVisual::SetEffectOverflowEnabled(mVisual, enabled);
+  mIsManualRenderInProgress = false;
+  RequestAsyncRender();
+  RequestRendererUpdate();
+  RelayoutRequest();
 }
 
 void LabelImpl::SetRenderScale(float scale)
@@ -2676,6 +2690,10 @@ void LabelImpl::InvalidateTextMeasure()
 
 void LabelImpl::RequestAsyncRender()
 {
+  if(mVisual && Internal::TextVisual::CancelAsyncRender(mVisual, true))
+  {
+    mIsManualRenderInProgress = false;
+  }
   mIsAsyncRenderRequested = true;
 }
 
@@ -2685,7 +2703,12 @@ void LabelImpl::RequestAsyncRender()
 void LabelImpl::ScrollingFinished()
 {
   DALI_LOG_INFO(gLogFilter, Debug::General, "[%p] Scrolling finished\n", mController.Get());
-  InvalidateMarqueeStartGeometry();
+  // Restore static presentation even when the cached layout has not changed.
+  RequestRendererUpdate();
+  if(mTextScroller)
+  {
+    mTextScroller->StopScrollingForUpdate();
+  }
   SuppressAutoMarqueeEvaluation();
   mController->SetMarqueeEnabled(false);
   RequestTextRelayout();
@@ -2764,141 +2787,158 @@ void LabelImpl::AsyncInitializeMarquee(const Ui::Text::AsyncTextRenderInfo& rend
   float     wrapGap                 = renderInfo.marqueeWrapGap;
   PixelData data                    = renderInfo.marqueePixelData;
 
-  bool    isHorizontal = mTextScroller->GetOrientation() == Ui::Text::MarqueeOrientation::HORIZONTAL;
-  Sampler sampler      = Ui::Text::MarqueeBuilder::CreateTextScrollSampler(isHorizontal);
-
-  Ui::Text::MarqueeBuilder::PreparedContent preparedContent =
-    Ui::Text::MarqueeBuilder::CreateTextContent(data, sampler);
-
-  const auto*           gradientData                   = Internal::Text::GetTextGradientPropertyData(mTextGradientPropertyData);
-  const Gradient::Base& textGradient                   = gradientData ? gradientData->textGradient : Gradient::Base::None();
-  const Gradient::Base& textGradientOverlay            = gradientData ? gradientData->textGradientOverlay : Gradient::Base::None();
-  const auto            textGradientBoundsMode         = gradientData ? gradientData->textGradientBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
-  const auto            textGradientOverlayBoundsMode  = gradientData ? gradientData->textGradientOverlayBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
-  const auto            textGradientOverlayMode        = gradientData ? gradientData->textGradientOverlayMode : Ui::Text::GradientOverlayMode::SRC_OVER;
-  const Property::Index gradientAnimOffsetIndex        = gradientData ? gradientData->gradientAnimOffsetIndex : Property::INVALID_INDEX;
-  const Property::Index gradientOverlayAnimOffsetIndex = gradientData ? gradientData->gradientOverlayAnimOffsetIndex : Property::INVALID_INDEX;
-  const bool            gradientAnimApplyAlways        = gradientAnimOffsetIndex != Property::INVALID_INDEX;
-  const bool            gradientOverlayApplyAlways     = gradientOverlayAnimOffsetIndex != Property::INVALID_INDEX;
-
-  const Ui::Text::MarqueeBuilder::GradientState gradientState =
-    Ui::Text::MarqueeBuilder::ResolveGradientState(textGradient,
-                                                   textGradientOverlay,
-                                                   verifiedSize);
-  const bool hasGradientFeature      = gradientState.baseRenderable || gradientState.overlayRenderable;
-  const bool needsMarqueeComposition = hasGradientFeature || renderInfo.isOverlayStyle;
-  if(needsMarqueeComposition)
+  bool                                      isHorizontal = mTextScroller->GetOrientation() == Ui::Text::MarqueeOrientation::HORIZONTAL;
+  Ui::Text::MarqueeBuilder::PreparedContent preparedContent;
+  Shader                                    paintShader;
+  if(renderInfo.effectOverflow)
   {
-    const bool cutoutEnabled = renderInfo.isCutoutEnabled ||
-                               mController->IsTextCutout() ||
-                               mController->GetRenderTextModel()->IsBackgroundWithCutoutEnabled();
-    Ui::Text::MarqueeBuilder::FeatureInfo featureInfo;
-    if(hasGradientFeature)
+    auto renderer                = static_cast<Internal::Visual::Base&>(GetImplementation(mVisual)).GetRenderer();
+    preparedContent.textureSet   = renderer.GetTextures();
+    paintShader                  = renderer.GetShader();
+    preparedContent.textGradient = Internal::TextVisual::GetMarqueeGradient(mVisual, verifiedSize, renderInfo.textLogicalBounds, renderInfo.isEmbossEnabled);
+    if(isHorizontal && ((preparedContent.textGradient.enabled && preparedContent.textGradient.useTextureCoordinates) ||
+                        (preparedContent.textGradient.overlayEnabled && preparedContent.textGradient.overlayUseTextureCoordinates)))
     {
-      featureInfo.hasMultipleTextColors = renderInfo.hasMultipleTextColors;
-      featureInfo.containsColorGlyph    = renderInfo.containsColorGlyph;
-      featureInfo.styleTextureEnabled   = renderInfo.styleTextureEnabled;
+      const auto visualSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
+      if(visualSize.x > Math::MACHINE_EPSILON_1000 && visualSize.y > Math::MACHINE_EPSILON_1000) textScrollerControlSize = visualSize;
     }
-    featureInfo.isOverlayStyle = renderInfo.isOverlayStyle;
-    featureInfo.cutoutEnabled  = cutoutEnabled;
+  }
+  else
+  {
+    Sampler sampler = Ui::Text::MarqueeBuilder::CreateTextScrollSampler(isHorizontal);
 
-    Ui::Text::MarqueeBuilder::AnimationState animationState;
-    animationState.baseStartOffsetIndex    = gradientAnimOffsetIndex;
-    animationState.baseApplyAlways         = gradientAnimApplyAlways;
-    animationState.overlayStartOffsetIndex = gradientOverlayAnimOffsetIndex;
-    animationState.overlayApplyAlways      = gradientOverlayApplyAlways;
+    preparedContent = Ui::Text::MarqueeBuilder::CreateTextContent(data, sampler);
 
-    Ui::Text::MarqueeBuilder::CompositionRequest compositionRequest;
-    compositionRequest.sampler        = sampler;
-    compositionRequest.verifiedSize   = verifiedSize;
-    compositionRequest.featureInfo    = featureInfo;
-    compositionRequest.embossEnabled  = renderInfo.isEmbossEnabled;
-    compositionRequest.gradientState  = gradientState;
-    compositionRequest.animationState = animationState;
-    compositionRequest.overlayMode    = textGradientOverlayMode;
+    const auto*           gradientData                   = Internal::Text::GetTextGradientPropertyData(mTextGradientPropertyData);
+    const Gradient::Base& textGradient                   = gradientData ? gradientData->textGradient : Gradient::Base::None();
+    const Gradient::Base& textGradientOverlay            = gradientData ? gradientData->textGradientOverlay : Gradient::Base::None();
+    const auto            textGradientBoundsMode         = gradientData ? gradientData->textGradientBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
+    const auto            textGradientOverlayBoundsMode  = gradientData ? gradientData->textGradientOverlayBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
+    const auto            textGradientOverlayMode        = gradientData ? gradientData->textGradientOverlayMode : Ui::Text::GradientOverlayMode::SRC_OVER;
+    const Property::Index gradientAnimOffsetIndex        = gradientData ? gradientData->gradientAnimOffsetIndex : Property::INVALID_INDEX;
+    const Property::Index gradientOverlayAnimOffsetIndex = gradientData ? gradientData->gradientOverlayAnimOffsetIndex : Property::INVALID_INDEX;
+    const bool            gradientAnimApplyAlways        = gradientAnimOffsetIndex != Property::INVALID_INDEX;
+    const bool            gradientOverlayApplyAlways     = gradientOverlayAnimOffsetIndex != Property::INVALID_INDEX;
 
-    const Ui::Text::MarqueeBuilder::CompositionPlan compositionPlan =
-      Ui::Text::MarqueeBuilder::GetCompositionPlan(compositionRequest);
-    if(compositionPlan.HasWork())
+    const Ui::Text::MarqueeBuilder::GradientState gradientState =
+      Ui::Text::MarqueeBuilder::ResolveGradientState(textGradient,
+                                                     textGradientOverlay,
+                                                     verifiedSize);
+    const bool hasGradientFeature      = gradientState.baseRenderable || gradientState.overlayRenderable;
+    const bool needsMarqueeComposition = hasGradientFeature || renderInfo.isOverlayStyle;
+    if(needsMarqueeComposition)
     {
-      const bool hasContentBoundGradient =
-        (compositionPlan.needsBaseBounds && textGradientBoundsMode == Ui::Text::GradientBoundsMode::CONTENT_BOUND) ||
-        (compositionPlan.needsOverlayBounds && textGradientOverlayBoundsMode == Ui::Text::GradientBoundsMode::CONTENT_BOUND);
-      if(isHorizontal && hasContentBoundGradient)
+      const bool cutoutEnabled = renderInfo.isCutoutEnabled ||
+                                 mController->IsTextCutout() ||
+                                 mController->GetRenderTextModel()->IsBackgroundWithCutoutEnabled();
+      Ui::Text::MarqueeBuilder::FeatureInfo featureInfo;
+      if(hasGradientFeature)
       {
-        const Vector2 visualCoordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
-        if(visualCoordinateSize.width > Math::MACHINE_EPSILON_1000 &&
-           visualCoordinateSize.height > Math::MACHINE_EPSILON_1000)
+        featureInfo.hasMultipleTextColors = renderInfo.hasMultipleTextColors;
+        featureInfo.containsColorGlyph    = renderInfo.containsColorGlyph;
+        featureInfo.styleTextureEnabled   = renderInfo.styleTextureEnabled;
+      }
+      featureInfo.isOverlayStyle = renderInfo.isOverlayStyle;
+      featureInfo.cutoutEnabled  = cutoutEnabled;
+
+      Ui::Text::MarqueeBuilder::AnimationState animationState;
+      animationState.baseStartOffsetIndex    = gradientAnimOffsetIndex;
+      animationState.baseApplyAlways         = gradientAnimApplyAlways;
+      animationState.overlayStartOffsetIndex = gradientOverlayAnimOffsetIndex;
+      animationState.overlayApplyAlways      = gradientOverlayApplyAlways;
+
+      Ui::Text::MarqueeBuilder::CompositionRequest compositionRequest;
+      compositionRequest.sampler        = sampler;
+      compositionRequest.verifiedSize   = verifiedSize;
+      compositionRequest.featureInfo    = featureInfo;
+      compositionRequest.embossEnabled  = renderInfo.isEmbossEnabled;
+      compositionRequest.gradientState  = gradientState;
+      compositionRequest.animationState = animationState;
+      compositionRequest.overlayMode    = textGradientOverlayMode;
+
+      const Ui::Text::MarqueeBuilder::CompositionPlan compositionPlan =
+        Ui::Text::MarqueeBuilder::GetCompositionPlan(compositionRequest);
+      if(compositionPlan.HasWork())
+      {
+        const bool hasContentBoundGradient =
+          (compositionPlan.needsBaseBounds && textGradientBoundsMode == Ui::Text::GradientBoundsMode::CONTENT_BOUND) ||
+          (compositionPlan.needsOverlayBounds && textGradientOverlayBoundsMode == Ui::Text::GradientBoundsMode::CONTENT_BOUND);
+        if(isHorizontal && hasContentBoundGradient)
         {
-          // Async controlSize can describe the allocated Label while the text visual is
-          // fitted to the rendered marquee height. Keep scroller geometry on the visual;
-          // gradient evaluation independently uses content texture coordinates.
-          textScrollerControlSize = visualCoordinateSize;
+          const Vector2 visualCoordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
+          if(visualCoordinateSize.width > Math::MACHINE_EPSILON_1000 &&
+             visualCoordinateSize.height > Math::MACHINE_EPSILON_1000)
+          {
+            // Async controlSize can describe the allocated Label while the text visual is
+            // fitted to the rendered marquee height. Keep scroller geometry on the visual;
+            // gradient evaluation independently uses content texture coordinates.
+            textScrollerControlSize = visualCoordinateSize;
+          }
         }
-      }
 
-      auto resolveMarqueeGradientBounds = [&](Ui::Text::GradientBoundsMode boundsMode,
-                                              Vector2&                     coordinateSize,
-                                              bool&                        useTextureCoordinates) -> Vector4
-      {
-        useTextureCoordinates = false;
-        if(boundsMode == Ui::Text::GradientBoundsMode::VIEW_BOUND)
+        auto resolveMarqueeGradientBounds = [&](Ui::Text::GradientBoundsMode boundsMode,
+                                                Vector2&                     coordinateSize,
+                                                bool&                        useTextureCoordinates) -> Vector4
         {
-          coordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
-          return Internal::TextVisual::CalculateGradientViewBounds(mVisual, coordinateSize);
+          useTextureCoordinates = false;
+          if(boundsMode == Ui::Text::GradientBoundsMode::VIEW_BOUND)
+          {
+            coordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
+            return Internal::TextVisual::CalculateGradientViewBounds(mVisual, coordinateSize);
+          }
+
+          coordinateSize        = verifiedSize;
+          useTextureCoordinates = true;
+          return renderInfo.textLogicalBounds;
+        };
+
+        if(compositionPlan.needsBaseBounds)
+        {
+          Vector2       textGradientCoordinateSize;
+          bool          textGradientUseTextureCoordinates     = false;
+          const Vector4 textGradientBounds                    = resolveMarqueeGradientBounds(textGradientBoundsMode,
+                                                                                             textGradientCoordinateSize,
+                                                                                             textGradientUseTextureCoordinates);
+          compositionRequest.baseBoundsResolved               = true;
+          compositionRequest.baseBounds.bounds                = textGradientBounds;
+          compositionRequest.baseBounds.coordinateSize        = textGradientCoordinateSize;
+          compositionRequest.baseBounds.useTextureCoordinates = textGradientUseTextureCoordinates;
         }
 
-        coordinateSize        = verifiedSize;
-        useTextureCoordinates = true;
-        return renderInfo.textLogicalBounds;
-      };
+        if(compositionPlan.needsOverlayBounds)
+        {
+          Vector2       textGradientOverlayCoordinateSize;
+          bool          textGradientOverlayUseTextureCoordinates = false;
+          const Vector4 textGradientOverlayBounds                = resolveMarqueeGradientBounds(textGradientOverlayBoundsMode,
+                                                                                                textGradientOverlayCoordinateSize,
+                                                                                                textGradientOverlayUseTextureCoordinates);
+          compositionRequest.overlayBoundsResolved               = true;
+          compositionRequest.overlayBounds.bounds                = textGradientOverlayBounds;
+          compositionRequest.overlayBounds.coordinateSize        = textGradientOverlayCoordinateSize;
+          compositionRequest.overlayBounds.useTextureCoordinates = textGradientOverlayUseTextureCoordinates;
+        }
 
-      if(compositionPlan.needsBaseBounds)
-      {
-        Vector2       textGradientCoordinateSize;
-        bool          textGradientUseTextureCoordinates     = false;
-        const Vector4 textGradientBounds                    = resolveMarqueeGradientBounds(textGradientBoundsMode,
-                                                                                           textGradientCoordinateSize,
-                                                                                           textGradientUseTextureCoordinates);
-        compositionRequest.baseBoundsResolved               = true;
-        compositionRequest.baseBounds.bounds                = textGradientBounds;
-        compositionRequest.baseBounds.coordinateSize        = textGradientCoordinateSize;
-        compositionRequest.baseBounds.useTextureCoordinates = textGradientUseTextureCoordinates;
-      }
+        Ui::Text::MarqueeBuilder::PixelDataBundle pixels;
+        if(compositionPlan.needsFillPixelData)
+        {
+          pixels.fillPixelData = renderInfo.marqueeFillPixelData;
+        }
+        if(compositionPlan.needsStylePixelData)
+        {
+          pixels.stylePixelData = renderInfo.marqueeStylePixelData;
+        }
+        if(compositionPlan.needsPreservedMaskPixelData)
+        {
+          pixels.preservedPixelData = renderInfo.textGradientPreservedPixelData;
+          pixels.maskPixelData      = renderInfo.textGradientMaskPixelData;
+        }
+        if(compositionPlan.needsOverlayStylePixelData)
+        {
+          pixels.overlayStylePixelData = renderInfo.marqueeOverlayStylePixelData;
+        }
 
-      if(compositionPlan.needsOverlayBounds)
-      {
-        Vector2       textGradientOverlayCoordinateSize;
-        bool          textGradientOverlayUseTextureCoordinates = false;
-        const Vector4 textGradientOverlayBounds                = resolveMarqueeGradientBounds(textGradientOverlayBoundsMode,
-                                                                                              textGradientOverlayCoordinateSize,
-                                                                                              textGradientOverlayUseTextureCoordinates);
-        compositionRequest.overlayBoundsResolved               = true;
-        compositionRequest.overlayBounds.bounds                = textGradientOverlayBounds;
-        compositionRequest.overlayBounds.coordinateSize        = textGradientOverlayCoordinateSize;
-        compositionRequest.overlayBounds.useTextureCoordinates = textGradientOverlayUseTextureCoordinates;
+        Ui::Text::MarqueeBuilder::ApplyPreparedComposition(preparedContent, compositionRequest, pixels);
       }
-
-      Ui::Text::MarqueeBuilder::PixelDataBundle pixels;
-      if(compositionPlan.needsFillPixelData)
-      {
-        pixels.fillPixelData = renderInfo.marqueeFillPixelData;
-      }
-      if(compositionPlan.needsStylePixelData)
-      {
-        pixels.stylePixelData = renderInfo.marqueeStylePixelData;
-      }
-      if(compositionPlan.needsPreservedMaskPixelData)
-      {
-        pixels.preservedPixelData = renderInfo.textGradientPreservedPixelData;
-        pixels.maskPixelData      = renderInfo.textGradientMaskPixelData;
-      }
-      if(compositionPlan.needsOverlayStylePixelData)
-      {
-        pixels.overlayStylePixelData = renderInfo.marqueeOverlayStylePixelData;
-      }
-
-      Ui::Text::MarqueeBuilder::ApplyPreparedComposition(preparedContent, compositionRequest, pixels);
     }
   }
 
@@ -2933,7 +2973,7 @@ void LabelImpl::AsyncInitializeMarquee(const Ui::Text::AsyncTextRenderInfo& rend
                                renderInfo.isMarqueeContentOverflow, renderInfo.isTextDirectionRTL,
                                mController->GetHorizontalAlignment(),
                                mController->GetVerticalAlignment(), true, preparedContent.textGradient,
-                               marqueeInitialDelta);
+                               marqueeInitialDelta, paintShader);
 }
 
 void LabelImpl::AsyncTextFitChanged(float pointSize)
@@ -2956,8 +2996,8 @@ void LabelImpl::AsyncRenderFinished(Ui::Text::AsyncTextRenderInfo&& renderInfo)
 
   // A committed static result replaces the marquee renderer. Retire the old
   // animation without a user/loop-finished callback (which suppresses ON_OVERFLOW).
-  // Marquee results carry marqueePixelData, including MANUAL fitting text.
-  if(!renderInfo.marqueePixelData && mTextScroller && mTextScroller->IsScrolling() && !mIsAsyncRenderRequested)
+  // Marquee results carry full planes or marqueePixelData, including MANUAL fitting text.
+  if(!renderInfo.marqueePixelData && !renderInfo.effectOverflow && mTextScroller && mTextScroller->IsScrolling() && !mIsAsyncRenderRequested)
   {
     mTextScroller->StopScrollingForUpdate();
     if(mController->IsMarqueeEnabled())
@@ -3553,170 +3593,181 @@ void LabelImpl::InitializeMarquee(const Size& contentSize, const Size& originSiz
     }
   }
 
-  const Ui::Text::Direction      textDirection = mController->GetTextDirection();
-  Ui::Text::MarqueeTextureAnchor marqueeTextureAnchor;
-  auto                           renderMarqueeText = [&](Ui::Text::Typesetter::RenderBehaviour renderBehaviour,
-                               Pixel::Format                         pixelFormat,
-                               bool                                  resolveTextureAnchor = false) -> PixelData
+  const Ui::Text::Direction                 textDirection = mController->GetTextDirection();
+  Ui::Text::MarqueeTextureAnchor            marqueeTextureAnchor;
+  Ui::Text::MarqueeBuilder::PreparedContent preparedContent;
+  Shader                                    paintShader;
+  if(Internal::TextVisual::PrepareMarqueeText(mVisual, verifiedSize, originSize, isHorizontal,
+                                              mMarqueeStartAnchor, marqueeTextureAnchor, preparedContent.textGradient))
   {
-    return Internal::TextVisual::RenderMarqueeText(mVisual,
-                                                   verifiedSize,
-                                                   textDirection,
-                                                   renderBehaviour,
-                                                   isHorizontal,
-                                                   pixelFormat,
-                                                   originSize,
-                                                   mMarqueeStartAnchor,
-                                                   resolveTextureAnchor ? &marqueeTextureAnchor : nullptr);
-  };
-  // Capture from the primary text texture before any supplemental style or
-  // gradient renders. Supplemental renders do not update this anchor.
-  PixelData data = renderMarqueeText(Ui::Text::Typesetter::RENDER_TEXT_AND_STYLES,
-                                     Pixel::RGBA8888,
-                                     true);
-
-  Sampler sampler = Ui::Text::MarqueeBuilder::CreateTextScrollSampler(isHorizontal);
-
-  Ui::Text::MarqueeBuilder::PreparedContent preparedContent =
-    Ui::Text::MarqueeBuilder::CreateTextContent(data, sampler);
-
-  const auto*           gradientData                   = Internal::Text::GetTextGradientPropertyData(mTextGradientPropertyData);
-  const Gradient::Base& textGradient                   = gradientData ? gradientData->textGradient : Gradient::Base::None();
-  const Gradient::Base& textGradientOverlay            = gradientData ? gradientData->textGradientOverlay : Gradient::Base::None();
-  const auto            textGradientBoundsMode         = gradientData ? gradientData->textGradientBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
-  const auto            textGradientOverlayBoundsMode  = gradientData ? gradientData->textGradientOverlayBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
-  const auto            textGradientOverlayMode        = gradientData ? gradientData->textGradientOverlayMode : Ui::Text::GradientOverlayMode::SRC_OVER;
-  const Property::Index gradientAnimOffsetIndex        = gradientData ? gradientData->gradientAnimOffsetIndex : Property::INVALID_INDEX;
-  const Property::Index gradientOverlayAnimOffsetIndex = gradientData ? gradientData->gradientOverlayAnimOffsetIndex : Property::INVALID_INDEX;
-  const bool            gradientAnimApplyAlways        = gradientAnimOffsetIndex != Property::INVALID_INDEX;
-  const bool            gradientOverlayApplyAlways     = gradientOverlayAnimOffsetIndex != Property::INVALID_INDEX;
-
-  const Ui::Text::ModelInterface* const         textModel = mController->GetRenderTextModel();
-  const Ui::Text::MarqueeBuilder::GradientState gradientState =
-    Ui::Text::MarqueeBuilder::ResolveGradientState(textGradient,
-                                                   textGradientOverlay,
-                                                   verifiedSize);
-  const bool hasGradientFeature = gradientState.baseRenderable || gradientState.overlayRenderable;
-  const bool needsMarqueeComposition =
-    hasGradientFeature ||
-    Ui::Text::MarqueeBuilder::HasOverlayStyle(*textModel);
-  if(needsMarqueeComposition)
+    auto renderer              = static_cast<Internal::Visual::Base&>(GetImplementation(mVisual)).GetRenderer();
+    preparedContent.textureSet = renderer.GetTextures();
+    paintShader                = renderer.GetShader();
+  }
+  else
   {
-    Ui::Text::MarqueeBuilder::FeatureInfo featureInfo;
-    if(hasGradientFeature)
+    auto renderMarqueeText = [&](Ui::Text::Typesetter::RenderBehaviour renderBehaviour,
+                                 Pixel::Format                         pixelFormat,
+                                 bool                                  resolveTextureAnchor = false) -> PixelData
     {
-      featureInfo =
-        Ui::Text::MarqueeBuilder::CollectGradientFeatureInfo(*textModel,
-                                                             mController->IsTextCutout());
-    }
-    else
+      return Internal::TextVisual::RenderMarqueeText(mVisual,
+                                                     verifiedSize,
+                                                     textDirection,
+                                                     renderBehaviour,
+                                                     isHorizontal,
+                                                     pixelFormat,
+                                                     originSize,
+                                                     mMarqueeStartAnchor,
+                                                     resolveTextureAnchor ? &marqueeTextureAnchor : nullptr);
+    };
+    // Capture from the primary text texture before any supplemental style or
+    // gradient renders. Supplemental renders do not update this anchor.
+    PixelData data = renderMarqueeText(Ui::Text::Typesetter::RENDER_TEXT_AND_STYLES,
+                                       Pixel::RGBA8888,
+                                       true);
+
+    Sampler sampler = Ui::Text::MarqueeBuilder::CreateTextScrollSampler(isHorizontal);
+
+    preparedContent = Ui::Text::MarqueeBuilder::CreateTextContent(data, sampler);
+
+    const auto*           gradientData                   = Internal::Text::GetTextGradientPropertyData(mTextGradientPropertyData);
+    const Gradient::Base& textGradient                   = gradientData ? gradientData->textGradient : Gradient::Base::None();
+    const Gradient::Base& textGradientOverlay            = gradientData ? gradientData->textGradientOverlay : Gradient::Base::None();
+    const auto            textGradientBoundsMode         = gradientData ? gradientData->textGradientBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
+    const auto            textGradientOverlayBoundsMode  = gradientData ? gradientData->textGradientOverlayBoundsMode : Ui::Text::GradientBoundsMode::CONTENT_BOUND;
+    const auto            textGradientOverlayMode        = gradientData ? gradientData->textGradientOverlayMode : Ui::Text::GradientOverlayMode::SRC_OVER;
+    const Property::Index gradientAnimOffsetIndex        = gradientData ? gradientData->gradientAnimOffsetIndex : Property::INVALID_INDEX;
+    const Property::Index gradientOverlayAnimOffsetIndex = gradientData ? gradientData->gradientOverlayAnimOffsetIndex : Property::INVALID_INDEX;
+    const bool            gradientAnimApplyAlways        = gradientAnimOffsetIndex != Property::INVALID_INDEX;
+    const bool            gradientOverlayApplyAlways     = gradientOverlayAnimOffsetIndex != Property::INVALID_INDEX;
+
+    const Ui::Text::ModelInterface* const         textModel = mController->GetRenderTextModel();
+    const Ui::Text::MarqueeBuilder::GradientState gradientState =
+      Ui::Text::MarqueeBuilder::ResolveGradientState(textGradient,
+                                                     textGradientOverlay,
+                                                     verifiedSize);
+    const bool hasGradientFeature = gradientState.baseRenderable || gradientState.overlayRenderable;
+    const bool needsMarqueeComposition =
+      hasGradientFeature ||
+      Ui::Text::MarqueeBuilder::HasOverlayStyle(*textModel);
+    if(needsMarqueeComposition)
     {
-      featureInfo.isOverlayStyle = true;
-    }
-
-    Ui::Text::MarqueeBuilder::AnimationState animationState;
-    animationState.baseStartOffsetIndex    = gradientAnimOffsetIndex;
-    animationState.baseApplyAlways         = gradientAnimApplyAlways;
-    animationState.overlayStartOffsetIndex = gradientOverlayAnimOffsetIndex;
-    animationState.overlayApplyAlways      = gradientOverlayApplyAlways;
-
-    Ui::Text::MarqueeBuilder::CompositionRequest compositionRequest;
-    compositionRequest.sampler        = sampler;
-    compositionRequest.verifiedSize   = verifiedSize;
-    compositionRequest.featureInfo    = featureInfo;
-    compositionRequest.embossEnabled  = mController->IsEmbossEnabled();
-    compositionRequest.gradientState  = gradientState;
-    compositionRequest.animationState = animationState;
-    compositionRequest.overlayMode    = textGradientOverlayMode;
-
-    const Ui::Text::MarqueeBuilder::CompositionPlan compositionPlan =
-      Ui::Text::MarqueeBuilder::GetCompositionPlan(compositionRequest);
-    if(compositionPlan.HasWork())
-    {
-      if(compositionPlan.needsBaseBounds || compositionPlan.needsOverlayBounds)
+      Ui::Text::MarqueeBuilder::FeatureInfo featureInfo;
+      if(hasGradientFeature)
       {
-        const Vector4 textGradientContentBounds =
-          Ui::Text::Internal::CalculateGradientContentBounds(verifiedSize,
-                                                             textModel->GetLayoutSize(),
-                                                             textModel->GetLines(),
-                                                             textModel->GetNumberOfLines(),
-                                                             mController->GetVerticalAlignment(),
-                                                             isHorizontal);
-        auto resolveMarqueeGradientBounds = [&](Ui::Text::GradientBoundsMode boundsMode,
-                                                Vector2&                     coordinateSize,
-                                                bool&                        useTextureCoordinates) -> Vector4
+        featureInfo =
+          Ui::Text::MarqueeBuilder::CollectGradientFeatureInfo(*textModel,
+                                                               mController->IsTextCutout());
+      }
+      else
+      {
+        featureInfo.isOverlayStyle = true;
+      }
+
+      Ui::Text::MarqueeBuilder::AnimationState animationState;
+      animationState.baseStartOffsetIndex    = gradientAnimOffsetIndex;
+      animationState.baseApplyAlways         = gradientAnimApplyAlways;
+      animationState.overlayStartOffsetIndex = gradientOverlayAnimOffsetIndex;
+      animationState.overlayApplyAlways      = gradientOverlayApplyAlways;
+
+      Ui::Text::MarqueeBuilder::CompositionRequest compositionRequest;
+      compositionRequest.sampler        = sampler;
+      compositionRequest.verifiedSize   = verifiedSize;
+      compositionRequest.featureInfo    = featureInfo;
+      compositionRequest.embossEnabled  = mController->IsEmbossEnabled();
+      compositionRequest.gradientState  = gradientState;
+      compositionRequest.animationState = animationState;
+      compositionRequest.overlayMode    = textGradientOverlayMode;
+
+      const Ui::Text::MarqueeBuilder::CompositionPlan compositionPlan =
+        Ui::Text::MarqueeBuilder::GetCompositionPlan(compositionRequest);
+      if(compositionPlan.HasWork())
+      {
+        if(compositionPlan.needsBaseBounds || compositionPlan.needsOverlayBounds)
         {
-          useTextureCoordinates = false;
-          if(boundsMode == Ui::Text::GradientBoundsMode::VIEW_BOUND)
+          const Vector4 textGradientContentBounds =
+            Ui::Text::Internal::CalculateGradientContentBounds(verifiedSize,
+                                                               textModel->GetLayoutSize(),
+                                                               textModel->GetLines(),
+                                                               textModel->GetNumberOfLines(),
+                                                               mController->GetVerticalAlignment(),
+                                                               isHorizontal);
+          auto resolveMarqueeGradientBounds = [&](Ui::Text::GradientBoundsMode boundsMode,
+                                                  Vector2&                     coordinateSize,
+                                                  bool&                        useTextureCoordinates) -> Vector4
           {
-            coordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
-            return Internal::TextVisual::CalculateGradientViewBounds(mVisual, coordinateSize);
+            useTextureCoordinates = false;
+            if(boundsMode == Ui::Text::GradientBoundsMode::VIEW_BOUND)
+            {
+              coordinateSize = Internal::TextVisual::GetGradientViewCoordinateSize(mVisual);
+              return Internal::TextVisual::CalculateGradientViewBounds(mVisual, coordinateSize);
+            }
+
+            coordinateSize        = verifiedSize;
+            useTextureCoordinates = true;
+            return textGradientContentBounds;
+          };
+
+          if(compositionPlan.needsBaseBounds)
+          {
+            Vector2       textGradientCoordinateSize;
+            bool          textGradientUseTextureCoordinates     = false;
+            const Vector4 textGradientBounds                    = resolveMarqueeGradientBounds(textGradientBoundsMode,
+                                                                                               textGradientCoordinateSize,
+                                                                                               textGradientUseTextureCoordinates);
+            compositionRequest.baseBoundsResolved               = true;
+            compositionRequest.baseBounds.bounds                = textGradientBounds;
+            compositionRequest.baseBounds.coordinateSize        = textGradientCoordinateSize;
+            compositionRequest.baseBounds.useTextureCoordinates = textGradientUseTextureCoordinates;
           }
 
-          coordinateSize        = verifiedSize;
-          useTextureCoordinates = true;
-          return textGradientContentBounds;
-        };
-
-        if(compositionPlan.needsBaseBounds)
-        {
-          Vector2       textGradientCoordinateSize;
-          bool          textGradientUseTextureCoordinates     = false;
-          const Vector4 textGradientBounds                    = resolveMarqueeGradientBounds(textGradientBoundsMode,
-                                                                                             textGradientCoordinateSize,
-                                                                                             textGradientUseTextureCoordinates);
-          compositionRequest.baseBoundsResolved               = true;
-          compositionRequest.baseBounds.bounds                = textGradientBounds;
-          compositionRequest.baseBounds.coordinateSize        = textGradientCoordinateSize;
-          compositionRequest.baseBounds.useTextureCoordinates = textGradientUseTextureCoordinates;
+          if(compositionPlan.needsOverlayBounds)
+          {
+            Vector2       textGradientOverlayCoordinateSize;
+            bool          textGradientOverlayUseTextureCoordinates = false;
+            const Vector4 textGradientOverlayBounds                = resolveMarqueeGradientBounds(textGradientOverlayBoundsMode,
+                                                                                                  textGradientOverlayCoordinateSize,
+                                                                                                  textGradientOverlayUseTextureCoordinates);
+            compositionRequest.overlayBoundsResolved               = true;
+            compositionRequest.overlayBounds.bounds                = textGradientOverlayBounds;
+            compositionRequest.overlayBounds.coordinateSize        = textGradientOverlayCoordinateSize;
+            compositionRequest.overlayBounds.useTextureCoordinates = textGradientOverlayUseTextureCoordinates;
+          }
         }
 
-        if(compositionPlan.needsOverlayBounds)
+        Ui::Text::MarqueeBuilder::PixelDataBundle pixels;
+        if(compositionPlan.needsFillPixelData)
         {
-          Vector2       textGradientOverlayCoordinateSize;
-          bool          textGradientOverlayUseTextureCoordinates = false;
-          const Vector4 textGradientOverlayBounds                = resolveMarqueeGradientBounds(textGradientOverlayBoundsMode,
-                                                                                                textGradientOverlayCoordinateSize,
-                                                                                                textGradientOverlayUseTextureCoordinates);
-          compositionRequest.overlayBoundsResolved               = true;
-          compositionRequest.overlayBounds.bounds                = textGradientOverlayBounds;
-          compositionRequest.overlayBounds.coordinateSize        = textGradientOverlayCoordinateSize;
-          compositionRequest.overlayBounds.useTextureCoordinates = textGradientOverlayUseTextureCoordinates;
+          pixels.fillPixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_NO_STYLES, Pixel::RGBA8888);
         }
-      }
+        if(compositionPlan.needsStylePixelData)
+        {
+          pixels.stylePixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_NO_TEXT, Pixel::RGBA8888);
+        }
+        if(compositionPlan.needsPreservedMaskPixelData)
+        {
+          pixels.preservedPixelData =
+            Internal::TextVisual::RenderMarqueeTextGradientPreserved(mVisual,
+                                                                     verifiedSize,
+                                                                     textDirection,
+                                                                     isHorizontal,
+                                                                     Pixel::RGBA8888,
+                                                                     originSize);
+          pixels.maskPixelData =
+            Internal::TextVisual::RenderMarqueeTextGradientMask(mVisual,
+                                                                verifiedSize,
+                                                                textDirection,
+                                                                isHorizontal,
+                                                                Pixel::L8,
+                                                                originSize);
+        }
+        if(compositionPlan.needsOverlayStylePixelData)
+        {
+          pixels.overlayStylePixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_OVERLAY_STYLE, Pixel::RGBA8888);
+        }
 
-      Ui::Text::MarqueeBuilder::PixelDataBundle pixels;
-      if(compositionPlan.needsFillPixelData)
-      {
-        pixels.fillPixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_NO_STYLES, Pixel::RGBA8888);
+        Ui::Text::MarqueeBuilder::ApplyPreparedComposition(preparedContent, compositionRequest, pixels);
       }
-      if(compositionPlan.needsStylePixelData)
-      {
-        pixels.stylePixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_NO_TEXT, Pixel::RGBA8888);
-      }
-      if(compositionPlan.needsPreservedMaskPixelData)
-      {
-        pixels.preservedPixelData =
-          Internal::TextVisual::RenderMarqueeTextGradientPreserved(mVisual,
-                                                                   verifiedSize,
-                                                                   textDirection,
-                                                                   isHorizontal,
-                                                                   Pixel::RGBA8888,
-                                                                   originSize);
-        pixels.maskPixelData =
-          Internal::TextVisual::RenderMarqueeTextGradientMask(mVisual,
-                                                              verifiedSize,
-                                                              textDirection,
-                                                              isHorizontal,
-                                                              Pixel::L8,
-                                                              originSize);
-      }
-      if(compositionPlan.needsOverlayStylePixelData)
-      {
-        pixels.overlayStylePixelData = renderMarqueeText(Ui::Text::Typesetter::RENDER_OVERLAY_STYLE, Pixel::RGBA8888);
-      }
-
-      Ui::Text::MarqueeBuilder::ApplyPreparedComposition(preparedContent, compositionRequest, pixels);
     }
   }
 
@@ -3751,7 +3802,7 @@ void LabelImpl::InitializeMarquee(const Size& contentSize, const Size& originSiz
                                isTextContentOverflow, direction,
                                mController->GetHorizontalAlignment(), mController->GetVerticalAlignment(),
                                mRendererUpdateNeeded, preparedContent.textGradient,
-                               marqueeInitialDelta);
+                               marqueeInitialDelta, paintShader);
   mController->SetTextElideEnabled(actualellipsis);
   mController->SetMarqueeMaxTextureExceeded(false);
 }
@@ -4502,6 +4553,7 @@ void LabelImpl::SetOutlineColorInternal(const Vector4& color)
   if(mController->GetOutlineColor() != color)
   {
     mController->SetOutlineColor(color);
+    RequestRendererUpdate();
   }
 }
 

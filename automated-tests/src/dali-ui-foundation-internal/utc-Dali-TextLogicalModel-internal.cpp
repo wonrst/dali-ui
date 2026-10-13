@@ -23,11 +23,13 @@
 #include <dali-ui-foundation/public-api/text/styled-text/styled-text.h>
 #include <dali-ui-foundation/public-api/views/text-controls/label.h>
 #include <dali-ui-test-suite-utils.h>
+#include <test-font-glyph-constants.h>
 #include <dali-ui/ui-event-thread-callback.h>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 using namespace Dali;
 using namespace Dali::Ui;
@@ -398,5 +400,89 @@ int UtcDaliTextLogicalModelParagraphAndBidiP(void)
   DALI_TEST_EQUALS(model->GetNumberOfCharacterSpacingCharacterRuns(), 1u, TEST_LOCATION);
   DALI_TEST_EQUALS(model->GetCharacterSpacingCharacterRuns().Count(), 1u, TEST_LOCATION);
   model->ClearAnchors();
+  END_TEST;
+}
+
+int UtcDaliTextSpaceFallbackColdWarmP(void)
+{
+  UiTestApplication application;
+  auto support = MultilanguageSupport::New(false);
+  auto client = TextAbstraction::FontClient::Get();
+  TextAbstraction::FontDescription description;
+  description.family = TextAbstraction::Test::FALLBACK_SOURCE_FAMILY;
+  for(const std::string& text : {std::string("H"), std::string(" H"), std::string("    H"),
+                                std::string("        Hello Text"), std::string("  "),
+                                std::string("  \n  H"), std::string(8192, ' ') + "H"})
+  {
+    auto logical = LogicalModel::New();
+    for(char c : text) logical->mText.PushBack(static_cast<Character>(c));
+    const auto count = static_cast<Length>(logical->mText.Count());
+    support.SetScripts(logical->mText, 0u, count, logical->mScriptRuns);
+    const auto validate = [&]()
+    {
+      Vector<FontRun> runs;
+      support.ValidateFonts(client, logical->mText, logical->mScriptRuns, logical->mFontDescriptionRuns,
+                            description, 48u * 64u, 1.f, 0u, count, runs, nullptr);
+      std::vector<FontId> ids;
+      for(const auto& run : runs)
+      {
+        ids.insert(ids.end(), run.characterRun.numberOfCharacters, run.fontId);
+      }
+      return ids;
+    };
+    support.ClearCache();
+    const auto cold = validate();
+    const auto warm = validate();
+    DALI_TEST_CHECK(cold == warm);
+    DALI_TEST_EQUALS(cold.size(), text.size(), TEST_LOCATION);
+    if(text.back() == 'H' && text.find('\n') == std::string::npos)
+    {
+      for(auto id : cold) DALI_TEST_EQUALS(id, cold.back(), TEST_LOCATION);
+    }
+    if(text.find('\n') != std::string::npos)
+    {
+      DALI_TEST_EQUALS(cold[text.size() - 2u], cold.back(), TEST_LOCATION);
+    }
+    // All-space content must retain its own authored font even with a warmed Latin fallback.
+    logical->mText.Clear();
+    logical->mText.PushBack(' ');
+    logical->mScriptRuns.Clear();
+    support.SetScripts(logical->mText, 0u, 1u, logical->mScriptRuns);
+    Vector<FontRun> runs;
+    support.ValidateFonts(client, logical->mText, logical->mScriptRuns, logical->mFontDescriptionRuns,
+                          description, 48u * 64u, 1.f, 0u, 1u, runs, nullptr);
+    DALI_TEST_CHECK(runs[0].fontId & TextAbstraction::Test::FALLBACK_SOURCE_FONT_BIT);
+  }
+  END_TEST;
+}
+
+int UtcDaliTextSpaceFallbackFontBoundaryP(void)
+{
+  UiTestApplication application;
+  auto support = MultilanguageSupport::New(false);
+  auto client = TextAbstraction::FontClient::Get();
+  auto logical = LogicalModel::New();
+  for(char c : std::string("  H")) logical->mText.PushBack(c);
+  support.SetScripts(logical->mText, 0u, 3u, logical->mScriptRuns);
+  TextAbstraction::FontDescription description;
+  description.family = "DejaVu Sans";
+  FontDescriptionRun run;
+  run.characterRun = {0u, 2u};
+  const std::string family = TextAbstraction::Test::FALLBACK_SOURCE_FAMILY;
+  run.familyName = new char[family.size()];
+  memcpy(run.familyName, family.data(), family.size());
+  run.familyLength = family.size();
+  run.familyDefined = true;
+  logical->mFontDescriptionRuns.PushBack(run);
+  for(unsigned request = 0; request < 2; ++request)
+  {
+    Vector<FontRun> fonts;
+    support.ValidateFonts(client, logical->mText, logical->mScriptRuns, logical->mFontDescriptionRuns,
+                          description, 48u * 64u, 1.f, 0u, 3u, fonts, nullptr);
+    DALI_TEST_EQUALS(fonts.Count(), 2u, TEST_LOCATION);
+    DALI_TEST_EQUALS(fonts[0].characterRun.numberOfCharacters, 2u, TEST_LOCATION);
+    DALI_TEST_CHECK(fonts[0].fontId & TextAbstraction::Test::FALLBACK_SOURCE_FONT_BIT);
+    DALI_TEST_CHECK(!(fonts[1].fontId & TextAbstraction::Test::FALLBACK_SOURCE_FONT_BIT));
+  }
   END_TEST;
 }

@@ -681,6 +681,14 @@ public:
   void SetRenderScale(float scale);
 
   /**
+   * @brief Requests independent effect-plane rendering for supported text.
+   *
+   * Internal activation for effect overflow. Unsupported configurations retain
+   * legacy rendering; this does not change layout or scene clipping.
+   */
+  void SetEffectOverflowEnabled(bool enabled);
+
+  /**
    * @copydoc Dali::Ui::Label::GetRenderScale
    */
   float GetRenderScale() const;

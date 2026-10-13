@@ -46,7 +46,7 @@ AtlasGlyphManager::AtlasGlyphManager()
 }
 
 void AtlasGlyphManager::Add(const Text::GlyphInfo& glyph, const Ui::AtlasGlyphManager::GlyphStyle& style,
-                            const PixelData& bitmap, Dali::Ui::AtlasManager::AtlasSlot& slot)
+                            const PixelData& bitmap, Dali::Ui::AtlasManager::AtlasSlot& slot, const Vector2& origin)
 {
   DALI_LOG_INFO(gLogFilter, Debug::General, "Added glyph, font: %d index: %d\n", glyph.fontId, glyph.index);
 
@@ -67,6 +67,9 @@ void AtlasGlyphManager::Add(const Text::GlyphInfo& glyph, const Ui::AtlasGlyphMa
   record.mImageId      = slot.mImageId;
   record.mCount        = 1;
   record.mOutlineWidth = style.outline;
+  record.mOrigin       = origin;
+  record.mBlurRadius   = style.blurRadius;
+  record.mMask         = style.mask;
   record.isItalic      = style.isItalic;
   record.isBold        = style.isBold;
 
@@ -103,7 +106,7 @@ void AtlasGlyphManager::GenerateMeshData(uint32_t imageId, const Vector2& positi
 
 bool AtlasGlyphManager::IsCached(Text::FontId fontId, Text::GlyphIndex index,
                                  const Ui::AtlasGlyphManager::GlyphStyle& style,
-                                 Dali::Ui::AtlasManager::AtlasSlot&       slot)
+                                 Dali::Ui::AtlasManager::AtlasSlot& slot, Vector2* origin)
 {
   for(std::vector<FontGlyphRecord>::iterator fontGlyphRecordIt = mFontGlyphRecords.begin();
       fontGlyphRecordIt != mFontGlyphRecords.end(); ++fontGlyphRecordIt)
@@ -115,10 +118,15 @@ bool AtlasGlyphManager::IsCached(Text::FontId fontId, Text::GlyphIndex index,
           glyphRecordIt != fontGlyphRecordIt->mGlyphRecords.End(); ++glyphRecordIt)
       {
         if((glyphRecordIt->mIndex == index) && (glyphRecordIt->mOutlineWidth == style.outline) &&
+           (glyphRecordIt->mBlurRadius == style.blurRadius) && (glyphRecordIt->mMask == style.mask) &&
            (glyphRecordIt->isItalic == style.isItalic) && (glyphRecordIt->isBold == style.isBold))
         {
           slot.mImageId = glyphRecordIt->mImageId;
           slot.mAtlasId = mAtlasManager.GetAtlas(slot.mImageId);
+          if(origin)
+          {
+            *origin = glyphRecordIt->mOrigin;
+          }
           return true;
         }
       }

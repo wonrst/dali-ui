@@ -70,6 +70,7 @@ namespace Text
 class Controller;
 class Decorator;
 class Renderer;
+class EditableTextGroup;
 
 using ControllerPtr = IntrusivePtr<Controller>;
 using DecoratorPtr  = IntrusivePtr<Decorator>;
@@ -1147,6 +1148,9 @@ private: // Implementation
    */
   void RenderText(Text::UpdateTextType updateTextType);
 
+  /** @brief Updates the viewport-sized text paint composition. */
+  void UpdateTextGroup();
+
   /**
    * @brief Synchronizes the active normal/placeholder atlas gradient resource with the current renderer.
    *
@@ -1294,21 +1298,22 @@ private:
 
   Internal::Text::EditableTextGradientPropertyDataPtr mTextGradientPropertyData;
 
-  InputMethodContext              mInputMethodContext;
-  TapGestureDetector              mTapGestureDetector;
-  PanGestureDetector              mPanGestureDetector;
-  LongPressGestureDetector        mLongPressGestureDetector;
-  Ui::Text::ControllerPtr         mController;
-  Ui::Text::RendererPtr           mRenderer;
-  Text::Gradient::AtlasApplyState mAtlasApplyState;
-  Ui::Text::DecoratorPtr          mDecorator;
-  Actor                           mStencil;
-  std::vector<Actor>              mClippingDecorationActors; ///< Decoration actors which need clipping.
-  std::vector<Ui::TextAnchor>     mAnchorActors;
-  Actor                           mRenderableActor;
-  Actor                           mActiveLayer;
-  Actor                           mCursorLayer;
-  Actor                           mBackgroundActor;
+  InputMethodContext                           mInputMethodContext;
+  TapGestureDetector                           mTapGestureDetector;
+  PanGestureDetector                           mPanGestureDetector;
+  LongPressGestureDetector                     mLongPressGestureDetector;
+  Ui::Text::ControllerPtr                      mController;
+  Ui::Text::RendererPtr                        mRenderer;
+  std::unique_ptr<Ui::Text::EditableTextGroup> mTextGroup;
+  Text::Gradient::AtlasApplyState              mAtlasApplyState;
+  Ui::Text::DecoratorPtr                       mDecorator;
+  Actor                                        mStencil;
+  std::vector<Actor>                           mClippingDecorationActors; ///< Decoration actors which need clipping.
+  std::vector<Ui::TextAnchor>                  mAnchorActors;
+  Actor                                        mRenderableActor;
+  Actor                                        mActiveLayer;
+  Actor                                        mCursorLayer;
+  Actor                                        mBackgroundActor;
 
   Ui::Text::OverflowMode mOverflowMode;
   float                  mAlignmentOffset;

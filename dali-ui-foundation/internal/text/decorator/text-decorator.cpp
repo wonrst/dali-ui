@@ -211,7 +211,6 @@ struct Decorator::Impl : public ConnectionTracker
     mHighlightPosition(Vector2::ZERO),
     mHighlightSize(Vector2::ZERO),
     mControlSize(Vector2::ZERO),
-    mHighlightOutlineOffset(0.f),
     mActiveCursor(ACTIVE_CURSOR_NONE),
     mCursorBlinkInterval(CURSOR_BLINK_INTERVAL),
     mCursorWidth(CURSOR_WIDTH),
@@ -1291,8 +1290,7 @@ struct Decorator::Impl : public ConnectionTracker
     if(mHighlightActor)
     {
       // Sets the position of the highlight actor inside the decorator.
-      mHighlightActor.SetProperty(Actor::Property::POSITION, Vector2(mHighlightPosition.x + mHighlightOutlineOffset,
-                                                                     mHighlightPosition.y + mHighlightOutlineOffset));
+      mHighlightActor.SetProperty(Actor::Property::POSITION, mHighlightPosition);
 
       const uint32_t numberOfQuads = static_cast<uint32_t>(mHighlightQuadList.Count());
       if(0u != numberOfQuads)
@@ -2075,13 +2073,12 @@ struct Decorator::Impl : public ConnectionTracker
   Geometry      mQuadGeometry;
   QuadContainer mHighlightQuadList; ///< Sub-selections that combine to create the complete selection highlight.
 
-  BoundsInteger mLocalBoundingBox;       ///< The bounding box in local (screen) coords.
-  Vector4       mBoundingBox;            ///< The bounding box in world coords.
-  Vector4       mHighlightColor;         ///< Color of the highlight
-  Vector2       mHighlightPosition;      ///< The position of the highlight actor.
-  Size          mHighlightSize;          ///< The size of the highlighted text.
-  Size          mControlSize;            ///< The view's size. Set by the Relayout.
-  float         mHighlightOutlineOffset; ///< The outline's offset.
+  BoundsInteger mLocalBoundingBox;  ///< The bounding box in local (screen) coords.
+  Vector4       mBoundingBox;       ///< The bounding box in world coords.
+  Vector4       mHighlightColor;    ///< Color of the highlight
+  Vector2       mHighlightPosition; ///< The position of the highlight actor.
+  Size          mHighlightSize;     ///< The size of the highlighted text.
+  Size          mControlSize;       ///< The view's size. Set by the Relayout.
 
   unsigned int    mActiveCursor;
   unsigned int    mCursorBlinkInterval;
@@ -2494,18 +2491,16 @@ void Decorator::AddHighlight(unsigned int index, const Vector4& quad)
   *(mImpl->mHighlightQuadList.Begin() + index) = quad;
 }
 
-void Decorator::SetHighLightBox(const Vector2& position, const Size& size, float outlineOffset)
+void Decorator::SetHighLightBox(const Vector2& position, const Size& size)
 {
-  mImpl->mHighlightPosition      = position;
-  mImpl->mHighlightSize          = size;
-  mImpl->mHighlightOutlineOffset = outlineOffset;
+  mImpl->mHighlightPosition = position;
+  mImpl->mHighlightSize     = size;
 }
 
 void Decorator::ClearHighlights()
 {
   mImpl->mHighlightQuadList.Clear();
-  mImpl->mHighlightPosition      = Vector2::ZERO;
-  mImpl->mHighlightOutlineOffset = 0.f;
+  mImpl->mHighlightPosition = Vector2::ZERO;
 }
 
 void Decorator::ResizeHighlightQuads(unsigned int numberOfQuads)

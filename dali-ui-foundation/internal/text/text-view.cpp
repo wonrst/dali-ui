@@ -1174,6 +1174,11 @@ const Vector4& View::GetTextColor() const
   return Vector4::ZERO;
 }
 
+float View::GetShadowBlurRadius() const
+{
+  return mImpl->mVisualModel ? mImpl->mVisualModel->GetShadowBlurRadius() : 0.0f;
+}
+
 const Vector2& View::GetShadowOffset() const
 {
   if(mImpl->mVisualModel)
@@ -1310,15 +1315,17 @@ void View::GetUnderlineRuns(UnderlinedGlyphRun* underlineRuns, UnderlineRunIndex
   }
 }
 
+float View::GetOutlineBlurRadius() const
+{
+  return mImpl->mVisualModel ? mImpl->mVisualModel->GetOutlineBlurRadius() : 0.0f;
+}
+
 const Vector2& View::GetOutlineOffset() const
 {
-  // TODO : We should support outline offset to editable text.
-  /*
-    if(mImpl->mVisualModel)
-    {
-      return mImpl->mVisualModel->GetOutlineOffset();
-    }
-  */
+  if(mImpl->mVisualModel)
+  {
+    return mImpl->mVisualModel->GetEffectiveOutlineOffset();
+  }
   return Vector2::ZERO;
 }
 

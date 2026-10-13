@@ -196,6 +196,9 @@ public:
    */
   virtual const Vector2& GetShadowOffset() const = 0;
 
+  /** @brief Returns the authored shadow blur radius. */
+  virtual float GetShadowBlurRadius() const = 0;
+
   /**
    * @brief Returns whether shadow is enabled or not.
    *
@@ -302,6 +305,9 @@ public:
    * @return The outline offset.
    */
   virtual const Vector2& GetOutlineOffset() const = 0;
+
+  /** @brief Returns the authored outline blur radius. */
+  virtual float GetOutlineBlurRadius() const = 0;
 
   /**
    * @brief Retrieve the outline color.

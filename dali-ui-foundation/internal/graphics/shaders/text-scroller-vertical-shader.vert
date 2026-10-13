@@ -14,6 +14,9 @@ UNIFORM_BLOCK VertBlock
 {
   UNIFORM highp vec3 uSize;
   UNIFORM highp float uDelta;
+#ifdef TEXT_MARQUEE_PLANES
+  UNIFORM highp vec4 uMarqueeViewport;
+#endif
   UNIFORM highp vec2 uTextureSize;
   UNIFORM highp float uGap;
   UNIFORM highp float uHorizontalAlign;
@@ -42,10 +45,20 @@ void main()
   highp vec2 visualSize = mix(size * uSize.xy, size * effectiveScale, offsetSizeMode.zw) + extraSize * effectiveScale;
   highp vec2 visualOffset = mix(offset * uSize.xy, offset * effectiveScale, offsetSizeMode.xy);
 
-  vTexCoord.x = ( uHorizontalAlign * ( uTextureSize.x - visualSize.x ) + aPosition.x * visualSize.x ) / uTextureSize.x + 0.5;
-  vTexCoord.y = ( uDelta + uVerticalAlign * ( uTextureSize.y - visualSize.y - uGap ) + aPosition.y * visualSize.y - uGap * 0.5 ) / ( uTextureSize.y ) + 0.5;
+  highp vec2 coordinateSize = visualSize;
+  highp vec2 coordinatePosition = aPosition * visualSize;
+#ifdef TEXT_MARQUEE_PLANES
+  coordinateSize = uMarqueeViewport.xy;
+  coordinatePosition += 0.5 * (visualSize - coordinateSize) + uMarqueeViewport.zw;
+#endif
+  vTexCoord.x = ( uHorizontalAlign * ( uTextureSize.x - coordinateSize.x ) + coordinatePosition.x ) / uTextureSize.x + 0.5;
+  vTexCoord.y = ( uDelta + uVerticalAlign * ( uTextureSize.y - coordinateSize.y - uGap ) + coordinatePosition.y - uGap * 0.5 ) / ( uTextureSize.y ) + 0.5;
 #if defined(IS_REQUIRED_TEXT_GRADIENT) || defined(IS_REQUIRED_TEXT_GRADIENT_OVERLAY)
+#ifdef TEXT_MARQUEE_PLANES
+  vTextGradientCoord = coordinatePosition / coordinateSize + vec2(0.5);
+#else
   vTextGradientCoord = aPosition + vec2(0.5);
+#endif
 #endif
 
   highp vec4 vertexPosition = vec4( ( aPosition + pivot ) * visualSize + visualOffset + origin * uSize.xy, 0.0, 1.0 );

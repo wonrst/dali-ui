@@ -25,11 +25,13 @@
 #include <dali/integration-api/constraint-integ.h>
 #include <dali/integration-api/debug.h>
 #include <dali/integration-api/pixel-data-integ.h>
+#include <dali/integration-api/renderer-integ.h>
 #include <dali/integration-api/string-utils.h>
 #include <dali/integration-api/texture-integ.h>
 #include <dali/integration-api/trace.h>
 #include <string.h>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -41,7 +43,12 @@
 #include <dali-ui-foundation/integration-api/visuals/visual-properties-integ.h>
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/color-glyph-helper.h>
+#include <dali-ui-foundation/internal/text/marquee/marquee-builder.h>
+#include <dali-ui-foundation/internal/text/marquee/marquee-paint.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-renderer-state.h>
+#include <dali-ui-foundation/internal/text/rendering/text-effect-overflow.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-coordinate.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-geometry.h>
 #include <dali-ui-foundation/internal/text/replacement/inline-replacement-reveal-bridge.h>
 #include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/styled-text/gradient-span-data.h>
@@ -56,6 +63,7 @@
 #include <dali-ui-foundation/internal/visuals/visual-base-data-impl.h>
 #include <dali-ui-foundation/internal/visuals/visual-base-impl.h>
 #include <dali-ui-foundation/internal/visuals/visual-string-constants.h>
+#include <dali-ui-foundation/public-api/views/text-controls/label.h>
 #include <dali-ui-foundation/public-api/views/view-impl.h>
 #include <dali-ui-foundation/public-api/visuals/visual-types.h>
 
@@ -74,7 +82,7 @@ namespace
 DALI_INIT_TRACE_FILTER(gTraceFilter, DALI_TRACE_TEXT_PERFORMANCE_MARKER, false);
 DALI_INIT_TRACE_FILTER(gTraceFilter2, DALI_TRACE_TEXT_ASYNC, false);
 
-const int CUSTOM_PROPERTY_COUNT(24); // uTextColorAnimatable, uHasMultipleTextColors, requireRender, gradient uniforms
+const int CUSTOM_PROPERTY_COUNT(25); // Text color, recolor source, requireRender and gradient uniforms
 
 static constexpr uint32_t TEXT_VISUAL_COLOR_CONSTRAINT_TAG(Dali::Ui::Integration::ConstraintTagRanges::UI_CONSTRAINT_TAG_START + 21);
 static constexpr uint32_t TEXT_VISUAL_OPACITY_CONSTRAINT_TAG(Dali::Ui::Integration::ConstraintTagRanges::UI_CONSTRAINT_TAG_START +
@@ -132,13 +140,14 @@ bool IsAsyncRenderRequest(Ui::Integration::Text::Async::RequestType requestType)
 
 bool HasCompleteTextRevealMetadata(const Text::AsyncTextRenderInfo& renderInfo, int maxTextureSize)
 {
-  if(!renderInfo.isTextRevealEnabled || !renderInfo.textPixelData || maxTextureSize <= 0)
+  const PixelData& fill = renderInfo.effectOverflow ? renderInfo.effectOverflow->fill : renderInfo.textPixelData;
+  if(!renderInfo.isTextRevealEnabled || !fill || maxTextureSize <= 0)
   {
     return false;
   }
 
-  const uint32_t metadataWidth  = renderInfo.textPixelData.GetWidth();
-  const uint32_t metadataHeight = renderInfo.textPixelData.GetHeight();
+  const uint32_t metadataWidth  = fill.GetWidth();
+  const uint32_t metadataHeight = fill.GetHeight();
   if(metadataWidth == 0u || metadataHeight == 0u)
   {
     return false;
@@ -223,6 +232,15 @@ const NameIndexMatch NAME_INDEX_MATCH_TABLE[] = {
 };
 const int NAME_INDEX_MATCH_TABLE_SIZE = sizeof(NAME_INDEX_MATCH_TABLE) / sizeof(NAME_INDEX_MATCH_TABLE[0]);
 
+// Match the packed premultiplied color used by Typesetter before coverage.
+Vector4 GetBakedTextColor(const Vector4& color)
+{
+  return Vector4(static_cast<uint8_t>(color.r * color.a * 255.0f) / 255.0f,
+                 static_cast<uint8_t>(color.g * color.a * 255.0f) / 255.0f,
+                 static_cast<uint8_t>(color.b * color.a * 255.0f) / 255.0f,
+                 static_cast<uint8_t>(color.a * 255.0f) / 255.0f);
+}
+
 void TextColorConstraint(Vector4& current, const PropertyInputContainer& inputs)
 {
   Vector4 color = inputs[0]->GetVector4();
@@ -252,6 +270,29 @@ void GradientOffsetConstraint(float& current, const PropertyInputContainer& inpu
 
 } // unnamed namespace
 
+struct TextVisual::EffectOverflowTextures
+{
+  TextureSet textures;
+  Shader     shader;
+  Vector2    rasterSize;
+  Vector4    composition;
+  Vector4    fillUv;
+  Vector4    underlayUv;
+  Vector4    overlayUv;
+  bool       multipleColors{false};
+  bool       colorGlyphMask{false};
+  bool       underlay{false};
+  bool       overlay{false};
+  bool       gradient{false};
+  bool       gradientMixed{false};
+  bool       gradientOverlay{false};
+  bool       emboss{false};
+  bool       marquee{false};
+  bool       horizontal{true};
+  bool       reveal{false};
+  Vector2    marqueeSupport;
+};
+
 TextVisualPtr TextVisual::New(VisualFactoryCache& factoryCache, TextVisualShaderFactory& shaderFactory,
                               const Property::Map& properties)
 {
@@ -273,6 +314,15 @@ void TextVisual::GetNaturalSize(Vector2& naturalSize)
 
 void TextVisual::DoCreatePropertyMap(Property::Map& map) const
 {
+  if(mEffectOverflowTransform)
+  {
+    // Base serialization reads the renderer transform. Paint bounds must not
+    // replace the layout transform exposed by this visual.
+    auto& transform   = mImpl->GetOrCreateTransform();
+    transform.mSize   = mEffectOverflowTransform->size;
+    transform.mOffset = mEffectOverflowTransform->offset;
+  }
+
   Property::Value value;
 
   map.Clear();
@@ -317,6 +367,7 @@ TextVisual::TextVisual(VisualFactoryCache& factoryCache, TextVisualShaderFactory
   mAsyncTextInterface(nullptr),
   mGradientData(),
   mRevealData(),
+  mEffectOverflowTransform(),
   mTextVisualShaderFactory(shaderFactory),
   mTextShaderFeatureCache(),
   mHasMultipleTextColorsIndex(Property::INVALID_INDEX),
@@ -332,6 +383,7 @@ TextVisual::TextVisual(VisualFactoryCache& factoryCache, TextVisualShaderFactory
   mTextLoadingMaximumLinesRevision(0u),
   mNaturalSizeMaximumLinesRevision(0u),
   mHeightForWidthMaximumLinesRevision(0u),
+  mEffectOverflowEnabled(false),
   mRendererUpdateNeeded(false),
   mApplyingFittingMode(false),
   mTextRequireRender(false),
@@ -478,6 +530,12 @@ void TextVisual::DoSetOnScene(Actor& actor)
 
 void TextVisual::RemoveRenderer(Actor& actor, bool removeDefaultRenderer)
 {
+  if(mEffectOverflowTransform)
+  {
+    Dali::Integration::SetRendererVisualGeometryCullingEnabled(mImpl->mRenderer, false);
+    mImpl->SetTransformUniforms(mImpl->mRenderer);
+    mEffectOverflowTransform.reset();
+  }
   if(auto* data = GetTextVisualRevealData(mRevealData))
   {
     RemoveRuntimeRevealBlur(data->runtimeBlur, actor);
@@ -651,6 +709,94 @@ PixelData TextVisual::RenderMarqueeTextGradientMask(Ui::Integration::Visual::Bas
   visualObject.mTypesetter->SetModel(visualObject.mController->GetRenderTextModel());
   visualObject.mTypesetter->SetFinalElisionResult(visualObject.mController->GetFinalElisionResult());
   return visualObject.mTypesetter->RenderTextGradientMask(size, textDirection, ignoreHorizontalAlignment, pixelFormat, originSize);
+}
+
+Text::TextScrollerGradient TextVisual::GetMarqueeGradient(Ui::Integration::Visual::Base visual, const Vector2& size,
+                                                          const Vector4& contentBounds, bool emboss)
+{
+  auto&                      textVisual = GetVisualObject(visual);
+  const auto*                data       = GetTextVisualGradientData(textVisual.mGradientData);
+  Text::TextScrollerGradient gradient;
+  if(!data) return gradient;
+  const auto resolve = [&](const Text::Internal::Gradient::Style& style, Text::GradientBoundsMode mode)
+  {
+    const bool    content        = mode == Text::GradientBoundsMode::CONTENT_BOUND;
+    const Vector2 coordinateSize = content ? size : GetGradientViewCoordinateSize(visual);
+    const Vector4 bounds         = content ? contentBounds : CalculateGradientViewBounds(visual, coordinateSize);
+    return Text::Internal::GradientMarquee::CreateScrollerGradient(style, bounds, coordinateSize, content);
+  };
+  if(!emboss && Text::Internal::GradientMarquee::IsRenderable(data->mTextGradientStyle, size))
+  {
+    gradient                          = resolve(data->mTextGradientStyle, data->mTextGradientBoundsMode);
+    gradient.startOffsetPropertyIndex = data->mGradientAnimOffsetIndex;
+    gradient.applyConstraintsAlways   = data->mGradientAnimApplyAlways;
+  }
+  if(Text::Internal::GradientMarquee::IsRenderable(data->mTextGradientOverlayStyle, size))
+  {
+    Text::Internal::GradientMarquee::SetOverlayGradient(gradient, resolve(data->mTextGradientOverlayStyle, data->mTextGradientOverlayBoundsMode), data->mTextGradientOverlayMode);
+    gradient.overlayStartOffsetPropertyIndex = data->mGradientOverlayAnimOffsetIndex;
+    gradient.overlayApplyConstraintsAlways   = data->mGradientOverlayAnimApplyAlways;
+  }
+  return gradient;
+}
+
+bool TextVisual::PrepareMarqueeText(Ui::Integration::Visual::Base visual, const Vector2& size, const Vector2& originSize,
+                                    bool horizontal, const Text::MarqueeStartAnchor& startAnchor,
+                                    Text::MarqueeTextureAnchor& textureAnchor, Text::TextScrollerGradient& gradient)
+{
+  auto&       textVisual = GetVisualObject(visual);
+  auto        controller = textVisual.mController;
+  const auto* model      = controller->GetRenderTextModel();
+  if(!textVisual.mEffectOverflowEnabled || model->IsCutoutEnabled() || model->IsBackgroundWithCutoutEnabled()) return false;
+  const int maximum = Dali::GetMaxTextureSize();
+  if(maximum <= 2 || size.x >= maximum || size.y >= maximum) return false;
+  const auto    features      = Text::MarqueeBuilder::CollectGradientFeatureInfo(*model, false);
+  const bool    emboss        = controller->IsEmbossEnabled();
+  const Vector4 contentBounds = Text::Internal::CalculateGradientContentBounds(size, model->GetLayoutSize(), model->GetLines(),
+                                                                               model->GetNumberOfLines(), controller->GetVerticalAlignment(), horizontal);
+  gradient                    = GetMarqueeGradient(visual, size, contentBounds, emboss);
+  textVisual.mTypesetter->SetModel(model);
+  textVisual.mTypesetter->SetFinalElisionResult(controller->GetFinalElisionResult());
+  Text::TextRasterResult source;
+  const bool             mixed = features.hasMultipleTextColors || features.containsColorGlyph;
+  if(!textVisual.mTypesetter->RenderRasterPlanes(size, controller->GetTextDirection(), mixed ? Pixel::RGBA8888 : Pixel::L8,
+                                                 maximum - 2, source,
+                                                 features.containsColorGlyph && !features.hasMultipleTextColors && !gradient.enabled && !emboss,
+                                                 nullptr, gradient.enabled && mixed, emboss && features.containsColorGlyph && !features.hasMultipleTextColors,
+                                                 horizontal, originSize) ||
+     !source.fill) return false;
+  textureAnchor = textVisual.mTypesetter->ResolveMarqueeTextureAnchor(startAnchor);
+  EffectOverflowTextures prepared;
+  if(!textVisual.PrepareEffectOverflowTextures(source, features.hasMultipleTextColors, gradient.enabled, gradient.overlayEnabled,
+                                               emboss, controller->GetEmbossDirection(), controller->GetEmbossStrength(), prepared, true, horizontal)) return false;
+  textVisual.PublishEffectOverflowTextures(prepared, size, contentBounds);
+  auto        renderer = textVisual.mImpl->mRenderer;
+  const auto& color    = model->GetDefaultColor();
+  renderer.RegisterProperty("uTextColorBaked", GetBakedTextColor(color));
+  if(textVisual.mAnimatableTextColorPropertyIndex == Property::INVALID_INDEX)
+  {
+    renderer.RegisterProperty("uTextColorAnimatable", Vector4(color.r * color.a, color.g * color.a, color.b * color.a, color.a));
+  }
+  if(emboss)
+  {
+    renderer.RegisterProperty("uEmbossSize", Vector2(1.f / std::trunc(size.x), 1.f / std::trunc(size.y)));
+    renderer.RegisterProperty("uEmbossDirection", controller->GetEmbossDirection());
+    renderer.RegisterProperty("uEmbossStrength", controller->GetEmbossStrength());
+    renderer.RegisterProperty("uEmbossLightColor", controller->GetEmbossLightColor());
+    renderer.RegisterProperty("uEmbossShadowColor", controller->GetEmbossShadowColor());
+  }
+  return true;
+}
+
+void TextVisual::SetEffectOverflowEnabled(Ui::Integration::Visual::Base visual, bool enabled)
+{
+  auto& textVisual = GetVisualObject(visual);
+  if(textVisual.mEffectOverflowEnabled != enabled)
+  {
+    CancelAsyncRender(visual);
+    textVisual.mEffectOverflowEnabled = enabled;
+    textVisual.mRendererUpdateNeeded  = true;
+  }
 }
 
 void TextVisual::OnSetTransform()
@@ -1131,6 +1277,7 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
   }
   Text::AsyncTextParameters parameters          = textInformation.parameters;
   const auto                publicationRevision = mController->GetRenderRevision();
+  const auto                publicationTaskId   = mTextLoadingTaskId;
 
 #ifdef TRACE_ENABLED
   if(gTraceFilter2 && gTraceFilter2->IsTraceEnabled())
@@ -1189,6 +1336,16 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
     // no longer allowed to replace that path's renderer.
     mIsTextLoadingTaskRunning = false;
     return;
+  }
+  if(isRenderRequest && parameters.isEffectOverflowRequested)
+  {
+    Ui::View owner = Ui::View::DownCast(mControl.GetHandle());
+    if(owner && GetImpl(owner).GetEffectiveScale() != parameters.decorationUiScale)
+    {
+      // UI scale can invalidate layout before OnMeasure reaches Controller.
+      mIsTextLoadingTaskRunning = false;
+      return;
+    }
   }
   auto* revealData = GetTextVisualRevealData(mRevealData);
   if(isRenderRequest && parameters.textRevealRevision != (revealData ? revealData->revision : 0u))
@@ -1255,6 +1412,32 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       // Nothing to do.
       ResourceReady(Ui::Visual::ResourceStatus::READY);
       return;
+    }
+
+    EffectOverflowTextures preparedOverflow;
+    const bool             independentPlanes = static_cast<bool>(renderInfo.effectOverflow);
+    if(independentPlanes)
+    {
+      const bool metadataComplete = !renderInfo.isTextRevealEnabled || HasCompleteTextRevealMetadata(renderInfo, Dali::GetMaxTextureSize());
+      const bool prepared         = metadataComplete && PrepareEffectOverflowTextures(*renderInfo.effectOverflow, renderInfo.hasMultipleTextColors,
+                                                                                      parameters.isTextGradientRequested && !renderInfo.isEmbossEnabled, parameters.isTextGradientOverlayRequested,
+                                                                                      renderInfo.isEmbossEnabled, parameters.embossDirection,
+                                                                                      parameters.embossStrength * std::max(1.f, parameters.renderScale), preparedOverflow,
+                                                                                      parameters.isMarqueeEnabled, parameters.marqueeOrientation == Text::MarqueeOrientation::HORIZONTAL,
+                                                                              renderInfo.isTextRevealEnabled ? renderInfo.revealMetadataTiles.front() : PixelData());
+      if(mTextLoadingTaskId != publicationTaskId || mController->GetRenderRevision() != publicationRevision ||
+         !mController->IsAsyncRendering() || mControl.GetHandle() != control)
+      {
+        return;
+      }
+      if(!prepared)
+      {
+        // No legacy pixels accompany a successful worker result. A resource
+        // failure must clear the advanced quad rather than publish partial data.
+        RemoveRenderer(control, true);
+        ResourceReady(Ui::Visual::ResourceStatus::FAILED);
+        return;
+      }
     }
 
     // Calculate the size of the visual that can fit the text.
@@ -1359,7 +1542,7 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
                                          renderInfo.isOverlayStyle, renderInfo.isEmbossEnabled, isHeightTiling,
                                          isMarqueeEnabled, isCutoutEnabled);
     const bool textGradientMixedPixelDataAvailable =
-      renderInfo.textGradientPreservedPixelData && renderInfo.textGradientMaskPixelData;
+      (renderInfo.textGradientPreservedPixelData && renderInfo.textGradientMaskPixelData) || preparedOverflow.gradientMixed;
     const bool textGradientMixedCompositionEnabled =
       IsTextGradientMixedCompositionSupported(renderInfo.size, renderInfo.hasMultipleTextColors,
                                               renderInfo.containsColorGlyph, textGradientStyleBlocksComposition,
@@ -1376,6 +1559,7 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED &&
       HasCompleteTextRevealMetadata(renderInfo, maxTextureSize) &&
       !isMarqueeEnabled && !isCutoutEnabled;
+    if(!parameters.isMarqueeEnabled) renderInfo.effectOverflow.reset();
     if(revealData)
     {
       revealData->fadeDuration = textRevealEnabled ? renderInfo.textRevealFadeDuration : 0.0f;
@@ -1392,14 +1576,25 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
       .EnableTextReveal(textRevealEnabled);
 
-    Shader shader = GetTextShader(mFactoryCache, featureBuilder);
-    mImpl->mRenderer.SetShader(shader);
+    Shader shader;
+    if(!independentPlanes)
+    {
+      shader = GetTextShader(mFactoryCache, featureBuilder);
+    }
 
-    // Remove the texture set and any renderer previously set.
+    // Retire borrowed capture state before installing this publication's shader.
     RemoveRenderer(control, false);
+    if(shader)
+    {
+      mImpl->mRenderer.SetShader(shader);
+    }
 
     // No tiling required. Use the default renderer.
-    if(renderInfo.size.height <= static_cast<float>(maxTextureSize))
+    if(independentPlanes)
+    {
+      mRendererList.push_back(mImpl->mRenderer);
+    }
+    else if(renderInfo.size.height <= static_cast<float>(maxTextureSize))
     {
       // Filter mode needs to be set to linear to produce better quality while scaling.
       Sampler sampler = Sampler::New();
@@ -1588,8 +1783,23 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       VisualRenderer renderer = (*iter);
       if(renderer)
       {
+        if(renderInfo.containsColorGlyph && !renderInfo.hasMultipleTextColors && !renderInfo.isEmbossEnabled &&
+           !textGradientCompositionEnabled && !textGradientMixedCompositionEnabled)
+        {
+          renderer.RegisterProperty("uTextColorBaked", GetBakedTextColor(defaultColor));
+          if(mAnimatableTextColorPropertyIndex == Property::INVALID_INDEX)
+          {
+            renderer.RegisterProperty("uTextColorAnimatable", Vector4(defaultColor.r * defaultColor.a,
+                                                                      defaultColor.g * defaultColor.a,
+                                                                      defaultColor.b * defaultColor.a, defaultColor.a));
+          }
+        }
         // Register transform properties
         mImpl->SetTransformUniforms(renderer);
+        if(independentPlanes)
+        {
+          PublishEffectOverflowTextures(preparedOverflow, renderInfo.size, renderInfo.textLogicalBounds);
+        }
 
         control.AddRenderer(renderer);
 
@@ -1597,7 +1807,11 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
         {
           float          sizeX             = std::max(layoutSize.x, Math::MACHINE_EPSILON_100);
           float          sizeY             = std::max(std::min((float)maxTextureSize, layoutSize.y), Math::MACHINE_EPSILON_100);
-          const Vector2& embossSize        = Vector2(1.0f / sizeX, 1.0f / sizeY);
+          const Vector2& embossSize        = preparedOverflow.marquee                        ? Vector2(std::max(1.f, parameters.renderScale) / std::trunc(preparedOverflow.rasterSize.x),
+                                                                                                       std::max(1.f, parameters.renderScale) / std::trunc(preparedOverflow.rasterSize.y))
+                                             : independentPlanes && !preparedOverflow.reveal ? Vector2(std::max(1.f, parameters.renderScale) / preparedOverflow.textures.GetTexture(0).GetWidth(),
+                                                                                                       std::max(1.f, parameters.renderScale) / preparedOverflow.textures.GetTexture(0).GetHeight())
+                                                                                             : Vector2(1.0f / sizeX, 1.0f / sizeY);
           const Vector2& embossDirection   = parameters.embossDirection;
           const float    embossStrength    = parameters.embossStrength;
           const Vector4& embossLightColor  = parameters.embossLightColor;
@@ -1679,7 +1893,8 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
     // Allocation/attachment above can invoke application code. Do not deliver
     // the old result's image timings or completion after a newer publication.
     const auto* publishedReveal = GetTextVisualRevealData(mRevealData);
-    if(!Dali::Adaptor::IsAvailable() || mController->GetRenderRevision() != publicationRevision ||
+    if(!Dali::Adaptor::IsAvailable() || mTextLoadingTaskId != publicationTaskId ||
+       mController->GetRenderRevision() != publicationRevision ||
        parameters.textRevealRevision != (publishedReveal ? publishedReveal->revision : 0u) ||
        !mController->IsAsyncRendering() || mControl.GetHandle() != control)
     {
@@ -1720,6 +1935,13 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       }
     }
 
+    // This publication is complete. A resize in the completion callback must
+    // not invalidate it as a pending manual render. Preserve any newer task
+    // submitted by the fitting/replacement callbacks above.
+    if(mTextLoadingTaskId == publicationTaskId)
+    {
+      mTextLoadingTaskId = 0u;
+    }
     if(mAsyncTextInterface)
     {
       mAsyncTextInterface->AsyncRenderFinished(std::move(renderInfo));
@@ -1736,6 +1958,11 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
   }
   else
   {
+    if(parameters.isEffectOverflowRequested)
+    {
+      Actor control = mControl.GetHandle();
+      RemoveRenderer(control, true);
+    }
     resourceStatus = Ui::Visual::ResourceStatus::FAILED;
   }
 
@@ -2497,14 +2724,23 @@ void TextVisual::RequestAsyncSizeComputationOwned(Text::AsyncTextParameters&& pa
   StoreAsyncSizeTaskId(requestType, taskId);
 }
 
-void TextVisual::CancelAsyncRender(Ui::Integration::Visual::Base visual)
+bool TextVisual::CancelAsyncRender(Ui::Integration::Visual::Base visual, bool effectOverflowOnly)
 {
   TextVisual& visualObject = GetVisualObject(visual);
+  if(effectOverflowOnly && !visualObject.mEffectOverflowEnabled && !visualObject.mEffectOverflowTransform)
+  {
+    return false;
+  }
+  // Also invalidate a completion currently preparing GPU resources. The task
+  // may already have left the manager's running map before application reentry.
+  const auto taskId               = visualObject.mTextLoadingTaskId;
+  visualObject.mTextLoadingTaskId = 0u;
   if(visualObject.mIsTextLoadingTaskRunning)
   {
-    Text::AsyncTextManager::Get().RequestCancel(visualObject.mTextLoadingTaskId);
+    Text::AsyncTextManager::Get().RequestCancel(taskId);
     visualObject.mIsTextLoadingTaskRunning = false;
   }
+  return taskId != 0u;
 }
 
 bool TextVisual::PrepareAsyncRendererRequest(Actor& control, Text::AsyncTextParameters& parameters)
@@ -2522,6 +2758,8 @@ bool TextVisual::PrepareAsyncRendererRequest(Actor& control, Text::AsyncTextPara
       Text::AsyncTextManager::Get().RequestCancel(mTextLoadingTaskId);
       mIsTextLoadingTaskRunning = false;
     }
+
+    mTextLoadingTaskId = 0u;
 
     // Remove the texture set and any renderer previously set.
     RemoveRenderer(control, true);
@@ -2581,8 +2819,14 @@ bool TextVisual::PrepareAsyncRendererRequest(Actor& control, Text::AsyncTextPara
   }
 #endif
 
-  mIsTextLoadingTaskRunning        = true;
-  mTextLoadingMaximumLinesRevision = parameters.maximumNumberOfLinesRevision;
+  parameters.isEffectOverflowRequested = mEffectOverflowEnabled;
+  // The worker needs foreground eligibility, not the GPU-only brush. Resolve
+  // it from the effective style at request time, including degenerate brushes.
+  const auto* gradientData                  = GetTextVisualGradientData(mGradientData);
+  parameters.isTextGradientRequested        = gradientData && Text::Internal::Gradient::IsRenderable(gradientData->mTextGradientStyle);
+  parameters.isTextGradientOverlayRequested = gradientData && Text::Internal::Gradient::IsRenderable(gradientData->mTextGradientOverlayStyle);
+  mIsTextLoadingTaskRunning                 = true;
+  mTextLoadingMaximumLinesRevision          = parameters.maximumNumberOfLinesRevision;
 
   return true;
 }
@@ -2879,8 +3123,17 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
     .EnableTextReveal(textRevealEnabled);
 
-  Shader shader = GetTextShader(mFactoryCache, featureBuilder);
-  mImpl->mRenderer.SetShader(shader);
+  EffectOverflowTextures preparedOverflow;
+  const bool             independentPlanes = mEffectOverflowEnabled &&
+                                 CreateEffectOverflowTextures(size, hasMultipleTextColors, containsColorGlyph,
+                                                              textGradientCompositionEnabled || textGradientMixedCompositionEnabled,
+                                                              textGradientOverlayCompositionEnabled, preparedOverflow);
+  Shader shader;
+  if(!independentPlanes)
+  {
+    shader = GetTextShader(mFactoryCache, featureBuilder);
+    mImpl->mRenderer.SetShader(shader);
+  }
 
   DALI_TRACE_SCOPE(gTraceFilter, "DALI_TEXT_VISUAL_UPDATE_RENDERER");
 
@@ -2890,7 +3143,11 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
   }
 
   // No tiling required. Use the default renderer.
-  if(size.height < maxTextureSize)
+  if(independentPlanes)
+  {
+    mRendererList.push_back(mImpl->mRenderer);
+  }
+  else if(size.height < maxTextureSize)
   {
     TextureSet textureSet = GetTextTexture(size);
 
@@ -2936,9 +3193,12 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     Vector<Text::ReplacementRevealTiming> replacementTimings;
     uint64_t                              replacementSourceRevision = 0u;
 
-    // Create a texture for the text without any styles
+    PixelData  recolorMask;
+    const bool recolor = containsColorGlyph && !hasMultipleTextColors && !embossEnabled;
+    // Generate the recolor coefficient alongside the fill, before tiling either plane.
     PixelData data =
-      mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_NO_STYLES, false, textPixelFormat);
+      mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_NO_STYLES, false, textPixelFormat,
+                          Size::ZERO, recolor ? &recolorMask : nullptr);
 
     if(textRevealEnabled)
     {
@@ -2971,7 +3231,7 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     if(mTextShaderFeatureCache.IsEnabledEmoji() && !mTextShaderFeatureCache.IsEnabledMultiColor())
     {
       // Create a L8 texture as a mask to avoid color glyphs (e.g. emojis) to be affected by text color animation
-      info.maskPixelData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_MASK, false, Pixel::L8);
+      info.maskPixelData = recolor ? recolorMask : mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_MASK, false, Pixel::L8);
     }
 
     // Get the current offset for recalculate the offset when tiling.
@@ -3046,8 +3306,24 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     VisualRenderer renderer = (*iter);
     if(renderer)
     {
+      if(containsColorGlyph && !hasMultipleTextColors && !embossEnabled &&
+         !textGradientCompositionEnabled && !textGradientMixedCompositionEnabled)
+      {
+        renderer.RegisterProperty("uTextColorBaked", GetBakedTextColor(defaultColor));
+        if(mAnimatableTextColorPropertyIndex == Property::INVALID_INDEX)
+        {
+          renderer.RegisterProperty("uTextColorAnimatable", Vector4(defaultColor.r * defaultColor.a,
+                                                                    defaultColor.g * defaultColor.a,
+                                                                    defaultColor.b * defaultColor.a, defaultColor.a));
+        }
+      }
       // Register transform properties
       mImpl->SetTransformUniforms(renderer);
+      if(independentPlanes)
+      {
+        PublishEffectOverflowTextures(preparedOverflow, size,
+                                      (preparedOverflow.gradient || preparedOverflow.gradientOverlay) ? CalculateGradientContentBounds(size) : Vector4::ZERO);
+      }
 
       // Note, AddRenderer will ignore renderer if it is already added.
       actor.AddRenderer(renderer);
@@ -3056,7 +3332,8 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
       {
         float          sizeX             = std::max(size.x, Math::MACHINE_EPSILON_100);
         float          sizeY             = std::max(std::min((float)maxTextureSize, size.y), Math::MACHINE_EPSILON_100);
-        const Vector2& embossSize        = Vector2(1.0f / sizeX, 1.0f / sizeY);
+        const Vector2& embossSize        = independentPlanes && !preparedOverflow.reveal ? Vector2(1.f / preparedOverflow.textures.GetTexture(0).GetWidth(), 1.f / preparedOverflow.textures.GetTexture(0).GetHeight())
+                                                                                         : Vector2(1.0f / sizeX, 1.0f / sizeY);
         const Vector2& embossDirection   = mController->GetEmbossDirection();
         const float    embossStrength    = mController->GetEmbossStrength();
         const Vector4& embossLightColor  = mController->GetEmbossLightColor();
@@ -3575,9 +3852,405 @@ void TextVisual::RefreshRevealBlurImages(Ui::Integration::Visual::Base visual)
   }
 }
 
+bool TextVisual::CreateEffectOverflowTextures(const Vector2& size, bool multipleColors, bool colorGlyphs, bool gradient, bool gradientOverlay,
+                                              EffectOverflowTextures& prepared)
+{
+  const int   maxTextureSize = Dali::GetMaxTextureSize();
+  const auto* model          = mController->GetRenderTextModel();
+  const auto* reveal         = GetTextVisualRevealData(mRevealData);
+  if(reveal && reveal->unit != Text::Internal::Reveal::Unit::DISABLED &&
+     !mController->IsMarqueeEnabled() && !mController->IsTextCutout())
+  {
+    // Reveal owns a bounded source domain shared by foreground, metadata and
+    // its optional blur atlas. Static overflow's tight planes change that domain.
+    Text::TextRasterResult result;
+    const bool             emboss = mController->IsEmbossEnabled();
+    if(!mTypesetter->RenderRevealPlanes(size, mController->GetTextDirection(),
+                                        (multipleColors || colorGlyphs) ? Pixel::RGBA8888 : Pixel::L8,
+                                        maxTextureSize > 0 ? static_cast<uint32_t>(maxTextureSize) : 0u, result,
+                                        colorGlyphs && !multipleColors && !gradient && !emboss,
+                                        gradient && (multipleColors || colorGlyphs), emboss && colorGlyphs && !multipleColors)) return false;
+    Vector<Text::ReplacementRevealTiming> timings;
+    uint64_t                              sourceRevision = 0u;
+    auto                                  plan           = BuildFinalTextRevealPlan(timings, sourceRevision);
+    auto                                  metadata       = mTypesetter->RenderTextRevealMetadata(size, mController->GetTextDirection(), plan,
+                                                                                                 GetTextVisualRevealData(mRevealData)->fadeDuration);
+    if(!metadata || !PrepareEffectOverflowTextures(result, multipleColors, gradient, gradientOverlay, emboss,
+                                                   mController->GetEmbossDirection(), mController->GetEmbossStrength(), prepared,
+                                                   false, true, metadata)) return false;
+    PublishReplacementRevealTimings(timings, sourceRevision);
+    return true;
+  }
+  if(!Text::IsEffectOverflowSupported(*model, size, maxTextureSize,
+                                      mController->IsMarqueeEnabled(),
+                                      reveal && reveal->unit != Text::Internal::Reveal::Unit::DISABLED))
+  {
+    return false;
+  }
+
+  Text::TextRasterResult result;
+  const Pixel::Format    fillFormat     = (multipleColors || colorGlyphs) ? Pixel::RGBA8888 : Pixel::L8;
+  const Vector4          sourceViewport = GetSourceViewport(size);
+  if(!mTypesetter->RenderRasterPlanes(size, mController->GetTextDirection(), fillFormat,
+                                      static_cast<uint32_t>(maxTextureSize - 2), result, colorGlyphs && !multipleColors && !gradient && !mController->IsEmbossEnabled(), &sourceViewport, gradient && (multipleColors || colorGlyphs),
+                                      mController->IsEmbossEnabled() && colorGlyphs && !multipleColors) ||
+     !result.fill)
+  {
+    return false;
+  }
+
+  return PrepareEffectOverflowTextures(result, multipleColors, gradient, gradientOverlay, mController->IsEmbossEnabled(),
+                                       mController->GetEmbossDirection(), mController->GetEmbossStrength(), prepared);
+}
+
+bool TextVisual::PrepareEffectOverflowTextures(const Text::TextRasterResult& source, bool multipleColors, bool gradient, bool gradientOverlay, bool emboss, const Vector2& embossDirection, float embossStrength, EffectOverflowTextures& prepared, bool marquee, bool horizontal, const PixelData& revealMetadata)
+{
+  const int maxTextureSize = Dali::GetMaxTextureSize();
+  prepared.marquee         = marquee;
+  prepared.horizontal      = horizontal;
+  prepared.reveal          = static_cast<bool>(revealMetadata);
+  if(prepared.reveal &&
+     (marquee || !source.fill || revealMetadata.GetPixelFormat() != Pixel::RGBA8888 ||
+      revealMetadata.GetWidth() != source.fill.GetWidth() || revealMetadata.GetHeight() != source.fill.GetHeight())) return false;
+  if(marquee && !Text::ResolveMarqueePaintSupport(source.geometry.composition, source.geometry.fill, source.legacyRasterSize,
+                                                  horizontal, emboss, embossDirection, embossStrength, prepared.marqueeSupport)) return false;
+  if(source.colorGlyphMask &&
+     (multipleColors || !source.fill || source.fill.GetPixelFormat() != Pixel::RGBA8888 ||
+      source.colorGlyphMask.GetPixelFormat() != Pixel::L8 ||
+      source.colorGlyphMask.GetWidth() != source.fill.GetWidth() || source.colorGlyphMask.GetHeight() != source.fill.GetHeight()))
+  {
+    return false;
+  }
+  if(source.textGradientMask &&
+     (!gradient || source.colorGlyphMask || !source.fill || source.fill.GetPixelFormat() != Pixel::RGBA8888 ||
+      source.textGradientMask.GetPixelFormat() != Pixel::L8 ||
+      source.textGradientMask.GetWidth() != source.fill.GetWidth() || source.textGradientMask.GetHeight() != source.fill.GetHeight()))
+  {
+    return false;
+  }
+  if(source.embossMask &&
+     (!emboss || multipleColors || source.colorGlyphMask || source.textGradientMask || !source.fill ||
+      source.fill.GetPixelFormat() != Pixel::RGBA8888 || source.embossMask.GetPixelFormat() != Pixel::L8 ||
+      source.embossMask.GetWidth() != source.fill.GetWidth() || source.embossMask.GetHeight() != source.fill.GetHeight()))
+  {
+    return false;
+  }
+  const auto* gradientData = GetTextVisualGradientData(mGradientData);
+  if((gradient || gradientOverlay) && !gradientData) return false;
+  // Only these local handles are replaced by gutter storage; the request's
+  // semantic planes and bounds stay immutable through completion.
+  auto result = source;
+  // Cover the filtering footprint as well as semantic paint. A tight quad
+  // clips bilinear edge samples when the scene is scaled or positioned fractionally.
+  if(emboss && !prepared.reveal && !result.geometry.fill.Empty())
+  {
+    // Emboss samples the foreground at +/- one authored pixel displacement.
+    // Only composition support expands; source planes and layout stay unchanged.
+    const double length = std::hypot(static_cast<double>(embossDirection.x), static_cast<double>(embossDirection.y));
+    if(!std::isfinite(length) || length == 0.0 || !std::isfinite(embossStrength) || embossStrength < 0.f) return false;
+    const double dx = std::ceil(std::abs(embossDirection.x / length * embossStrength));
+    const double dy = std::ceil(std::abs(embossDirection.y / length * embossStrength));
+    if(dx > maxTextureSize || dy > maxTextureSize) return false;
+    const auto&                     fill = result.geometry.fill;
+    Text::Raster::BoundsAccumulator paint;
+    paint.Include(result.geometry.composition);
+    paint.Include(static_cast<int64_t>(fill.left) - static_cast<int64_t>(dx), static_cast<int64_t>(fill.top) - static_cast<int64_t>(dy),
+                  static_cast<int64_t>(fill.right) + static_cast<int64_t>(dx), static_cast<int64_t>(fill.bottom) + static_cast<int64_t>(dy));
+    if(!paint.valid) return false;
+    result.geometry.composition = paint.bounds;
+  }
+  const auto&                     paintBounds = result.geometry.composition;
+  Text::Raster::BoundsAccumulator compositionStorage;
+  const int                       gutter = prepared.reveal ? 0 : 1;
+  compositionStorage.Include(static_cast<int64_t>(paintBounds.left) - gutter, static_cast<int64_t>(paintBounds.top) - gutter,
+                             static_cast<int64_t>(paintBounds.right) + gutter, static_cast<int64_t>(paintBounds.bottom) + gutter);
+  if(!compositionStorage.valid)
+  {
+    return false;
+  }
+  const auto&  bounds  = compositionStorage.bounds;
+  const double width   = static_cast<int64_t>(bounds.right) - bounds.left;
+  const double height  = static_cast<int64_t>(bounds.bottom) - bounds.top;
+  prepared.composition = Vector4(bounds.left, bounds.top, width, height);
+
+  // CPU semantic bounds remain unchanged. Storage bounds include exactly one
+  // transparent texel on each side for non-mipmapped bilinear sampling.
+  const auto prepare = [&](PixelData& pixels, const Text::Raster::Bounds& paint, Vector4& uv)
+  {
+    if(!pixels)
+    {
+      return paint.Empty();
+    }
+    if(prepared.reveal)
+    {
+      // Bounded Reveal keeps its established filtering, metadata and blur
+      // coordinates. No gutter copy or expanded visual transform is needed.
+      uv = Vector4(1.f, 1.f, 0.f, 0.f);
+      return paint.left == 0 && paint.top == 0 && paint.right == bounds.right && paint.bottom == bounds.bottom &&
+             pixels.GetWidth() == static_cast<uint32_t>(paint.right) && pixels.GetHeight() == static_cast<uint32_t>(paint.bottom) &&
+             paint.right < maxTextureSize && paint.bottom < maxTextureSize;
+    }
+    Text::Raster::BoundsAccumulator storage;
+    storage.Include(static_cast<int64_t>(paint.left) - 1, static_cast<int64_t>(paint.top) - 1,
+                    static_cast<int64_t>(paint.right) + 1, static_cast<int64_t>(paint.bottom) + 1);
+    const uint64_t w   = static_cast<uint64_t>(pixels.GetWidth()) + 2u;
+    const uint64_t h   = static_cast<uint64_t>(pixels.GetHeight()) + 2u;
+    const uint32_t bpp = Pixel::GetBytesPerPixel(pixels.GetPixelFormat());
+    if(!storage.valid || w > static_cast<uint32_t>(maxTextureSize) || h > static_cast<uint32_t>(maxTextureSize) ||
+       !Text::Raster::BufferFits(static_cast<uint32_t>(w), static_cast<uint32_t>(h), bpp))
+    {
+      return false;
+    }
+    const auto source = Dali::Integration::GetPixelDataBuffer(pixels);
+    auto       padded = PixelBuffer::New(static_cast<uint32_t>(w), static_cast<uint32_t>(h), pixels.GetPixelFormat());
+    if(!source.buffer || !padded || !padded.GetBuffer())
+    {
+      return false;
+    }
+    const size_t rowBytes     = static_cast<size_t>(pixels.GetWidth()) * bpp;
+    const size_t sourceStride = source.strideBytes ? source.strideBytes : rowBytes;
+    memset(padded.GetBuffer(), 0, padded.GetBufferSize());
+    for(uint32_t y = 0; y < pixels.GetHeight(); ++y)
+    {
+      memcpy(padded.GetBuffer() + (static_cast<size_t>(y) + 1u) * padded.GetStrideBytes() + bpp,
+             source.buffer + static_cast<size_t>(y) * sourceStride, rowBytes);
+    }
+    uv     = Vector4(width / w, height / h,
+                     (static_cast<int64_t>(bounds.left) - storage.bounds.left) / static_cast<double>(w),
+                     (static_cast<int64_t>(bounds.top) - storage.bounds.top) / static_cast<double>(h));
+    pixels = PixelBuffer::Convert(padded);
+    return true;
+  };
+
+  Vector4 fillUv, underlayUv, overlayUv, maskUv;
+  if(!prepare(result.fill, result.geometry.fill, fillUv) ||
+     !prepare(result.underlay, result.geometry.underlay, underlayUv) ||
+     !prepare(result.overlay, result.geometry.overlay, overlayUv) ||
+     (result.colorGlyphMask && !prepare(result.colorGlyphMask, result.geometry.fill, maskUv)) ||
+     (result.textGradientMask && !prepare(result.textGradientMask, result.geometry.fill, maskUv)) ||
+     (result.embossMask && !prepare(result.embossMask, result.geometry.fill, maskUv)))
+  {
+    return false;
+  }
+
+  Sampler sampler = Sampler::New();
+  sampler.SetFilterMode(FilterMode::LINEAR, FilterMode::LINEAR);
+  sampler.SetWrapMode(WrapMode::CLAMP_TO_EDGE, WrapMode::CLAMP_TO_EDGE);
+  TextureSet textures = TextureSet::New();
+  unsigned   index    = 0u;
+  const auto upload   = [&](PixelData pixels)
+  {
+    if(!pixels) return true;
+    auto texture = Texture::New(TextureType::TEXTURE_2D, pixels.GetPixelFormat(), pixels.GetWidth(), pixels.GetHeight());
+    if(!texture || !texture.Upload(pixels)) return false;
+    textures.SetTexture(index, texture);
+    textures.SetSampler(index++, sampler);
+    return true;
+  };
+  if(!upload(result.fill) || !upload(result.textGradientMask)) return false;
+  if(gradient) Text::Internal::Gradient::AddLookupTexture(textures, index, gradientData->mTextGradientStyle);
+  if(gradientOverlay) Text::Internal::Gradient::AddLookupTexture(textures, index, gradientData->mTextGradientOverlayStyle);
+  if(!upload(result.underlay) || !upload(result.overlay) || !upload(result.colorGlyphMask) || !upload(result.embossMask)) return false;
+
+  if(prepared.reveal)
+  {
+    Sampler nearest = Sampler::New();
+    nearest.SetFilterMode(FilterMode::NEAREST, FilterMode::NEAREST);
+    if(!upload(revealMetadata)) return false;
+    textures.SetSampler(index - 1u, nearest);
+  }
+
+  prepared.emboss          = emboss;
+  prepared.gradient        = gradient;
+  prepared.gradientMixed   = static_cast<bool>(result.textGradientMask);
+  prepared.gradientOverlay = gradientOverlay;
+  prepared.multipleColors  = multipleColors;
+  prepared.colorGlyphMask  = static_cast<bool>(result.colorGlyphMask || result.embossMask);
+  prepared.underlay        = static_cast<bool>(result.underlay);
+  prepared.overlay         = static_cast<bool>(result.overlay);
+  if(prepared.reveal)
+  {
+    const auto features = TextVisualShaderFeature::FeatureBuilder()
+                            .EnableMultiColor(prepared.multipleColors)
+                            .EnableEmoji(prepared.colorGlyphMask || (prepared.gradientMixed && !prepared.multipleColors))
+                            .EnableEmboss(emboss)
+                            .EnableStyle(prepared.underlay)
+                            .EnableOverlay(prepared.overlay)
+                            .EnableTextGradient(gradient && !prepared.gradientMixed)
+                            .EnableTextGradientMixed(prepared.gradientMixed)
+                            .EnableTextGradientOverlay(gradientOverlay)
+                            .EnableTextReveal(true);
+    prepared.shader = mTextVisualShaderFactory.GetShader(mFactoryCache, features);
+  }
+  else
+  {
+    prepared.shader = mTextVisualShaderFactory.GetIndependentPlanesShader(mFactoryCache, prepared.multipleColors, prepared.colorGlyphMask,
+                                                                          prepared.underlay, prepared.overlay, prepared.gradient, prepared.gradientMixed, prepared.gradientOverlay, prepared.emboss, marquee, horizontal);
+  }
+  prepared.textures   = textures;
+  prepared.rasterSize = result.legacyRasterSize;
+  if(marquee)
+  {
+    const Vector2 raster(std::trunc(prepared.rasterSize.x), std::trunc(prepared.rasterSize.y));
+    const auto    sourceUv = [&](Vector4& uv)
+    {
+      uv.z -= uv.x * prepared.composition.x / prepared.composition.z;
+      uv.w -= uv.y * prepared.composition.y / prepared.composition.w;
+      uv.x *= raster.x / prepared.composition.z;
+      uv.y *= raster.y / prepared.composition.w;
+    };
+    sourceUv(fillUv);
+    sourceUv(underlayUv);
+    sourceUv(overlayUv);
+  }
+  prepared.fillUv     = fillUv;
+  prepared.underlayUv = underlayUv;
+  prepared.overlayUv  = overlayUv;
+  return true;
+}
+
+void TextVisual::PublishEffectOverflowTextures(EffectOverflowTextures& prepared, const Vector2& coordinateSize, const Vector4& contentBounds)
+{
+  // Mixed gradient uses target coverage instead of a recolor mask, but keeps
+  // its native foreground classification for animation bindings.
+  mTextShaderFeatureCache = TextVisualShaderFeature::FeatureBuilder()
+                              .EnableMultiColor(prepared.multipleColors)
+                              .EnableEmoji(prepared.colorGlyphMask || (prepared.gradientMixed && !prepared.multipleColors))
+                              .EnableEmboss(prepared.emboss)
+                              .EnableStyle(prepared.underlay)
+                              .EnableOverlay(prepared.overlay)
+                              .EnableTextGradient(prepared.gradient && !prepared.gradientMixed)
+                              .EnableTextGradientMixed(prepared.gradientMixed)
+                              .EnableTextGradientOverlay(prepared.gradientOverlay)
+                              .EnableTextReveal(prepared.reveal);
+  auto renderer = mImpl->mRenderer;
+  renderer.SetShader(prepared.shader);
+  renderer.SetTextures(prepared.textures);
+  renderer.SetProperty(mHasMultipleTextColorsIndex, static_cast<float>(prepared.multipleColors));
+  renderer.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
+  if(!prepared.reveal)
+  {
+    renderer.RegisterProperty("uFillUvTransform", prepared.fillUv);
+    if(prepared.underlay) renderer.RegisterProperty("uUnderlayUvTransform", prepared.underlayUv);
+    if(prepared.overlay) renderer.RegisterProperty("uOverlayUvTransform", prepared.overlayUv);
+  }
+  if(!prepared.marquee && (prepared.gradient || prepared.gradientOverlay || prepared.emboss))
+  {
+    // Restore original text UV independently of every plane's storage origin.
+    const auto&   bounds = prepared.composition;
+    const Vector2 rasterSize(std::trunc(prepared.rasterSize.x), std::trunc(prepared.rasterSize.y));
+    if(!prepared.reveal)
+    {
+      renderer.RegisterProperty("uTextCoordTransform", Vector4(bounds.z / rasterSize.x, bounds.w / rasterSize.y,
+                                                               bounds.x / rasterSize.x, bounds.y / rasterSize.y));
+    }
+    if(prepared.gradient) ApplyTextGradientUniforms(renderer, coordinateSize, ResolveTextGradientBounds(coordinateSize, contentBounds));
+    if(prepared.gradientOverlay) ApplyTextGradientOverlayUniforms(renderer, coordinateSize, ResolveTextGradientOverlayBounds(coordinateSize, contentBounds));
+  }
+  if(prepared.reveal)
+  {
+    BindTextRevealConstraint(renderer);
+  }
+  else if(prepared.marquee)
+  {
+    renderer.RegisterProperty("uMarqueeSupport", prepared.marqueeSupport);
+    ApplyMarqueeTransform(renderer, prepared, coordinateSize);
+  }
+  else
+  {
+    ApplyEffectOverflowTransform(renderer, prepared.rasterSize, prepared.composition);
+  }
+}
+
+void TextVisual::ApplyEffectOverflowTransform(VisualRenderer renderer, const Vector2& rasterSize,
+                                              const Vector4& compositionBounds)
+{
+  // Start from the ordinary visual transform just applied to this renderer.
+  // Its local size / integer raster size is the pixel-to-scene conversion, not
+  // an assumed reciprocal RenderScale (sync rendering currently ignores it).
+  const Vector2 visualSize = mImpl->GetTransformVisualSize(mImpl->mControlSize);
+  const Vector2 pixelScale(visualSize.x / std::trunc(rasterSize.x), visualSize.y / std::trunc(rasterSize.y));
+  ApplyPaintTransform(renderer, visualSize, Vector2(compositionBounds.x, compositionBounds.y) * pixelScale,
+                      Vector2(compositionBounds.z, compositionBounds.w) * pixelScale);
+}
+
+void TextVisual::ApplyMarqueeTransform(VisualRenderer renderer, const EffectOverflowTextures& prepared, const Vector2& sourceSize)
+{
+  const Vector2 viewport = mImpl->GetTransformVisualSize(mImpl->mControlSize);
+  const auto&   bounds   = prepared.composition;
+  // The source-to-viewport alignment is the scroller vertex shader's existing
+  // mapping. Periodic copies translate only along the scrolling axis.
+  const unsigned axis         = prepared.horizontal ? 1u : 0u;
+  const float    alignment    = prepared.horizontal ? VERTICAL_ALIGNMENT_TABLE[static_cast<int>(mController->GetVerticalAlignment())] : .5f;
+  const float    sourceOrigin = (sourceSize[axis] - viewport[axis]) * alignment;
+  const float    pixelScale   = sourceSize[axis] / std::trunc(prepared.rasterSize[axis]);
+  const float    start        = std::min(0.f, bounds[axis] * pixelScale - sourceOrigin);
+  const float    end          = std::max(viewport[axis], (bounds[axis] + bounds[axis + 2u]) * pixelScale - sourceOrigin);
+  Vector2        paintOffset  = Vector2::ZERO;
+  Vector2        paintSize    = viewport;
+  paintOffset[axis]           = start;
+  paintSize[axis]             = end - start;
+  // Keep texture and VIEW_BOUND gradient coordinates in the original viewport.
+  renderer.RegisterProperty("uMarqueeViewport", Vector4(viewport.x, viewport.y, paintOffset.x, paintOffset.y));
+  ApplyPaintTransform(renderer, viewport, paintOffset, paintSize);
+}
+
+void TextVisual::ApplyPaintTransform(VisualRenderer renderer, const Vector2& visualSize,
+                                     const Vector2& paintOffset, const Vector2& paintSize)
+{
+  const float   effectiveScale = mImpl->mTransformMapSetForFittingMode ? 1.0f : mImpl->mViewEffectiveScale;
+  const Vector2 offset         = renderer.GetProperty<Vector2>(VisualRenderer::Property::TRANSFORM_OFFSET);
+  mEffectOverflowTransform     = std::unique_ptr<EffectOverflowTransform>(new EffectOverflowTransform{
+    renderer.GetProperty<Vector2>(VisualRenderer::Property::TRANSFORM_SIZE), offset});
+  const Vector4 mode           = renderer.GetProperty<Vector4>(VisualRenderer::Property::TRANSFORM_OFFSET_SIZE_MODE);
+  const Vector2 pivot          = renderer.GetProperty<Vector2>(VisualRenderer::Property::TRANSFORM_PIVOT);
+  const Vector2 visualOffset(offset.x * ((1.f - mode.x) * mImpl->mControlSize.x + mode.x * effectiveScale),
+                             offset.y * ((1.f - mode.y) * mImpl->mControlSize.y + mode.y * effectiveScale));
+  const Vector2 topLeft = visualOffset + (pivot - Vector2(.5f, .5f)) * visualSize;
+  renderer.SetProperty(VisualRenderer::Property::TRANSFORM_SIZE, paintSize / effectiveScale);
+  renderer.SetProperty(VisualRenderer::Property::TRANSFORM_OFFSET, (topLeft + paintOffset) / effectiveScale);
+  renderer.SetProperty(VisualRenderer::Property::TRANSFORM_OFFSET_SIZE_MODE, Vector4::ONE);
+  renderer.SetProperty(VisualRenderer::Property::TRANSFORM_PIVOT, Vector2(.5f, .5f));
+  renderer.SetProperty(VisualRenderer::Property::EXTRA_SIZE, Vector2::ZERO);
+
+  // Check whether the published quad, including its filtering footprint,
+  // exceeds the control bounds. Coordinates use the node's top-left.
+  const Vector2 origin       = renderer.GetProperty<Vector2>(VisualRenderer::Property::TRANSFORM_ORIGIN);
+  const Vector2 paintTopLeft = (topLeft + paintOffset) / effectiveScale +
+                               (origin + Vector2(.5f, .5f)) * mImpl->mControlSize;
+  const Vector2 paintBottomRight = paintTopLeft + paintSize / effectiveScale;
+  const bool    contained        = paintTopLeft.x >= 0.0f && paintTopLeft.y >= 0.0f &&
+                         paintBottomRight.x <= mImpl->mControlSize.x &&
+                         paintBottomRight.y <= mImpl->mControlSize.y;
+  Dali::Integration::SetRendererVisualGeometryCullingEnabled(renderer, !contained);
+}
+
+Vector4 TextVisual::GetSourceViewport(const Vector2& size) const
+{
+  auto label = Ui::Label::DownCast(mControl.GetHandle());
+  if(!label) return Vector4(0.f, 0.f, size.x, size.y);
+  auto        padding = label.GetPadding();
+  const float scale   = mController->GetUiScale();
+  padding.start *= scale;
+  padding.end *= scale;
+  padding.top *= scale;
+  padding.bottom *= scale;
+  if(mController->GetLayoutDirection(label) == Dali::LayoutDirection::RIGHT_TO_LEFT) std::swap(padding.start, padding.end);
+  const auto ownerSize = label.GetProperty<Vector3>(Actor::Property::SIZE);
+  const auto offset    = mController->GetLayoutOffsetWithPadding();
+  return Vector4(padding.start - offset.x, padding.top - offset.y,
+                 std::max(0.f, ownerSize.x - padding.start - padding.end), std::max(0.f, ownerSize.y - padding.top - padding.bottom));
+}
+
 TextureSet TextVisual::GetTextTexture(const Vector2& size)
 {
-  const bool cutoutEnabled = mController->IsTextCutout();
+  const bool                      cutoutEnabled = mController->IsTextCutout();
+  Text::Raster::SourceClip        resolvedSource;
+  const Text::Raster::SourceClip* sourceClip     = nullptr;
+  const bool                      sourcePolicy   = Text::IsEffectOverflowSupported(*mController->GetRenderTextModel(), size, Dali::GetMaxTextureSize(),
+                                                                                   mController->IsMarqueeEnabled(),
+                                                                                   mTextShaderFeatureCache.IsEnabledTextReveal());
+  const Vector4                   sourceViewport = GetSourceViewport(size);
 
   // Filter mode needs to be set to linear to produce better quality while scaling.
   Sampler sampler = Sampler::New();
@@ -3595,18 +4268,25 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
   Text::Direction textDirection   = mController->GetTextDirection();
   uint32_t        textureSetIndex = 0u;
   PixelBuffer     cutoutData;
-  float           cutoutAlpha = mController->GetRenderTextModel()->GetDefaultColor().a;
+  PixelData       recolorMask;
+  const bool      recolor = !mTextShaderFeatureCache.IsEnabledAnyTextGradient() &&
+                       mTextShaderFeatureCache.IsEnabledEmoji() &&
+                       !mTextShaderFeatureCache.IsEnabledMultiColor() &&
+                       !mTextShaderFeatureCache.isEnabledEmboss();
+  float cutoutAlpha = mController->GetRenderTextModel()->GetDefaultColor().a;
 
   if(mTextShaderFeatureCache.IsEnabledTextGradientMixed())
   {
+    if(sourcePolicy && !mTypesetter->ResolveSourceClip(size, sourceViewport, resolvedSource)) return TextureSet::New();
+    sourceClip             = resolvedSource.planes ? &resolvedSource : nullptr;
     auto&     gradientData = GetOrCreateTextVisualGradientData(mGradientData);
     PixelData preservedData =
-      mTypesetter->RenderTextGradientPreserved(size, textDirection, false, Pixel::RGBA8888);
+      mTypesetter->RenderTextGradientPreserved(size, textDirection, false, Pixel::RGBA8888, Size::ZERO, sourceClip);
     AddTexture(textureSet, preservedData, sampler, textureSetIndex);
     ++textureSetIndex;
 
     gradientData.mTextGradientMaskPixelData =
-      mTypesetter->RenderTextGradientMask(size, textDirection, false, Pixel::L8);
+      mTypesetter->RenderTextGradientMask(size, textDirection, false, Pixel::L8, Size::ZERO, sourceClip);
     AddTexture(textureSet, gradientData.mTextGradientMaskPixelData, sampler, textureSetIndex);
     ++textureSetIndex;
 
@@ -3634,7 +4314,10 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     else
     {
       PixelData data =
-        mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_NO_STYLES, false, textPixelFormat);
+        mTypesetter->RenderFill(size, textDirection, textPixelFormat, sourcePolicy ? &sourceViewport : nullptr,
+                                resolvedSource, recolor ? &recolorMask : nullptr);
+      if(sourcePolicy && !data) return TextureSet::New();
+      sourceClip = resolvedSource.planes ? &resolvedSource : nullptr;
       AddTexture(textureSet, data, sampler, textureSetIndex);
       ++textureSetIndex;
     }
@@ -3663,7 +4346,7 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
     }
     else
     {
-      styleData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_NO_TEXT, false, Pixel::RGBA8888);
+      styleData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_NO_TEXT, false, Pixel::RGBA8888, Size::ZERO, nullptr, sourceClip);
     }
 
     AddTexture(textureSet, styleData, sampler, textureSetIndex);
@@ -3674,7 +4357,7 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
   {
     // Create RGBA texture for overlay styles such as underline and strikethrough (without the text itself)
     PixelData overlayStyleData =
-      mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE, false, Pixel::RGBA8888);
+      mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE, false, Pixel::RGBA8888, Size::ZERO, nullptr, sourceClip);
     AddTexture(textureSet, overlayStyleData, sampler, textureSetIndex);
     ++textureSetIndex;
   }
@@ -3684,7 +4367,17 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size)
      !mTextShaderFeatureCache.IsEnabledMultiColor())
   {
     // Create a L8 texture as a mask to avoid color glyphs (e.g. emojis) to be affected by text color animation
-    PixelData maskData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_MASK, false, Pixel::L8);
+    PixelData maskData = recolorMask;
+    if(cutoutEnabled && recolor)
+    {
+      PixelBuffer emptyMask    = PixelBuffer::New(1u, 1u, Pixel::L8);
+      emptyMask.GetBuffer()[0] = 0u;
+      maskData                 = PixelBuffer::Convert(emptyMask);
+    }
+    else if(!recolor)
+    {
+      maskData = mTypesetter->Render(size, textDirection, Text::Typesetter::RENDER_MASK, false, Pixel::L8, Size::ZERO, nullptr, sourceClip);
+    }
 
     AddTexture(textureSet, maskData, sampler, textureSetIndex);
     ++textureSetIndex;
