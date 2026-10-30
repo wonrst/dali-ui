@@ -1108,6 +1108,8 @@ void TextVisual::CreateTextureSet(TilingInfo& info, VisualRenderer& renderer, Sa
   // Enable the pre-multiplied alpha to improve the text quality
   renderer.SetProperty(Renderer::Property::BLEND_PRE_MULTIPLIED_ALPHA, true);
 
+  // Apply the shared transform first; the tile's size/offset must survive.
+  mImpl->SetTransformUniforms(renderer);
   // Set size and offset for the tiling.
   renderer.SetProperty(VisualRenderer::Property::TRANSFORM_SIZE,
                        Vector2(static_cast<float>(info.width), static_cast<float>(info.height)));
@@ -1551,11 +1553,11 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
         RemoveRenderer(control, false);
       }
 
-      int verifiedWidth  = static_cast<int>(renderInfo.size.width);
-      int verifiedHeight = static_cast<int>(renderInfo.size.height);
+      int verifiedWidth  = renderInfo.textPixelData.GetWidth();
+      int verifiedHeight = renderInfo.textPixelData.GetHeight();
 
       // Set information for creating textures.
-      TilingInfo info(verifiedWidth, maxTextureSize);
+      TilingInfo info(verifiedWidth, std::min(verifiedHeight, maxTextureSize));
 
       // Get the pixel data of text.
       info.textPixelData = renderInfo.textPixelData;
@@ -1640,7 +1642,10 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       if(renderer)
       {
         // Register transform properties
-        mImpl->SetTransformUniforms(renderer);
+        if(!isHeightTiling)
+        {
+          mImpl->SetTransformUniforms(renderer);
+        }
 
         control.AddRenderer(renderer);
 
@@ -3045,7 +3050,7 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     int verifiedHeight = data.GetHeight();
 
     // Set information for creating textures.
-    TilingInfo info(verifiedWidth, maxTextureSize);
+    TilingInfo info(verifiedWidth, std::min(verifiedHeight, maxTextureSize));
 
     // Get the pixel data of text.
     info.textPixelData = data;
@@ -3143,7 +3148,10 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     if(renderer)
     {
       // Register transform properties
-      mImpl->SetTransformUniforms(renderer);
+      if(!isHeightTiling)
+      {
+        mImpl->SetTransformUniforms(renderer);
+      }
 
       // Note, AddRenderer will ignore renderer if it is already added.
       actor.AddRenderer(renderer);

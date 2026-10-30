@@ -34,6 +34,7 @@
 #include <dali-ui-foundation/internal/text/ellipsis/ellipsis-resolver.h>
 #include <dali-ui-foundation/internal/text/hyphenator.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-start-geometry.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-coordinate.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-layout-data.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-placement.h>
@@ -1496,11 +1497,33 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     layoutSize.y = parameters.textHeight + (parameters.padding.top + parameters.padding.bottom);
   }
 
+  // Use the same return object on every path to preserve return-value elision.
+  AsyncTextRenderInfo renderInfo;
+
+  // Height tiles currently use display-pixel coordinates. They cannot crop a
+  // scaled raster without losing content. Keep 1x height tiling, but retry a
+  // scaled request before producing any bitmap if its raster needs tiling.
+  // Marquee has already resolved its actual, capped raster size at this point.
+  if(parameters.maxTextureSize > 0 && parameters.renderScale > 1.0f)
+  {
+    int32_t width, height;
+    if(!Raster::Convert(layoutSize.x, width) || !Raster::Convert(layoutSize.y, height) ||
+       width > parameters.maxTextureSize || height > parameters.maxTextureSize)
+    {
+      parameters.renderScale = 1.0f;
+      return renderInfo;
+    }
+  }
+
+  // Match the synchronous Label's width clipping. Height can use the existing
+  // 1x tile path; there is no horizontal tiling path.
+  if(parameters.maxTextureSize > 0)
+  {
+    layoutSize.x = std::min(layoutSize.x, static_cast<float>(parameters.maxTextureSize));
+  }
+
   // Check the text direction
   Direction textDirection = mIsTextDirectionRTL ? Direction::RIGHT_TO_LEFT : Direction::LEFT_TO_RIGHT;
-
-  // Set information for creating pixel datas.
-  AsyncTextRenderInfo renderInfo;
 
   if(!parameters.isMarqueeEnabled)
   {
@@ -1936,6 +1959,20 @@ Size AsyncTextLoader::ComputeLayoutSize(AsyncTextParameters& parameters, float w
 
 Size AsyncTextLoader::SetupRenderScale(AsyncTextParameters& parameters, bool& cachedNaturalSize)
 {
+  // ConvertToEven and marquee gap use signed integers. Check in double before
+  // any scaled font/layout calculation or float-to-integer conversion.
+  const double largestInput = std::max({static_cast<double>(parameters.textWidth),
+                                        static_cast<double>(parameters.textHeight),
+                                        static_cast<double>(parameters.minLineSize),
+                                        std::abs(static_cast<double>(parameters.marqueeGap))});
+  if(!std::isfinite(parameters.renderScale) ||
+     largestInput * parameters.renderScale >= std::numeric_limits<int>::max() - 1.0)
+  {
+    parameters.renderScale = 1.0f;
+    cachedNaturalSize      = false;
+    return Size::ZERO;
+  }
+
   if(parameters.isTextFitEnabled || parameters.isTextFitCandidatesEnabled)
   {
     // If text fit, only update the scaled size.
@@ -2166,9 +2203,14 @@ AsyncTextRenderInfo AsyncTextLoader::RenderMarquee(AsyncTextParameters& paramete
   }
   else // MarqueeOrientation::VERTICAL
   {
-    bool  layoutOnly      = useCachedNaturalSize;
-    bool  useCachedHeight = false;
-    float textHeight      = 0.0f;
+    // Render() adds padding to cutout rasters. Reserve that space before
+    // laying out the capped scrolling content, including its ellipsis.
+    const float maxTextureHeight = parameters.isCutoutEnabled
+                                     ? std::max(static_cast<float>(maxTextureSize) - parameters.padding.top - parameters.padding.bottom, 0.0f)
+                                     : static_cast<float>(maxTextureSize);
+    bool        layoutOnly       = useCachedNaturalSize;
+    bool        useCachedHeight  = false;
+    float       textHeight       = 0.0f;
     if(parameters.requestType == Ui::Integration::Text::Async::RENDER_FIXED_WIDTH || parameters.requestType == Ui::Integration::Text::Async::RENDER_CONSTRAINT)
     {
       // The real height calculated during layout should be set.
@@ -2207,10 +2249,10 @@ AsyncTextRenderInfo AsyncTextLoader::RenderMarquee(AsyncTextParameters& paramete
     verifiedSize = textureSize;
 
     // If the texture size height exceed maxTextureSize, modify the visual model size and enabled the ellipsis.
-    if(verifiedSize.height > maxTextureSize)
+    if(verifiedSize.height > maxTextureHeight)
     {
-      verifiedSize.height = static_cast<float>(maxTextureSize);
-      if(textHeight > maxTextureSize)
+      verifiedSize.height = maxTextureHeight;
+      if(textHeight > maxTextureHeight)
       {
         float actualWidth  = parameters.textWidth;
         float actualHeight = parameters.textHeight;
@@ -2228,7 +2270,7 @@ AsyncTextRenderInfo AsyncTextLoader::RenderMarquee(AsyncTextParameters& paramete
         parameters.textHeight       = actualHeight;
         parameters.isMarqueeEnabled = true;
       }
-      wrapGap = std::max(maxTextureSize - textHeight, 0.0f);
+      wrapGap = std::max(maxTextureHeight - textHeight, 0.0f);
     }
   }
 
