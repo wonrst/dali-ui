@@ -221,3 +221,83 @@ int UtcDaliTextGradientUiScaleFiniteGeometryP(void)
   DALI_TEST_CHECK(TextInternal::Gradient::ResolveRenderData(style, bounds, display).enabled);
   END_TEST;
 }
+
+int UtcDaliTextGradientNonFiniteGeometryN(void)
+{
+  const Vector4 bounds(0.f, 0.f, 1.f, 1.f);
+  const Vector2 size(200.f, 80.f);
+  for(auto units : {PublicGradient::Units::USER_SPACE, PublicGradient::Units::OBJECT_BOUNDING_BOX})
+  {
+    for(auto type : {PublicGradient::Type::LINEAR, PublicGradient::Type::RADIAL, PublicGradient::Type::CONIC})
+    {
+      for(float value : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()})
+      {
+        TextInternal::Gradient::Style base;
+        base.enabled = true;
+        base.units   = units;
+        base.type    = type;
+        base.stops.PushBack({0.f, Color::RED});
+        base.stops.PushBack({1.f, Color::BLUE});
+        base.radialRadius = .5f;
+        auto style        = base;
+        if(type == PublicGradient::Type::LINEAR)
+        {
+          style.linearEnd.x = value;
+        }
+        if(type == PublicGradient::Type::RADIAL)
+        {
+          style.radialCenter.x = value;
+        }
+        if(type == PublicGradient::Type::CONIC)
+        {
+          style.conicCenter.x = value;
+        }
+        DALI_TEST_CHECK(!TextInternal::Gradient::ResolveRenderData(style, bounds, size).enabled);
+        style             = base;
+        style.startOffset = value;
+        DALI_TEST_CHECK(!TextInternal::Gradient::ResolveRenderData(style, bounds, size).enabled);
+        style = base;
+        if(type == PublicGradient::Type::RADIAL)
+        {
+          style.radialRadius = value;
+          DALI_TEST_CHECK(!TextInternal::Gradient::ResolveRenderData(style, bounds, size).enabled);
+        }
+        if(type == PublicGradient::Type::CONIC)
+        {
+          style.conicStartAngle = Radian(value);
+          DALI_TEST_CHECK(!TextInternal::Gradient::ResolveRenderData(style, bounds, size).enabled);
+        }
+        for(unsigned i = 0; i < 4; ++i)
+        {
+          Vector4 invalid = bounds;
+          invalid[i]      = value;
+          DALI_TEST_CHECK(!TextInternal::Gradient::ResolveRenderData(base, invalid, size).enabled);
+        }
+      }
+    }
+  }
+  END_TEST;
+}
+
+int UtcDaliTextGradientAcceptedSmallGeometryP(void)
+{
+  for(auto units : {PublicGradient::Units::USER_SPACE, PublicGradient::Units::OBJECT_BOUNDING_BOX})
+  {
+    PublicGradient::Linear line(Vector2::ZERO, Vector2(.02f, 0.f));
+    SetCommonProperties(line);
+    line.SetUnits(units);
+    auto style = TextInternal::Gradient::CreateStyle(line);
+    DALI_TEST_CHECK(TextInternal::Gradient::ResolveRenderData(style, Vector4(0, 0, 1, 1), Vector2(.001f, .002f)).enabled);
+    for(float radius : {.001f, -.001f})
+    {
+      PublicGradient::Radial radial(Vector2(.001f, .002f), radius);
+      SetCommonProperties(radial);
+      radial.SetUnits(units);
+      style       = TextInternal::Gradient::CreateStyle(radial);
+      auto result = TextInternal::Gradient::ResolveRenderData(style, Vector4(0, 0, 1, 1), Vector2(.001f, .002f));
+      DALI_TEST_CHECK(result.enabled);
+      DALI_TEST_CHECK(std::isfinite(result.radialScale.x) && std::isfinite(result.radialScale.y));
+    }
+  }
+  END_TEST;
+}

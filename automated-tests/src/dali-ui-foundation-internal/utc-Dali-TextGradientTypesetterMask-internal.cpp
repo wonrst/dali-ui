@@ -1258,3 +1258,67 @@ int UtcDaliGradientSpanRasterDisplayScalePixelsP(void)
   }
   END_TEST;
 }
+
+int UtcDaliGradientSpanNonFiniteGeometryPixelsN(void)
+{
+  UiTestApplication application;
+  for(auto units : {Ui::Gradient::Units::USER_SPACE, Ui::Gradient::Units::OBJECT_BOUNDING_BOX})
+  {
+    for(auto bounds : {UiText::GradientSpan::BoundsMode::CONTENT_BOUND, UiText::GradientSpan::BoundsMode::VIEW_BOUND, UiText::GradientSpan::BoundsMode::SPAN_BOUND})
+    {
+      for(auto type : {Ui::Gradient::Type::LINEAR, Ui::Gradient::Type::RADIAL, Ui::Gradient::Type::CONIC})
+      {
+        MaskModel                         model(6u);
+        UiText::Internal::Gradient::Style style;
+        style.enabled      = true;
+        style.units        = units;
+        style.type         = type;
+        style.linearEnd    = Vector2(100.f, 0.f);
+        style.radialRadius = 100.f;
+        style.stops.PushBack({0.f, Color::RED});
+        style.stops.PushBack({1.f, Color::BLUE});
+        model.SetGradientPaint(style, bounds);
+        auto typesetter = UiText::Typesetter::New(&model);
+        auto reference  = typesetter->Render(MASK_SIZE, UiText::Direction::LEFT_TO_RIGHT, UiText::Typesetter::RENDER_NO_STYLES);
+        DALI_TEST_CHECK(reference);
+        auto referenceBytes = Integration::GetPixelDataBuffer(reference);
+        bool ink            = false;
+        for(uint32_t i = 3; i < referenceBytes.bufferSize; i += 4)
+        {
+          ink |= referenceBytes.buffer[i] != 0;
+        }
+        DALI_TEST_CHECK(ink);
+        for(float value : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()})
+        {
+          auto invalid = style;
+          if(type == Ui::Gradient::Type::LINEAR)
+          {
+            invalid.linearEnd.x = value;
+          }
+          if(type == Ui::Gradient::Type::RADIAL)
+          {
+            invalid.radialCenter.x = value;
+          }
+          if(type == Ui::Gradient::Type::CONIC)
+          {
+            invalid.conicCenter.x = value;
+          }
+          model.SetGradientPaint(invalid, bounds);
+          auto pixels = typesetter->Render(MASK_SIZE, UiText::Direction::LEFT_TO_RIGHT, UiText::Typesetter::RENDER_NO_STYLES);
+          DALI_TEST_CHECK(pixels);
+          auto bytes = Integration::GetPixelDataBuffer(pixels);
+          for(uint32_t i = 3; i < bytes.bufferSize; i += 4)
+          {
+            DALI_TEST_EQUALS(bytes.buffer[i], uint8_t(0), TEST_LOCATION);
+          }
+        }
+        model.SetGradientPaint(style, bounds);
+        auto restored = typesetter->Render(MASK_SIZE, UiText::Direction::LEFT_TO_RIGHT, UiText::Typesetter::RENDER_NO_STYLES);
+        auto bytes    = Integration::GetPixelDataBuffer(restored);
+        DALI_TEST_EQUALS(bytes.bufferSize, referenceBytes.bufferSize, TEST_LOCATION);
+        DALI_TEST_EQUALS(std::memcmp(bytes.buffer, referenceBytes.buffer, bytes.bufferSize), 0, TEST_LOCATION);
+      }
+    }
+  }
+  END_TEST;
+}

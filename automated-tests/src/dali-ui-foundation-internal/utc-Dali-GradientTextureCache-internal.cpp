@@ -743,3 +743,54 @@ int UtcDaliGradientTextureCachePendingShutdown(void)
   application.SendNotification();
   END_TEST;
 }
+
+int UtcDaliGradientVisualRejectInvalidGeometryP(void)
+{
+  UiTestApplication        application;
+  Impl::VisualFactoryCache factory(false);
+  namespace P = Ui::Integration::GradientVisual::Property;
+  for(auto units : {Ui::Gradient::Units::USER_SPACE, Ui::Gradient::Units::OBJECT_BOUNDING_BOX})
+  {
+    auto properties = MakeProperties();
+    properties.Insert(P::UNITS, units);
+    auto       visual   = Impl::GradientVisual::New(factory, properties);
+    auto       renderer = visual->GetRenderer();
+    const auto before   = renderer.GetProperty<Matrix3>(renderer.GetPropertyIndex("uAlignmentMatrix"));
+    for(float value : {0.f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+    {
+      Property::Map update;
+      update.Insert(P::START_POSITION, Vector2::ZERO);
+      update.Insert(P::END_POSITION, Vector2(value, 0.f));
+      visual->SetProperties(update);
+      DALI_TEST_EQUALS(renderer.GetProperty<Matrix3>(renderer.GetPropertyIndex("uAlignmentMatrix")), before, TEST_LOCATION);
+      update.Clear();
+      update.Insert(P::CENTER, Vector2::ZERO);
+      update.Insert(P::RADIUS, value);
+      visual->SetProperties(update);
+      DALI_TEST_EQUALS(renderer.GetProperty<Matrix3>(renderer.GetPropertyIndex("uAlignmentMatrix")), before, TEST_LOCATION);
+      if(value != 0.f)
+      {
+        update.Clear();
+        update.Insert(P::CENTER, Vector2::ZERO);
+        update.Insert(P::START_ANGLE, value);
+        visual->SetProperties(update);
+        DALI_TEST_CHECK(renderer.GetPropertyIndex("uStartAngle") == Property::INVALID_INDEX);
+        update.Clear();
+        update.Insert(P::START_OFFSET, value);
+        visual->SetProperties(update);
+        DALI_TEST_EQUALS(renderer.GetProperty<float>(renderer.GetPropertyIndex("uGradientOffset")), 0.f, TEST_LOCATION);
+      }
+    }
+    // These tiny radii are invertible; no blanket epsilon rejection.
+    for(float radius : {.00001f, -.00001f})
+    {
+      Property::Map update;
+      update.Insert(P::CENTER, Vector2::ZERO);
+      update.Insert(P::RADIUS, radius);
+      visual->SetProperties(update);
+      auto matrix = renderer.GetProperty<Matrix3>(renderer.GetPropertyIndex("uAlignmentMatrix"));
+      DALI_TEST_EQUALS(matrix.AsFloat()[0], 1.f / radius, 1.f, TEST_LOCATION);
+    }
+  }
+  END_TEST;
+}

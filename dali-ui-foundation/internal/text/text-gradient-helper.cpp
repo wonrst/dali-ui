@@ -62,9 +62,48 @@ bool IsRenderable(const Dali::Ui::Gradient::Base& gradient)
   }
 }
 
+bool HasFiniteGeometry(const Style& style)
+{
+  const auto finite = [](const Vector2& value)
+  {
+    return std::isfinite(value.x) && std::isfinite(value.y);
+  };
+  if(!std::isfinite(style.startOffset))
+  {
+    return false;
+  }
+  switch(style.type)
+  {
+    case Dali::Ui::Gradient::Type::LINEAR:
+    {
+      return finite(style.linearStart) && finite(style.linearEnd);
+    }
+
+    case Dali::Ui::Gradient::Type::RADIAL:
+    {
+      return finite(style.radialCenter) && std::isfinite(style.radialRadius);
+    }
+
+    case Dali::Ui::Gradient::Type::CONIC:
+    {
+      return finite(style.conicCenter) && std::isfinite(style.conicStartAngle.radian);
+    }
+
+    case Dali::Ui::Gradient::Type::NONE:
+    {
+      return true;
+    }
+
+    default:
+    {
+      return false;
+    }
+  }
+}
+
 bool IsRenderable(const Style& style)
 {
-  if(!style.enabled || style.stops.Count() < 2u)
+  if(!style.enabled || style.stops.Count() < 2u || !HasFiniteGeometry(style))
   {
     return false;
   }
@@ -154,10 +193,11 @@ RenderData ResolveRenderData(const Style&   style,
     return data;
   }
 
-  if(style.units == Dali::Ui::Gradient::Units::USER_SPACE &&
-     (!std::isfinite(coordinateSize.x) || !std::isfinite(coordinateSize.y)))
+  if(!std::isfinite(coordinateSize.x) || !std::isfinite(coordinateSize.y) ||
+     !std::isfinite(bounds.x) || !std::isfinite(bounds.y) ||
+     !std::isfinite(bounds.z) || !std::isfinite(bounds.w))
   {
-    DALI_LOG_ERROR("Text gradient coordinate size is not finite\n");
+    DALI_LOG_ERROR("Text gradient coordinate size or bounds are not finite\n");
     return data;
   }
 
@@ -187,14 +227,16 @@ RenderData ResolveRenderData(const Style&   style,
     data.conicStartAngle = style.conicStartAngle.radian;
   }
 
-  if(style.units == Dali::Ui::Gradient::Units::USER_SPACE)
+  // Both units can contain non-finite authored values or overflow while
+  // resolving geometry. Do not publish them as uniforms or CPU paint data.
   {
     const auto finite = [](const Vector2& value)
     {
       return std::isfinite(value.x) && std::isfinite(value.y);
     };
     const bool valid = style.type == Dali::Ui::Gradient::Type::LINEAR
-                         ? finite(data.startPosition) && finite(data.endPosition)
+                         ? finite(data.startPosition) && finite(data.endPosition) &&
+                             std::isfinite((data.endPosition - data.startPosition).LengthSquared())
                        : style.type == Dali::Ui::Gradient::Type::RADIAL
                          ? finite(data.radialCenter) && finite(data.radialScale)
                          : finite(data.conicCenter) && finite(data.conicScale);

@@ -1309,7 +1309,8 @@ std::vector<GradientRasterPaint> ResolveGradientRasterPaints(ViewModel&         
       continue;
     }
     result[index].renderData = Internal::Gradient::ResolveRenderData(source.style, bounds, geometrySize);
-    if(!result[index].renderData.enabled && Internal::Gradient::IsRenderable(source.style))
+    if(!result[index].renderData.enabled &&
+       (Internal::Gradient::IsRenderable(source.style) || !Internal::Gradient::HasFiniteGeometry(source.style)))
     {
       // Rejected geometry has no paint. The existing empty-stop path stays transparent.
       continue;

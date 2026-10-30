@@ -44,6 +44,16 @@ bool IsRenderable(const Dali::Ui::Gradient::Base& gradient);
 bool IsRenderable(const Style& style);
 
 /**
+ * @brief Checks whether the relevant authored gradient geometry is finite.
+ *
+ * Stop normalization and the minimum renderable geometry are checked separately.
+ *
+ * @param[in] style The gradient style to check.
+ * @return True if the geometry and start offset are finite, false otherwise.
+ */
+bool HasFiniteGeometry(const Style& style);
+
+/**
  * @brief Compares two immutable gradient rendering snapshots by value.
  */
 bool EqualStyle(const Style& lhs, const Style& rhs);

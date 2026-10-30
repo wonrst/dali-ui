@@ -234,7 +234,7 @@ void GradientVisual::DoSetProperties(const Property::Map& propertyMap)
 
     Property::Value* startOffsetValue = propertyMap.Find(Ui::Integration::GradientVisual::Property::START_OFFSET, START_OFFSET_NAME);
     float            startOffset;
-    if(startOffsetValue && startOffsetValue->Get(startOffset))
+    if(startOffsetValue && startOffsetValue->Get(startOffset) && std::isfinite(startOffset))
     {
       if(DALI_LIKELY(mGradient))
       {
@@ -477,7 +477,8 @@ bool GradientVisual::NewGradient(Type gradientType, const Property::Map& propert
     Vector2          endPosition;
 
     if(startPositionValue && startPositionValue->Get(startPosition) && endPositionValue &&
-       endPositionValue->Get(endPosition))
+       endPositionValue->Get(endPosition) &&
+       (startPosition.x != endPosition.x || startPosition.y != endPosition.y))
     {
       mGradient = new LinearGradient(startPosition, endPosition, mGradient);
     }
@@ -492,7 +493,8 @@ bool GradientVisual::NewGradient(Type gradientType, const Property::Map& propert
     Property::Value* radiusValue = propertyMap.Find(Ui::Integration::GradientVisual::Property::RADIUS, RADIUS_NAME);
     Vector2          center;
     float            radius;
-    if(centerValue && centerValue->Get(center) && radiusValue && radiusValue->Get(radius))
+    if(centerValue && centerValue->Get(center) && radiusValue && radiusValue->Get(radius) &&
+       radius != 0.0f)
     {
       mGradient = new RadialGradient(center, radius, mGradient);
     }
@@ -508,7 +510,8 @@ bool GradientVisual::NewGradient(Type gradientType, const Property::Map& propert
       propertyMap.Find(Ui::Integration::GradientVisual::Property::START_ANGLE, CONIC_START_ANGLE_NAME);
     Vector2 center;
     float   startAngle;
-    if(centerValue && centerValue->Get(center) && startAngleValue && startAngleValue->Get(startAngle))
+    if(centerValue && centerValue->Get(center) && startAngleValue && startAngleValue->Get(startAngle) &&
+       std::isfinite(startAngle))
     {
       mGradient = new ConicGradient(center, Dali::Radian(startAngle), mGradient);
     }
