@@ -18,6 +18,7 @@
  */
 
 #include <dali/graphics-api/graphics-controller.h>
+#include <functional>
 #include <unordered_map>
 #include "test-gl-abstraction.h"
 #include "test-graphics-command-buffer.h"
@@ -185,6 +186,8 @@ public:
    */
   void UpdateTextures(const std::vector<Graphics::TextureUpdateInfo>&       updateInfoList,
                       const std::vector<Graphics::TextureUpdateSourceInfo>& sourceList) override;
+
+  std::function<void(PixelData)> mTextureUploadObserver; ///< Optional inspection before upload releases the pixel buffer.
 
   /**
    * Auto generates mipmaps for the texture

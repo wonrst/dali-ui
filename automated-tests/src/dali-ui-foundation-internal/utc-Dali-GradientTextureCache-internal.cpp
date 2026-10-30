@@ -21,7 +21,9 @@
 #include <dali.h>
 #include <dali/devel-api/object/base-object-observer.h>
 #include <dali/integration-api/adaptor-framework/adaptor.h>
+#include <dali/integration-api/pixel-data-integ.h>
 #include <ui-adaptor-impl.h>
+#include <cfenv>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -82,6 +84,47 @@ Property::Map MakeProperties()
   return map;
 }
 } //namespace
+
+int UtcDaliGradientTextureSingleTexelSegments(void)
+{
+  UiTestApplication application;
+  Cache             cache;
+  for(auto spread : {Ui::Gradient::SpreadMethod::PAD, Ui::Gradient::SpreadMethod::REPEAT, Ui::Gradient::SpreadMethod::REFLECT})
+  {
+    for(float alpha : {1.0f, 0.5f})
+    {
+      auto gradient = MakeGradient();
+      gradient->ClearStop();
+      Vector<float>   offsets;
+      Vector<Vector4> colors;
+      // First, middle and last one-texel segments, plus a zero-width segment.
+      for(float offset : {0.f, 1.f / 512.f, 0.5f, 0.5f, 257.f / 512.f, 511.f / 512.f, 1.f})
+      {
+        offsets.PushBack(offset);
+        colors.PushBack(Vector4(offset, 1.f - offset, 0.25f, alpha));
+      }
+      gradient->ApplyStops(offsets, colors);
+      gradient->SetSpreadMethod(spread);
+      std::feclearexcept(FE_ALL_EXCEPT);
+      Texture uncached = gradient->GenerateLookupTexture();
+      DALI_TEST_EQUALS(std::fetestexcept(FE_DIVBYZERO | FE_INVALID), 0, TEST_LOCATION);
+      DALI_TEST_CHECK(uncached);
+      std::feclearexcept(FE_ALL_EXCEPT);
+      const auto id = cache.Acquire(*gradient);
+      DALI_TEST_EQUALS(std::fetestexcept(FE_DIVBYZERO | FE_INVALID), 0, TEST_LOCATION);
+      Texture cached = cache.GetTexture(id);
+      DALI_TEST_CHECK(cached);
+      DALI_TEST_EQUALS(cached.GetWidth(), 512u, TEST_LOCATION);
+      DALI_TEST_EQUALS(cached.GetHeight(), 1u, TEST_LOCATION);
+      DALI_TEST_EQUALS(id, cache.Acquire(*gradient), TEST_LOCATION);
+      DALI_TEST_CHECK(cached == cache.GetTexture(id));
+      cache.RequestRelease(id);
+      cache.RequestRelease(id);
+      application.SendNotification();
+    }
+  }
+  END_TEST;
+}
 
 int UtcDaliGradientTextureCacheReferences(void)
 {
@@ -792,5 +835,65 @@ int UtcDaliGradientVisualRejectInvalidGeometryP(void)
       DALI_TEST_EQUALS(matrix.AsFloat()[0], 1.f / radius, 1.f, TEST_LOCATION);
     }
   }
+  END_TEST;
+}
+
+int UtcDaliGradientTextureSingleTexelEndpoints(void)
+{
+  UiTestApplication          application;
+  std::vector<unsigned char> pixels;
+  application.GetGraphicsController().mTextureUploadObserver = [&](PixelData data)
+  {
+    if(data.GetWidth() == 512u && data.GetHeight() == 1u)
+    {
+      auto buffer = Integration::GetPixelDataBuffer(data);
+      pixels.assign(buffer.buffer, buffer.buffer + buffer.bufferSize);
+    }
+  };
+  for(auto spread : {Ui::Gradient::SpreadMethod::PAD, Ui::Gradient::SpreadMethod::REPEAT, Ui::Gradient::SpreadMethod::REFLECT})
+  {
+    for(float alpha : {0.0f, 0.5f, 1.0f})
+    {
+      auto gradient = MakeGradient();
+      gradient->ClearStop();
+      Vector<float>   offsets;
+      Vector<Vector4> colors;
+      for(float offset : {0.0f, 1.0f / 512.0f, 511.0f / 512.0f, 1.0f})
+      {
+        offsets.PushBack(offset);
+      }
+      colors.PushBack(Vector4(1.0f, 0.0f, 0.0f, alpha));
+      colors.PushBack(Vector4(0.0f, 1.0f, 0.0f, alpha));
+      colors.PushBack(Vector4(0.0f, 1.0f, 0.0f, alpha));
+      colors.PushBack(Vector4(0.0f, 0.0f, 1.0f, alpha));
+      gradient->ApplyStops(offsets, colors);
+      gradient->SetSpreadMethod(spread);
+      auto texture = gradient->GenerateLookupTexture();
+      pixels.clear();
+      application.SendNotification();
+      application.Render();
+      const unsigned bpp = alpha < 1.0f ? 4u : 3u;
+      DALI_TEST_EQUALS(pixels.size(), 512u * bpp, TEST_LOCATION);
+      if(pixels.size() == 512u * bpp)
+      {
+        const auto value = static_cast<unsigned char>(255.0f * alpha);
+        // Endpoint colors follow the authored stops, independently of the
+        // segment interpolation formula. The middle remains solid green.
+        DALI_TEST_EQUALS(pixels[0u], value, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[1u], 0u, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[2u], 0u, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[256u * bpp + 1u], value, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[511u * bpp], 0u, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[511u * bpp + 1u], 0u, TEST_LOCATION);
+        DALI_TEST_EQUALS(pixels[511u * bpp + 2u], value, TEST_LOCATION);
+        if(bpp == 4u)
+        {
+          DALI_TEST_EQUALS(pixels[3u], value, TEST_LOCATION);
+          DALI_TEST_EQUALS(pixels[511u * bpp + 3u], value, TEST_LOCATION);
+        }
+      }
+    }
+  }
+  application.GetGraphicsController().mTextureUploadObserver = {};
   END_TEST;
 }

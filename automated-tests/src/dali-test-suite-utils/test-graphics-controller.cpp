@@ -1237,6 +1237,11 @@ void TestGraphicsController::UpdateTextures(const std::vector<Graphics::TextureU
     auto& updateInfo = updateInfoList[i];
     auto& source     = sourceList[i];
 
+    if(mTextureUploadObserver && source.sourceType == Graphics::TextureUpdateSourceInfo::Type::PIXEL_DATA)
+    {
+      mTextureUploadObserver(source.pixelDataSource.pixelData);
+    }
+
     auto texture = static_cast<TestGraphicsTexture*>(updateInfo.dstTexture);
     texture->Bind(0); // Use first texture unit during resource update
     texture->Update(updateInfo, source);
