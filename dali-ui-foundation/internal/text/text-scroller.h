@@ -326,6 +326,7 @@ private:
 
   int                      mScrollSpeed;                    ///< Speed which text should automatically scroll at
   int                      mLoopCount;                      ///< Number of time the text should scroll
+  int                      mAppliedLoopCount;               ///< Loop count setting applied to the current animation
   float                    mLoopDelay;                      ///< Time delay of loop start
   float                    mWrapGap;                        ///< Gap before text wraps around when scrolling
   Text::MarqueeStopMode    mStopMode;                       ///< Stop mode of scrolling text, when loop count is 0.

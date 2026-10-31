@@ -1337,32 +1337,6 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
           : roundf(parameters.padding.top + alignmentOffset.y);
     }
 
-    SetRequireRender(renderInfo.isCutoutEnabled);
-
-    // Mark that we don't use viewEffectiveScale at transform's size & offset for this visual.
-    // (Because visual transform size and polic already apply viewEffectiveScale).
-    SetTransformMapUsageForFittingMode(true);
-
-    // Reset cutout offset before call SetTransformAndSize.
-    // (cutout offset will be set at OnSetTransform)
-    if(mController->IsTextCutout())
-    {
-      mController->SetOffsetWithCutout(Vector2::ZERO);
-    }
-
-    // Transform offset is used for subpixel data upload in text tiling.
-    // We should set the transform before creating a tiling texture.
-    Property::Map visualTransform;
-    visualTransform.Add(Ui::Integration::Visual::Transform::Property::SIZE, layoutSize)
-      .Add(Ui::Integration::Visual::Transform::Property::SIZE_POLICY,
-           Vector2(Ui::Integration::Visual::Transform::Policy::ABSOLUTE, Ui::Integration::Visual::Transform::Policy::ABSOLUTE))
-      .Add(Ui::Integration::Visual::Transform::Property::OFFSET, visualTransformOffset)
-      .Add(Ui::Integration::Visual::Transform::Property::OFFSET_POLICY,
-           Vector2(Ui::Integration::Visual::Transform::Policy::ABSOLUTE, Ui::Integration::Visual::Transform::Policy::ABSOLUTE))
-      .Add(Ui::Integration::Visual::Transform::Property::ORIGIN, Ui::VisualOrigin::TOP_LEFT)
-      .Add(Ui::Integration::Visual::Transform::Property::PIVOT, Ui::VisualPivot::TOP_LEFT);
-    SetTransformAndSize(visualTransform, textControlSize, parameters.effectiveTextScale);
-
     // Get the maximum texture size.
     const int  maxTextureSize   = Dali::GetMaxTextureSize();
     const bool isHeightTiling   = renderInfo.size.height > static_cast<float>(maxTextureSize);
@@ -1394,11 +1368,6 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       revealData && revealData->unit != Text::Internal::Reveal::Unit::DISABLED &&
       HasCompleteTextRevealMetadata(renderInfo, maxTextureSize) &&
       !isMarqueeEnabled && !isCutoutEnabled;
-    if(revealData)
-    {
-      revealData->fadeDuration = textRevealEnabled ? renderInfo.textRevealFadeDuration : 0.0f;
-    }
-
     TextVisualShaderFeature::FeatureBuilder featureBuilder;
     featureBuilder.EnableMultiColor(renderInfo.hasMultipleTextColors)
       .EnableEmoji(renderInfo.containsColorGlyph)
@@ -1410,17 +1379,45 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
       .EnableTextReveal(textRevealEnabled);
 
-    Shader shader = GetTextShader(mFactoryCache, featureBuilder);
+    // Shader creation may reenter through ObjectCreatedSignal. Validate ownership
+    // before changing the published state.
+    Shader      shader        = mTextVisualShaderFactory.GetShader(mFactoryCache, featureBuilder);
+    const auto* currentReveal = GetTextVisualRevealData(mRevealData);
     if(!Dali::Adaptor::IsAvailable() || mControl.GetHandle() != control ||
-       !mController->IsAsyncRendering() || mTextLoadingTaskId != publicationTaskId || !hasCurrentGradientScale())
+       !mController->IsAsyncRendering() || mTextLoadingTaskId != publicationTaskId ||
+       mController->GetRenderRevision() != publicationRevision ||
+       parameters.textRevealRevision != (currentReveal ? currentReveal->revision : 0u) || !hasCurrentGradientScale())
     {
       return;
     }
-    if(!usesUserSpaceGradient)
+    mTextShaderFeatureCache = featureBuilder;
+    if(revealData)
     {
-      mImpl->mRenderer.SetShader(shader);
-      RemoveRenderer(control, false);
+      revealData->fadeDuration = textRevealEnabled ? renderInfo.textRevealFadeDuration : 0.0f;
     }
+
+    SetRequireRender(renderInfo.isCutoutEnabled);
+
+    // The visual transform already includes viewEffectiveScale.
+    SetTransformMapUsageForFittingMode(true);
+
+    // OnSetTransform recalculates the cutout offset.
+    if(mController->IsTextCutout())
+    {
+      mController->SetOffsetWithCutout(Vector2::ZERO);
+    }
+
+    // Tiled texture upload needs the transform offset for subpixel alignment.
+    Property::Map visualTransform;
+    visualTransform.Add(Ui::Integration::Visual::Transform::Property::SIZE, layoutSize)
+      .Add(Ui::Integration::Visual::Transform::Property::SIZE_POLICY,
+           Vector2(Ui::Integration::Visual::Transform::Policy::ABSOLUTE, Ui::Integration::Visual::Transform::Policy::ABSOLUTE))
+      .Add(Ui::Integration::Visual::Transform::Property::OFFSET, visualTransformOffset)
+      .Add(Ui::Integration::Visual::Transform::Property::OFFSET_POLICY,
+           Vector2(Ui::Integration::Visual::Transform::Policy::ABSOLUTE, Ui::Integration::Visual::Transform::Policy::ABSOLUTE))
+      .Add(Ui::Integration::Visual::Transform::Property::ORIGIN, Ui::VisualOrigin::TOP_LEFT)
+      .Add(Ui::Integration::Visual::Transform::Property::PIVOT, Ui::VisualPivot::TOP_LEFT);
+    SetTransformAndSize(visualTransform, textControlSize, parameters.effectiveTextScale);
 
     // No tiling required. Use the default renderer.
     if(renderInfo.size.height <= static_cast<float>(maxTextureSize))
@@ -1437,10 +1434,6 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
         auto& gradientData = GetOrCreateTextVisualGradientData(mGradientData);
         AddTexture(textureSet, renderInfo.textGradientPreservedPixelData, sampler, textureSetIndex);
         ++textureSetIndex;
-        if(!usesUserSpaceGradient)
-        {
-          gradientData.mTextGradientMaskPixelData = renderInfo.textGradientMaskPixelData;
-        }
         AddTexture(textureSet, renderInfo.textGradientMaskPixelData, sampler, textureSetIndex);
         ++textureSetIndex;
         Text::Internal::Gradient::AddLookupTexture(textureSet, textureSetIndex, gradientData.mTextGradientStyle);
@@ -1495,18 +1488,11 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
         AddTexture(textureSet, renderInfo.revealMetadataTiles.front(), nearestSampler, textureSetIndex);
       }
 
-      if(usesUserSpaceGradient)
+      RemoveRenderer(control, false);
+      mImpl->mRenderer.SetShader(shader);
+      if(mTextShaderFeatureCache.IsEnabledTextGradientMixed())
       {
-        if(!hasCurrentGradientScale() || mController->GetRenderRevision() != publicationRevision)
-        {
-          return;
-        }
-        mImpl->mRenderer.SetShader(shader);
-        RemoveRenderer(control, false);
-        if(mTextShaderFeatureCache.IsEnabledTextGradientMixed())
-        {
-          GetOrCreateTextVisualGradientData(mGradientData).mTextGradientMaskPixelData = renderInfo.textGradientMaskPixelData;
-        }
+        GetOrCreateTextVisualGradientData(mGradientData).mTextGradientMaskPixelData = renderInfo.textGradientMaskPixelData;
       }
       mImpl->mRenderer.SetTextures(textureSet);
       mImpl->mRenderer.SetProperty(mHasMultipleTextColorsIndex,
@@ -1540,11 +1526,8 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       Sampler sampler = Sampler::New();
       sampler.SetFilterMode(FilterMode::LINEAR, FilterMode::LINEAR);
 
-      if(usesUserSpaceGradient)
-      {
-        mImpl->mRenderer.SetShader(shader);
-        RemoveRenderer(control, false);
-      }
+      RemoveRenderer(control, false);
+      mImpl->mRenderer.SetShader(shader);
 
       int verifiedWidth  = static_cast<int>(renderInfo.size.width);
       int verifiedHeight = static_cast<int>(renderInfo.size.height);

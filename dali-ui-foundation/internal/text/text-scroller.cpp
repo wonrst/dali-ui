@@ -421,6 +421,7 @@ TextScroller::TextScroller(Ui::Integration::Text::ScrollerInterface& scrollerInt
   mGradientOverlayAnimOffsetIndex(Property::INVALID_INDEX),
   mScrollSpeed(MINIMUM_SCROLL_SPEED),
   mLoopCount(1),
+  mAppliedLoopCount(1),
   mLoopDelay(0.0f),
   mWrapGap(0.0f),
   mStopMode(Text::MarqueeStopMode::FINISH_LOOP),
@@ -465,6 +466,15 @@ void TextScroller::SetParameters(Actor scrollingTextActor, Renderer renderer, Te
   DALI_LOG_INFO(gLogFilter, Debug::Verbose,
                 "TextScroller::SetParameters controlSize[%f,%f] textureSize[%f,%f] direction[%d]\n", controlSize.x,
                 controlSize.y, textureSize.x, textureSize.y, direction);
+  const int completedLoops = mScrollAnimation ? mScrollAnimation.GetCurrentLoop() : 0;
+  if(IsScrolling() && mLoopCount == mAppliedLoopCount && mScrollAnimation.GetLoopCount() > 0 &&
+     completedLoops >= mScrollAnimation.GetLoopCount())
+  {
+    // The update thread can finish before its FinishedSignal is delivered.
+    // Keep that animation and let its queued completion finish this run.
+    return;
+  }
+
   mRenderer           = renderer;
   mScrollingTextActor = scrollingTextActor;
   RemoveGradientConstraints();
@@ -481,14 +491,19 @@ void TextScroller::SetParameters(Actor scrollingTextActor, Renderer renderer, Te
     {
       animationProgress = animationReStart ? 0.0f : mScrollAnimation.GetCurrentProgress();
 
-      if(mLoopCount > 0) // If not a ininity loop, then calculate remained loop
+      // Content replacement preserves the active budget. A changed setting
+      // still takes effect at the next publication, as it did before.
+      const int loopCount = mLoopCount == mAppliedLoopCount ? mScrollAnimation.GetLoopCount() : mLoopCount;
+      if(loopCount > 0)
       {
-        remainedLoop = mLoopCount - (mScrollAnimation.GetCurrentLoop());
+        remainedLoop = loopCount - completedLoops;
         remainedLoop = mIsStopRequested ? 1 : (remainedLoop <= 0 ? 1 : remainedLoop);
       }
     }
     mScrollAnimation.Clear();
   }
+
+  mAppliedLoopCount = mLoopCount;
 
   // Set the shader and texture for scrolling
   const std::string_view vertexShaderSource       = isHorizontal ? SHADER_TEXT_SCROLLER_SHADER_VERT : SHADER_TEXT_SCROLLER_VERTICAL_SHADER_VERT;
