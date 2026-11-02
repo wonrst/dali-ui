@@ -238,6 +238,9 @@ public:
    * @param[in] featureBuilder Collection of current text shader's features
    * @return The standard text rendering shader with features.
    */
+  /** @brief Gets a cached cutout variant; ordinary text variants are unchanged. */
+  Shader GetCutoutShader(VisualFactoryCache& factoryCache, bool coloredGlyphs, bool overlay);
+
   Shader GetShader(VisualFactoryCache& factoryCache, const TextVisualShaderFeature::FeatureBuilder& featureBuilder);
 
   /**

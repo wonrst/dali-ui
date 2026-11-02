@@ -1237,6 +1237,9 @@ public: // Default style & Input style
    */
   void SetDefaultColor(const Vector4& color);
 
+  /** @brief Updates a uniform-only cutout tint without invalidating its raster. */
+  void SetCutoutTextColor(const Vector4& color);
+
   /**
    * @brief Retrieves the text's default color.
    *

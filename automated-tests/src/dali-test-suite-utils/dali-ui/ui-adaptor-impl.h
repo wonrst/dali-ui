@@ -71,6 +71,11 @@ public:
   void RemoveIdle(CallbackBase* callback);
   void RunIdles();
 
+  uint32_t GetIdleCallbackCount() const
+  {
+    return mCallbacks.Count() + mReturnCallbacks.Count();
+  }
+
   void RequestUpdateOnce();
   void RequestProcessEventsOnIdle();
   void RequestProcessEventsAndUpdate();

@@ -296,8 +296,17 @@ bool LabelImpl::PropertyHandler::OnPropertySet(LabelImpl& impl, Dali::Property::
       const Vector4& textColor = propertyValue.Get<Vector4>();
       if(impl.mController->GetDefaultColor() != textColor)
       {
-        impl.mController->SetDefaultColor(textColor);
-        impl.RequestRendererUpdate();
+        if(impl.mController->IsTextCutout() && (!impl.mController->IsAsyncRendering() || !impl.mIsAsyncRenderRequested) &&
+           Internal::TextVisual::CanUpdateCutoutTextColor(impl.mVisual))
+        {
+          impl.mController->SetCutoutTextColor(textColor);
+        }
+        else
+        {
+          impl.mController->SetDefaultColor(textColor);
+          impl.RequestRendererUpdate();
+          if(impl.mController->IsAsyncRendering() && impl.mController->IsTextCutout()) impl.RequestAsyncRender();
+        }
 
         // Trigger constraint always.
         if(DALI_LIKELY(impl.mVisual))

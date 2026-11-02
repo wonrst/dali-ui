@@ -29,6 +29,7 @@
 
 // INTERNAL INCLUDES
 #include <dali-ui-foundation/integration-api/text/async-text-interface.h>
+#include <dali-ui-foundation/integration-api/ui-constraint-tag-ranges.h>
 #include <dali-ui-foundation/internal/text/async-text/async-text-manager.h>
 #include <dali-ui-foundation/internal/text/controller/text-controller.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
@@ -390,6 +391,18 @@ public:
    * @return The visual size in Label coordinates after transform constraints.
    */
   static Vector2 GetGradientViewCoordinateSize(Ui::Integration::Visual::Base visual);
+
+  /** @brief Binds the current solid background without baking it into text pixels. */
+  static void SetCutoutBackground(Ui::Integration::Visual::Base visual, Ui::Integration::Visual::Base background);
+
+  /** @brief Whether a text result is currently attached, including a retained async result. */
+  static bool HasTextRenderer(Ui::Integration::Visual::Base visual);
+
+  /** @brief Whether the current renderer owns the shader cutout background. */
+  static bool HasCutoutRenderer(Ui::Integration::Visual::Base visual);
+
+  /** @brief Whether a text color update is independent of the current raster payload. */
+  static bool CanUpdateCutoutTextColor(Ui::Integration::Visual::Base visual);
 
   /**
    * @brief Render marquee text PixelData with the TextVisual-owned Typesetter.
@@ -900,6 +913,8 @@ private:
    * @param[in] gradientContext Borrowed USER_SPACE raster coordinates, or nullptr.
    * @return The textures prepared for the text renderer.
    */
+  TextureSet GetCutoutTexture(const Ui::Text::CutoutRenderData& data);
+
   TextureSet GetTextTexture(const Vector2& size, const Ui::Text::GradientRasterContext* gradientContext);
 
   /**
@@ -936,8 +951,25 @@ private:
   void LoadComplete(bool success, const TextInformation& textInformation) override;
 
 private:
+  static constexpr uint32_t CUTOUT_BACKGROUND_CONSTRAINT_TAG = Ui::Integration::ConstraintTagRanges::UI_CONSTRAINT_TAG_START + 29u;
+
   typedef std::vector<VisualRenderer> RendererContainer;
   typedef std::vector<Constraint>     ConstraintContainer;
+
+  /**
+   * @brief Returns the optional background binding in the first slot.
+   *
+   * The default color handle is the common fast path. A color source set after
+   * scene attachment can create tiled colors without that default, so identify
+   * other first entries by tag rather than assuming they are the background.
+   */
+  Constraint GetCutoutBackgroundConstraint() const
+  {
+    return !mColorConstraintList.empty() && mColorConstraintList.front() != mColorConstraint &&
+               mColorConstraintList.front().GetTag() == CUTOUT_BACKGROUND_CONSTRAINT_TAG
+             ? mColorConstraintList.front()
+             : Constraint{};
+  }
 
 private:
   Ui::Text::ControllerPtr                    mController;         ///< The text's controller.
@@ -958,7 +990,7 @@ private:
   Property::Index     mTextColorAnimatableIndex;         ///< The index of uTextColorAnimatable property.
   Property::Index     mTextRequireRenderPropertyIndex;   ///< The index of requireRender property.
   RendererContainer   mRendererList;
-  ConstraintContainer mColorConstraintList;
+  ConstraintContainer mColorConstraintList; ///< Color constraints, preceded by an optional cutout background binding.
   ConstraintContainer mOpacityConstraintList;
 
   float                    mLineHeight;
@@ -970,6 +1002,7 @@ private:
   uint64_t                 mTextLoadingMaximumLinesRevision;      ///< MaximumLines revision owned by the latest render task.
   uint64_t                 mNaturalSizeMaximumLinesRevision;      ///< MaximumLines revision owned by the latest natural-size task.
   uint64_t                 mHeightForWidthMaximumLinesRevision;   ///< MaximumLines revision owned by the latest HFW task.
+  bool                     mIsCutoutRenderer : 1;                 ///< Current renderer consumes cropped cutout inputs.
   bool                     mRendererUpdateNeeded : 1;             ///< The flag to indicate whether the renderer needs to be updated.
   bool                     mApplyingFittingMode : 1;              ///< Whether renderer update is running from OnApplyFittingMode().
   bool                     mTextRequireRender : 1;                ///< The flag to indicate whether the text needs to be rendered.

@@ -52,6 +52,8 @@ struct PreparedRevealBlur;
 
 namespace Text
 {
+struct CutoutRenderData;
+
 namespace Internal DALI_INTERNAL
 {
 class AsyncTextLoader;
@@ -339,6 +341,7 @@ struct AsyncTextRenderInfo
     marqueePixelData(),
     revealMetadataTiles(),
     revealBlur(),
+    cutout(),
     size(),
     textLogicalBounds(0.0f, 0.0f, 1.0f, 1.0f),
     controlSize(),
@@ -387,6 +390,8 @@ struct AsyncTextRenderInfo
   std::vector<PixelData>                    revealMetadataTiles; ///< One RGBA8888 buffer per height tile.
 
   std::shared_ptr<const Ui::Internal::PreparedRevealBlur> revealBlur; ///< Optional CPU-only result; absent for ordinary Reveal.
+
+  std::shared_ptr<const CutoutRenderData> cutout; ///< One immutable cutout raster snapshot.
 
   Size                              size;                     ///< Actual rendered buffer size. For marquee, this is the scrolling texture size.
   Vector4                           textLogicalBounds;        ///< Normalized logical text bounds inside @p size.

@@ -1153,6 +1153,12 @@ float Controller::GetPlaceholderTextFontSize(FontSizeType type) const
   return PlaceholderHandler::GetPlaceholderTextFontSize(*this, type);
 }
 
+void Controller::SetCutoutTextColor(const Vector4& color)
+{
+  mImpl->mTextColor = color;
+  mImpl->mModel->mVisualModel->SetTextColor(color);
+}
+
 void Controller::SetDefaultColor(const Vector4& color)
 {
   mImpl->SetDefaultColor(color);

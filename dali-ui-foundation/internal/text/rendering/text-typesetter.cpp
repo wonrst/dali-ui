@@ -32,11 +32,13 @@
 #include <dali-ui-foundation/internal/text/rendering/styles/character-spacing-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/strikethrough-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
+#include <dali-ui-foundation/internal/text/rendering/text-cutout-render-data.h>
 #include <dali-ui-foundation/internal/text/rendering/text-raster-coordinate.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter-impl.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-run-snapshot.h>
+#include <dali-ui-foundation/internal/text/styled-text/gradient-span-data.h>
 #include <dali-ui-foundation/internal/text/text-trace.h>
 
 namespace DALI_NAMESPACE
@@ -487,7 +489,8 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
                                               Direction       textDirection,
                                               RenderBehaviour behaviour, bool ignoreHorizontalAlignment,
                                               Pixel::Format pixelFormat, const Vector2& originSize,
-                                              const GradientRasterContext* gradientContext)
+                                              const GradientRasterContext* gradientContext,
+                                              const Vector2& rasterOrigin, bool includeCutoutBackground)
 {
   uint32_t       bufferWidth, bufferHeight;
   const uint32_t bytesPerPixel = (behaviour == RENDER_NO_STYLES || behaviour == RENDER_MASK)
@@ -569,7 +572,9 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
   if(isCutoutEnabled)
   {
     Vector2 offset = viewModel.GetOffsetWithCutout();
-    if(!Raster::Convert(offset.x, penX) || !Raster::Convert(offset.y, penY))
+    if(!Raster::Convert(offset.x, penX) || !Raster::Convert(offset.y, penY) ||
+       !Raster::AddCoordinate(penX, -rasterOrigin.x, penX) ||
+       !Raster::AddCoordinate(penY, -rasterOrigin.y, penY))
     {
       return {};
     }
@@ -628,9 +633,9 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
 
       const float& blurRadius = viewModel.GetOutlineBlurRadius();
 
-      if(blurRadius > Math::MACHINE_EPSILON_1)
+      if(blurRadius > Math::MACHINE_EPSILON_1 && !PixelBufferOperations::ApplyGaussianBlur(outlineImageBuffer, blurRadius))
       {
-        PixelBufferOperations::ApplyGaussianBlur(outlineImageBuffer, blurRadius);
+        return {};
       }
 
       // Combine the two buffers
@@ -652,9 +657,9 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
       // Check whether it will be a soft shadow
       const float& blurRadius = viewModel.GetShadowBlurRadius();
 
-      if(blurRadius > Math::MACHINE_EPSILON_1)
+      if(blurRadius > Math::MACHINE_EPSILON_1 && !PixelBufferOperations::ApplyGaussianBlur(shadowImageBuffer, blurRadius))
       {
-        PixelBufferOperations::ApplyGaussianBlur(shadowImageBuffer, blurRadius);
+        return {};
       }
 
       // Combine the two buffers
@@ -691,7 +696,7 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
 
     // Generate the background_with_mask if enabled
     const bool backgroundWithCutoutEnabled = viewModel.IsBackgroundWithCutoutEnabled();
-    if((backgroundWithCutoutEnabled) && RENDER_OVERLAY_STYLE != behaviour)
+    if(backgroundWithCutoutEnabled && includeCutoutBackground && RENDER_OVERLAY_STYLE != behaviour)
     {
       PixelBuffer backgroundImageBuffer;
 
@@ -743,6 +748,202 @@ PixelBuffer Typesetter::RenderWithPixelBuffer(const Vector2&  size,
   }
 
   return imageBuffer;
+}
+
+bool Typesetter::RenderCutoutPlanes(const Vector2& size, CutoutRenderData& planes,
+                                    Pixel::Format glyphFormat, uint32_t maxTextureSize)
+{
+  int32_t widthValue, heightValue;
+  if((glyphFormat != Pixel::L8 && glyphFormat != Pixel::RGBA8888) ||
+     !Raster::Convert(size.width, widthValue) || !Raster::Convert(size.height, heightValue) ||
+     widthValue <= 0 || heightValue <= 0)
+  {
+    return false;
+  }
+  const uint32_t controlWidth  = static_cast<uint32_t>(widthValue);
+  const uint32_t controlHeight = static_cast<uint32_t>(heightValue);
+  auto&          model         = *mImpl->GetViewModel();
+  model.ElideGlyphs(mImpl->GetFontClient());
+  // Gradient spans still use their existing raster-space paint context.
+  const auto* gradientSpans = model.GetGradientSpanModelData();
+  if(!model.IsCutoutEnabled() || (gradientSpans && !gradientSpans->glyphPaintIndices.Empty()))
+  {
+    return false;
+  }
+
+  int32_t    penX, penY;
+  const auto offset = model.GetOffsetWithCutout();
+  if(!Raster::Convert(offset.x, penX) || !Raster::Convert(offset.y, penY))
+  {
+    return false;
+  }
+  int32_t    baseline = penY;
+  int64_t    left     = controlWidth;
+  int64_t    top      = controlHeight;
+  int64_t    right    = 0;
+  int64_t    bottom   = 0;
+  const auto end      = model.GetEndIndexOfElidedGlyphs();
+  for(LineIndex lineIndex = 0; lineIndex < model.GetNumberOfLines(); ++lineIndex)
+  {
+    const auto& line = model.GetLines()[lineIndex];
+    int32_t     alignment;
+    if(!Raster::AddCoordinate(baseline, line.ascender + GetPreOffsetVerticalLineAlignment(line, model.GetVerticalLineAlignment()), baseline) ||
+       !Raster::Convert(line.ellipsis ? model.GetElidedOffset() : line.alignmentOffset, alignment))
+    {
+      return false;
+    }
+    // Background runs, decorations and inserted hyphens can extend beyond ink.
+    if(model.GetHyphensCount() || model.IsBackgroundEnabled() || model.IsMarkupBackgroundColorSet() ||
+       model.IsUnderlineEnabled() || model.IsStrikethroughEnabled() ||
+       model.IsMarkupUnderlineSet() || model.IsMarkupStrikethroughSet())
+    {
+      int32_t lineWidth, lineTop, lineBottom;
+      if(!Raster::Convert(std::ceil(line.width), lineWidth) ||
+         !Raster::Convert(std::floor(static_cast<double>(baseline) - line.ascender), lineTop) ||
+         !Raster::Convert(std::ceil(static_cast<double>(baseline) - line.descender), lineBottom))
+      {
+        return false;
+      }
+      const int64_t px = static_cast<int64_t>(penX) + alignment;
+      left             = std::min(left, px);
+      right            = std::max(right, px + lineWidth);
+      top              = std::min(top, static_cast<int64_t>(lineTop));
+      bottom           = std::max(bottom, static_cast<int64_t>(lineBottom));
+    }
+    for(GlyphIndex index = line.glyphRun.glyphIndex;
+        index < line.glyphRun.glyphIndex + line.glyphRun.numberOfGlyphs && index <= end; ++index)
+    {
+      const auto& glyph = model.GetGlyphs()[index];
+      if(IsSyntheticReplacementGlyph(glyph))
+      {
+        return false;
+      }
+      TextAbstraction::GlyphBufferData bitmap;
+      int32_t                          glyphWidth, glyphHeight;
+      if(!Raster::Convert(glyph.width, glyphWidth) || !Raster::Convert(glyph.height, glyphHeight) ||
+         glyphWidth < 0 || glyphHeight < 0 ||
+         !Raster::GlyphBufferFits(static_cast<uint32_t>(glyphWidth), static_cast<uint32_t>(glyphHeight), 4u))
+      {
+        return false;
+      }
+      bitmap.width  = static_cast<uint32_t>(glyphWidth);
+      bitmap.height = static_cast<uint32_t>(glyphHeight);
+      mImpl->GetFontClient().CreateBitmap(glyph.fontId, glyph.index, glyph.isItalicRequired, glyph.isBoldRequired, bitmap, 0);
+      if(bitmap.buffer && bitmap.width && bitmap.height)
+      {
+        int32_t x, y;
+        if(!Raster::Convert(model.GetLayout()[index].x, x) || !Raster::Convert(model.GetLayout()[index].y, y))
+        {
+          return false;
+        }
+        const int64_t px = static_cast<int64_t>(penX) + alignment + x;
+        const int64_t py = static_cast<int64_t>(baseline) + y;
+        left             = std::min(left, px);
+        top              = std::min(top, py);
+        right            = std::max(right, px + bitmap.width);
+        bottom           = std::max(bottom, py + bitmap.height);
+      }
+    }
+    if(!Raster::AddCoordinate(baseline, -line.descender + GetPostOffsetVerticalLineAlignment(line, model.GetVerticalLineAlignment()), baseline))
+    {
+      return false;
+    }
+  }
+  // Conservative union for both style planes, including the existing CPU blur's
+  // support and a transparent filtering guard. No new outline/blur algorithm.
+  float decorationHeight = std::max(model.GetUnderlineHeight(), model.GetStrikethroughHeight());
+  for(UnderlineRunIndex i = 0; i < model.GetNumberOfUnderlineRuns(); ++i)
+  {
+    UnderlinedGlyphRun run;
+    model.GetUnderlineRuns(&run, i, 1u);
+    decorationHeight = std::max(decorationHeight, run.properties.height);
+  }
+  for(StrikethroughRunIndex i = 0; i < model.GetNumberOfStrikethroughRuns(); ++i)
+  {
+    StrikethroughGlyphRun run;
+    model.GetStrikethroughRuns(&run, i, 1u);
+    decorationHeight = std::max(decorationHeight, run.properties.height);
+  }
+  const auto  shadow      = model.GetShadowOffset();
+  const auto  outline     = model.GetOutlineOffset();
+  const float marginValue = 2.f + 3.f * std::max(0.f, decorationHeight) + (model.IsOutlineEnabled() ? 2.f * model.GetOutlineWidth() : 0.f) +
+                            (model.IsShadowEnabled() ? std::max(std::abs(shadow.x), std::abs(shadow.y)) + 3.f * model.GetShadowBlurRadius() : 0.f) +
+                            (model.IsOutlineEnabled() ? std::max(std::abs(outline.x), std::abs(outline.y)) + 3.f * model.GetOutlineBlurRadius() : 0.f);
+  int32_t margin;
+  if(!Raster::Convert(std::ceil(marginValue), margin) || margin < 0)
+  {
+    return false;
+  }
+  const bool hasPixels = right > left && bottom > top;
+  left                 = std::max<int64_t>(0, left - margin);
+  top                  = std::max<int64_t>(0, top - margin);
+  right                = std::min<int64_t>(controlWidth, right + margin);
+  bottom               = std::min<int64_t>(controlHeight, bottom + margin);
+  if(!hasPixels || right <= left || bottom <= top)
+  {
+    left = top = 0;
+    right = bottom = 1;
+  }
+  const uint32_t width = right - left, height = bottom - top;
+  if(!Raster::BufferFits(width, height, 4u) ||
+     (maxTextureSize && (width > maxTextureSize || height > maxTextureSize)))
+  {
+    return false;
+  }
+  int32_t x, y;
+  if(!Raster::Add(penX, -left, x) || !Raster::Add(penY, -top, y))
+  {
+    return false;
+  }
+  auto glyphs = mImpl->CreateImageBuffer(width, height, STYLE_NONE, false, Pixel::RGBA8888, x, y, 0u, end);
+  if(!glyphs) return false;
+  PixelBuffer coverage;
+  if(glyphFormat == Pixel::RGBA8888)
+  {
+    coverage = glyphs;
+  }
+  else
+  {
+    coverage                  = PixelBuffer::New(width, height, Pixel::L8);
+    auto*       coverageBytes = coverage.GetBuffer();
+    const auto* glyphBytes    = glyphs.GetBuffer();
+    for(size_t i = 0; i < static_cast<size_t>(width) * height; ++i)
+    {
+      coverageBytes[i] = glyphBytes[i * 4u + 3u];
+    }
+  }
+  glyphs.Reset();
+  const bool hasStyle = model.IsOutlineEnabled() || model.IsShadowEnabled() ||
+                        model.IsBackgroundEnabled() || model.IsMarkupBackgroundColorSet();
+  const Vector2 rasterSize(static_cast<float>(width), static_cast<float>(height));
+  const Vector2 origin(static_cast<float>(left), static_cast<float>(top));
+  auto          style = hasStyle ? RenderWithPixelBuffer(rasterSize, Direction::LEFT_TO_RIGHT, RENDER_NO_TEXT,
+                                                         false, Pixel::RGBA8888, Size::ZERO, nullptr, origin, false)
+                                 : Impl::CreateTransparentImageBuffer(1u, 1u, Pixel::RGBA8888);
+  PixelBuffer   overlay;
+  const bool    hasOverlay = model.IsUnderlineEnabled() || model.IsStrikethroughEnabled() ||
+                          model.IsMarkupUnderlineSet() || model.IsMarkupStrikethroughSet();
+  if(hasOverlay)
+  {
+    overlay = RenderWithPixelBuffer(rasterSize, Direction::LEFT_TO_RIGHT, RENDER_OVERLAY_STYLE,
+                                    false, Pixel::RGBA8888, Size::ZERO, nullptr, origin, false);
+  }
+  if(!style || (hasOverlay && !overlay))
+  {
+    return false;
+  }
+  CutoutRenderData result;
+  result.controlSize = size;
+  result.rect        = Vector4(origin.x, origin.y, rasterSize.x, rasterSize.y);
+  result.coverage    = PixelBuffer::Convert(coverage);
+  result.style       = PixelBuffer::Convert(style);
+  if(overlay)
+  {
+    result.overlay = PixelBuffer::Convert(overlay);
+  }
+  if(!result.IsValid()) return false;
+  planes = std::move(result);
+  return true;
 }
 
 Internal::Reveal::Plan Typesetter::CreateFinalRevealPlan(const Internal::Reveal::Plan& sourcePlan,

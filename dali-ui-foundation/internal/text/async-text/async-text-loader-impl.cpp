@@ -34,6 +34,8 @@
 #include <dali-ui-foundation/internal/text/ellipsis/ellipsis-resolver.h>
 #include <dali-ui-foundation/internal/text/hyphenator.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-start-geometry.h>
+#include <dali-ui-foundation/internal/text/rendering/text-cutout-render-data.h>
+#include <dali-ui-foundation/internal/text/rendering/text-raster-coordinate.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-layout-data.h>
 #include <dali-ui-foundation/internal/text/replacement/replacement-placement.h>
@@ -496,7 +498,12 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
   mTextModel->mVisualModel->mControlSize = Size(parameters.textWidth, parameters.textHeight);
 
   // Update style properties.
-  mTextModel->mVisualModel->SetDecorationUiScale(parameters.decorationUiScale);
+  // Cutout planes are sampled in the full supersampled canvas. Decorations
+  // must use that same density; ordinary text keeps its existing scale contract.
+  const float cutoutRasterScale = parameters.isCutoutEnabled && !parameters.isMarqueeEnabled
+                                    ? std::max(parameters.renderScale, 1.f)
+                                    : 1.f;
+  mTextModel->mVisualModel->SetDecorationUiScale(parameters.decorationUiScale * cutoutRasterScale);
   mTextModel->mVisualModel->SetTextColor(parameters.textColor);
   // Requests carry resolved colors, also used by runs when global style is off.
   // Always replace the previous worker request's fallback colors.
@@ -527,7 +534,7 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
   if(parameters.isShadowEnabled)
   {
     mTextModel->mVisualModel->SetShadowEnabled(true);
-    mTextModel->mVisualModel->SetShadowBlurRadius(parameters.shadowBlurRadius);
+    mTextModel->mVisualModel->SetShadowBlurRadius(parameters.shadowBlurRadius * cutoutRasterScale);
     mTextModel->mVisualModel->SetShadowColor(parameters.shadowColor);
     mTextModel->mVisualModel->SetShadowOffset(parameters.shadowOffset);
   }
@@ -541,7 +548,7 @@ void AsyncTextLoader::Update(AsyncTextParameters& parameters)
     mTextModel->mVisualModel->SetOutlineEnabled(true);
     mTextModel->mVisualModel->SetOutlineColor(parameters.outlineColor);
     mTextModel->mVisualModel->SetOutlineWidth(parameters.outlineWidth);
-    mTextModel->mVisualModel->SetOutlineBlurRadius(parameters.outlineBlurRadius);
+    mTextModel->mVisualModel->SetOutlineBlurRadius(parameters.outlineBlurRadius * cutoutRasterScale);
     mTextModel->mVisualModel->SetOutlineOffset(parameters.outlineOffset);
   }
   else
@@ -1486,14 +1493,15 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
   if(cutoutEnabled)
   {
     // We need to store the offset including padding and vertical alignment.
-    float xOffset = parameters.padding.start;
-    float yOffset = parameters.padding.top + std::round((parameters.textHeight - layoutSize.y) *
-                                                        VERTICAL_ALIGNMENT_TABLE[static_cast<int>(parameters.verticalAlignment)]);
+    const float density = parameters.isMarqueeEnabled ? 1.f : std::max(parameters.renderScale, 1.f);
+    const float xOffset = std::round(parameters.padding.start * density);
+    const float yOffset = std::round(parameters.padding.top * density + (parameters.textHeight - layoutSize.y) *
+                                                                          VERTICAL_ALIGNMENT_TABLE[static_cast<int>(parameters.verticalAlignment)]);
     renderModel->mVisualModel->SetOffsetWithCutout(Vector2(xOffset, yOffset));
 
     // The layout size is set to the text control size including padding.
-    layoutSize.x = parameters.textWidth + (parameters.padding.start + parameters.padding.end);
-    layoutSize.y = parameters.textHeight + (parameters.padding.top + parameters.padding.bottom);
+    layoutSize.x = parameters.textWidth + (parameters.padding.start + parameters.padding.end) * density;
+    layoutSize.y = parameters.textHeight + (parameters.padding.top + parameters.padding.bottom) * density;
   }
 
   // Check the text direction
@@ -1578,24 +1586,49 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
   renderInfo.isTextDirectionRTL = mIsTextDirectionRTL;
 
   PixelBuffer cutoutData;
-  if(cutoutEnabled)
+  if(cutoutEnabled && !parameters.isMarqueeEnabled)
   {
-    cutoutData = mTypesetter->RenderWithPixelBuffer(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
-                                                    ignoreHorizontalAlignment, textPixelFormat, Size::ZERO, context);
-
-    // Make transparent buffer.
-    // If the cutout is enabled, a separate texture is not used for the text.
-    PixelBuffer buffer       = mTypesetter->CreateFullBackgroundBuffer(1, 1, Color::TRANSPARENT);
-    renderInfo.textPixelData = PixelBuffer::Convert(buffer);
-
-    // Set the flag of cutout.
-    renderInfo.isCutoutEnabled = cutoutEnabled && (cutoutData != nullptr);
+    auto       data   = std::make_shared<CutoutRenderData>();
+    const auto format = containsColorGlyph || hasMultipleTextColors ? Pixel::RGBA8888 : Pixel::L8;
+    if(mTypesetter->RenderCutoutPlanes(layoutSize, *data, format, parameters.maxTextureSize))
+    {
+      renderInfo.cutout          = std::move(data);
+      renderInfo.isCutoutEnabled = true;
+    }
+    else if(!hasGradientSpan)
+    {
+      DALI_LOG_ERROR("Cutout raster bounds exceed the texture limit or are invalid\n");
+      return renderInfo;
+    }
   }
-  else
+  if(!renderInfo.cutout)
   {
-    // Create a pixel data for the text without any styles
-    renderInfo.textPixelData =
-      mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES, ignoreHorizontalAlignment, textPixelFormat, Size::ZERO, context);
+    if(cutoutEnabled)
+    {
+      // Legacy GradientSpan/marquee inputs still require full-raster paint coordinates.
+      if(parameters.maxTextureSize > 0 &&
+         (layoutSize.width > parameters.maxTextureSize || layoutSize.height > parameters.maxTextureSize))
+      {
+        DALI_LOG_ERROR("Legacy cutout combination exceeds the texture limit\n");
+        return renderInfo;
+      }
+      cutoutData = mTypesetter->RenderWithPixelBuffer(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES,
+                                                      ignoreHorizontalAlignment, textPixelFormat, Size::ZERO, context);
+
+      // Make transparent buffer.
+      // If the cutout is enabled, a separate texture is not used for the text.
+      PixelBuffer buffer       = mTypesetter->CreateFullBackgroundBuffer(1, 1, Color::TRANSPARENT);
+      renderInfo.textPixelData = PixelBuffer::Convert(buffer);
+
+      // Set the flag of cutout.
+      renderInfo.isCutoutEnabled = cutoutEnabled && (cutoutData != nullptr);
+    }
+    else
+    {
+      // Create a pixel data for the text without any styles
+      renderInfo.textPixelData =
+        mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_STYLES, ignoreHorizontalAlignment, textPixelFormat, Size::ZERO, context);
+    }
   }
 
   std::unique_ptr<Internal::Reveal::Plan> blurPlan;
@@ -1691,7 +1724,7 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     }
   }
 
-  if(styleEnabled)
+  if(styleEnabled && !renderInfo.cutout)
   {
     if(renderInfo.isCutoutEnabled)
     {
@@ -1706,13 +1739,13 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
         mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_NO_TEXT, ignoreHorizontalAlignment, Pixel::RGBA8888);
     }
   }
-  if(isOverlayStyle)
+  if(isOverlayStyle && !renderInfo.cutout)
   {
     // Create RGBA pixel data for all the overlay styles
     renderInfo.overlayStylePixelData =
       mTypesetter->Render(layoutSize, textDirection, Text::Typesetter::RENDER_OVERLAY_STYLE, ignoreHorizontalAlignment, Pixel::RGBA8888);
   }
-  if(containsColorGlyph && !hasMultipleTextColors)
+  if(containsColorGlyph && !hasMultipleTextColors && !renderInfo.cutout)
   {
     // Create a L8 pixel data as a mask to avoid color glyphs (e.g. emojis) to be affected by text color animation
     renderInfo.maskPixelData =
@@ -1851,6 +1884,45 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
 AsyncTextRenderInfo AsyncTextLoader::RenderText(AsyncTextParameters& parameters, bool useCachedNaturalSize,
                                                 const Size& naturalSize)
 {
+  if(parameters.text.empty() && parameters.isCutoutEnabled)
+  {
+    AsyncTextRenderInfo info;
+    auto                data     = std::make_shared<CutoutRenderData>();
+    auto                coverage = PixelBuffer::New(1u, 1u, Pixel::L8);
+    auto                style    = PixelBuffer::New(1u, 1u, Pixel::RGBA8888);
+    memset(coverage.GetBuffer(), 0, 1u);
+    memset(style.GetBuffer(), 0, 4u);
+    data->coverage     = PixelBuffer::Convert(coverage);
+    data->style        = PixelBuffer::Convert(style);
+    data->rect         = Vector4(0.f, 0.f, 1.f, 1.f);
+    const float width  = parameters.renderScale > 1.f ? parameters.renderScaleWidth : parameters.textWidth;
+    const float height = parameters.renderScale > 1.f ? parameters.renderScaleHeight : parameters.textHeight;
+    // Match the existing empty-request completion dimensions. Background drawing
+    // uses the owner's quad; no unconstrained dimension becomes a raster extent.
+    Size completedSize;
+    switch(parameters.requestType)
+    {
+      case Ui::Integration::Text::Async::RENDER_FIXED_SIZE:
+        completedSize = Size(width, height);
+        break;
+      case Ui::Integration::Text::Async::RENDER_FIXED_WIDTH:
+        completedSize = Size(width, 0.f);
+        break;
+      case Ui::Integration::Text::Async::RENDER_FIXED_HEIGHT:
+        completedSize = Size(0.f, height);
+        break;
+      default:
+        completedSize = Size::ZERO;
+        break;
+    }
+    completedSize += Size(parameters.padding.start + parameters.padding.end,
+                          parameters.padding.top + parameters.padding.bottom);
+    info.size = info.controlSize = info.renderedSize = completedSize;
+    data->controlSize                                = completedSize;
+    info.cutout                                      = std::move(data);
+    info.isCutoutEnabled                             = true;
+    return info;
+  }
   Size textNaturalSize   = naturalSize;
   bool cachedNaturalSize = useCachedNaturalSize;
 

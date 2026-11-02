@@ -17,6 +17,7 @@
 
 // EXTERNAL INCLUDES
 #include <dali/devel-api/adaptor-framework/image-loading-devel.h>
+#include <dali/devel-api/object/base-object-observer.h>
 #include <dali/devel-api/rendering/renderer-devel.h>
 #include <dali/devel-api/rendering/texture-devel.h>
 #include <dali/devel-api/text-abstraction/text-abstraction-definitions.h>
@@ -27,6 +28,8 @@
 #include <dali/integration-api/pixel-data-integ.h>
 #include <dali/integration-api/string-utils.h>
 #include <dali/integration-api/texture-integ.h>
+#include <dali/public-api/object/property-conditions.h>
+#include <dali/public-api/object/property-notification.h>
 #include <string.h>
 #include <cmath>
 #include <limits>
@@ -42,6 +45,7 @@
 #include <dali-ui-foundation/internal/graphics/builtin-shader-extern-gen.h>
 #include <dali-ui-foundation/internal/text/color-glyph-helper.h>
 #include <dali-ui-foundation/internal/text/marquee/marquee-renderer-state.h>
+#include <dali-ui-foundation/internal/text/rendering/text-cutout-render-data.h>
 #include <dali-ui-foundation/internal/text/replacement/inline-replacement-reveal-bridge.h>
 #include <dali-ui-foundation/internal/text/script-run.h>
 #include <dali-ui-foundation/internal/text/styled-text/gradient-span-data.h>
@@ -318,6 +322,7 @@ TextVisual::TextVisual(VisualFactoryCache& factoryCache, TextVisualShaderFactory
   mTextLoadingMaximumLinesRevision(0u),
   mNaturalSizeMaximumLinesRevision(0u),
   mHeightForWidthMaximumLinesRevision(0u),
+  mIsCutoutRenderer(false),
   mRendererUpdateNeeded(false),
   mApplyingFittingMode(false),
   mTextRequireRender(false),
@@ -496,22 +501,32 @@ void TextVisual::RemoveRenderer(Actor& actor, bool removeDefaultRenderer)
   {
     // Remove default renderer's textureset
     mImpl->mRenderer.RemoveTextures();
+    mIsCutoutRenderer = false;
   }
 
-  // Clear constraint, and keep default renderer's constraint only.
-  if(mColorConstraint)
+  // Retain the background and default color bindings, removing tiled colors
+  // even when the animatable color source was set after scene attachment.
+  if(mColorConstraint || !mColorConstraintList.empty())
   {
+    const auto backgroundConstraint = GetCutoutBackgroundConstraint();
     for(auto& constraint : mColorConstraintList)
     {
-      if(constraint && (constraint != mColorConstraint))
+      if(constraint && constraint != mColorConstraint && constraint != backgroundConstraint)
       {
         constraint.Remove();
       }
     }
     mColorConstraintList.clear();
-    mColorConstraintList.push_back(mColorConstraint);
+    if(backgroundConstraint)
+    {
+      mColorConstraintList.push_back(backgroundConstraint);
+    }
+    if(mColorConstraint)
+    {
+      mColorConstraintList.push_back(mColorConstraint);
+    }
   }
-  if(mOpacityConstraint)
+  if(mOpacityConstraint || !mOpacityConstraintList.empty())
   {
     for(auto& constraint : mOpacityConstraintList)
     {
@@ -521,7 +536,10 @@ void TextVisual::RemoveRenderer(Actor& actor, bool removeDefaultRenderer)
       }
     }
     mOpacityConstraintList.clear();
-    mOpacityConstraintList.push_back(mOpacityConstraint);
+    if(mOpacityConstraint)
+    {
+      mOpacityConstraintList.push_back(mOpacityConstraint);
+    }
   }
 }
 
@@ -538,8 +556,14 @@ void TextVisual::DoSetOffScene(Actor& actor)
   // Change the constraint as APPLY_ONCE if apply rate was always.
   if(mIsConstraintAppliedAlways)
   {
-    mColorConstraint.SetApplyRate(Dali::Constraint::APPLY_ONCE);
-    mOpacityConstraint.SetApplyRate(Dali::Constraint::APPLY_ONCE);
+    if(mColorConstraint)
+    {
+      mColorConstraint.SetApplyRate(Dali::Constraint::APPLY_ONCE);
+    }
+    if(mOpacityConstraint)
+    {
+      mOpacityConstraint.SetApplyRate(Dali::Constraint::APPLY_ONCE);
+    }
   }
 
   // Resets the control handle.
@@ -867,9 +891,15 @@ void TextVisual::UpdateRenderer()
   // TODO : Round the size and offset to avoid pixel alignment issues.
 
   auto textLengthUtf32 = mController->GetNumberOfCharacters();
+  if(textLengthUtf32 == 0u && mController->IsTextCutout())
+  {
+    // An empty glyph plane still needs a full background quad in this mode.
+    relayoutSize = mImpl->mControlSize;
+  }
 
   if((fabsf(relayoutSize.width) < Math::MACHINE_EPSILON_1000) ||
-     (fabsf(relayoutSize.height) < Math::MACHINE_EPSILON_1000) || textLengthUtf32 == 0u)
+     (fabsf(relayoutSize.height) < Math::MACHINE_EPSILON_1000) ||
+     (textLengthUtf32 == 0u && !(mController->IsTextCutout())))
   {
     // Remove the texture set and any renderer previously set.
     RemoveRenderer(control, true);
@@ -1024,7 +1054,8 @@ void TextVisual::UpdateRenderer()
                   styleTextureEnabled, styleBlocksTextGradient, isOverlayStyle, embossEnabled);
 
       // Text rendered and ready to display
-      ResourceReady(Ui::Visual::ResourceStatus::READY);
+      ResourceReady(cutoutEnabled && mRendererList.empty() ? Ui::Visual::ResourceStatus::FAILED
+                                                           : Ui::Visual::ResourceStatus::READY);
     }
   }
 }
@@ -1250,7 +1281,16 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
   }
 
   Ui::Visual::ResourceStatus resourceStatus;
+  if(isRenderRequest && parameters.isCutoutEnabled && !textInformation.renderInfo.cutout &&
+     !textInformation.renderInfo.textPixelData)
+  {
+    loadingSuccess = false;
+  }
 
+  if(loadingSuccess && textInformation.renderInfo.cutout && !textInformation.renderInfo.cutout->IsValid(Dali::GetMaxTextureSize()))
+  {
+    loadingSuccess = false;
+  }
   if(loadingSuccess)
   {
     resourceStatus = Ui::Visual::ResourceStatus::READY;
@@ -1291,6 +1331,13 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
     Vector2 textControlSize(parameters.textWidth + (parameters.padding.start + parameters.padding.end),
                             parameters.textHeight + (parameters.padding.top + parameters.padding.bottom));
 
+    if(renderInfo.cutout && parameters.text.empty())
+    {
+      // Empty coverage only draws the current owner background. Preserve the
+      // request's callback dimensions separately in renderedSize.
+      textControlSize = mImpl->mControlSize;
+      renderInfo.size = textControlSize;
+    }
     bool isVerticalScroll = false;
     if(parameters.isMarqueeEnabled)
     {
@@ -1411,7 +1458,11 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       .EnableTextReveal(textRevealEnabled);
 
     // Shader creation can reenter application code. Preserve a nested publication's cache.
-    Shader      shader        = mTextVisualShaderFactory.GetShader(mFactoryCache, featureBuilder);
+    Shader      shader        = renderInfo.cutout
+                                  ? mTextVisualShaderFactory.GetCutoutShader(mFactoryCache,
+                                                                             renderInfo.cutout->coverage.GetPixelFormat() == Pixel::RGBA8888,
+                                                                             static_cast<bool>(renderInfo.cutout->overlay))
+                                  : mTextVisualShaderFactory.GetShader(mFactoryCache, featureBuilder);
     const auto* currentReveal = GetTextVisualRevealData(mRevealData);
     if(!Dali::Adaptor::IsAvailable() || mControl.GetHandle() != control ||
        !mController->IsAsyncRendering() || mTextLoadingTaskId != publicationTaskId ||
@@ -1427,8 +1478,16 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
       RemoveRenderer(control, false);
     }
 
-    // No tiling required. Use the default renderer.
-    if(renderInfo.size.height <= static_cast<float>(maxTextureSize))
+    mIsCutoutRenderer = false;
+    if(renderInfo.cutout)
+    {
+      auto textures = GetCutoutTexture(*renderInfo.cutout);
+      mImpl->mRenderer.SetTextures(textures);
+      mImpl->mRenderer.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
+      mRendererList.push_back(mImpl->mRenderer);
+    }
+    // Ordinary text and the remaining legacy combinations retain their path.
+    else if(renderInfo.size.height <= static_cast<float>(maxTextureSize))
     {
       // Filter mode needs to be set to linear to produce better quality while scaling.
       Sampler sampler = Sampler::New();
@@ -1964,8 +2023,15 @@ void TextVisual::SetConstraintApplyAlways(bool applyAlways, bool notifyToConstra
     // Change apply rate only if it is scene on.
     if(mAnimatableTextColorPropertyIndex != Property::INVALID_INDEX && mControl.GetHandle())
     {
-      for(auto& constraint : mColorConstraintList)
+      auto colorBegin = mColorConstraintList.begin();
+      if(colorBegin != mColorConstraintList.end() && *colorBegin != mColorConstraint &&
+         colorBegin->GetTag() == CUTOUT_BACKGROUND_CONSTRAINT_TAG)
       {
+        ++colorBegin;
+      }
+      for(auto iter = colorBegin; iter != mColorConstraintList.end(); ++iter)
+      {
+        auto& constraint = *iter;
         if(constraint)
         {
           constraint.SetApplyRate(mIsConstraintAppliedAlways ? Dali::Constraint::APPLY_ALWAYS
@@ -2575,7 +2641,8 @@ bool TextVisual::PrepareAsyncRendererRequest(Actor& control, Text::AsyncTextPara
     return false;
   }
   if((fabsf(parameters.textWidth) < Math::MACHINE_EPSILON_1000) ||
-     (fabsf(parameters.textHeight) < Math::MACHINE_EPSILON_1000) || parameters.text.empty())
+     (fabsf(parameters.textHeight) < Math::MACHINE_EPSILON_1000) ||
+     (parameters.text.empty() && !parameters.isCutoutEnabled))
   {
     mAsyncRenderUsesUserSpaceGradient = false;
     if(mIsTextLoadingTaskRunning)
@@ -2620,7 +2687,7 @@ bool TextVisual::PrepareAsyncRendererRequest(Actor& control, Text::AsyncTextPara
   // Get the maximum texture size.
   const int maxTextureSize = Dali::GetMaxTextureSize();
 
-  if(parameters.textWidth > maxTextureSize)
+  if(parameters.textWidth > maxTextureSize && (!parameters.isCutoutEnabled || parameters.isMarqueeEnabled))
   {
     DALI_LOG_DEBUG_INFO(
       "layoutSize(%f) > maxTextureSize(%d): To guarantee the behavior of Texture::New, layoutSize must not be bigger "
@@ -2977,7 +3044,8 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
     .EnableTextGradientOverlay(textGradientOverlayCompositionEnabled)
     .EnableTextReveal(textRevealEnabled);
 
-  Shader shader = GetTextShader(mFactoryCache, featureBuilder);
+  Shader shader     = GetTextShader(mFactoryCache, featureBuilder);
+  mIsCutoutRenderer = false;
   mImpl->mRenderer.SetShader(shader);
 
   if(auto* gradientData = GetTextVisualGradientData(mGradientData))
@@ -2986,10 +3054,18 @@ void TextVisual::AddRenderer(Actor& actor, const Vector2& size, bool hasMultiple
   }
 
   // No tiling required. Use the default renderer.
-  if(size.height < maxTextureSize)
+  if(size.height < maxTextureSize || (mController->IsTextCutout() && !isMarqueeEnabled))
   {
     TextureSet textureSet = GetTextTexture(size, context);
 
+    if(mController->IsTextCutout() && textureSet.GetTextureCount() == 0u)
+    {
+      // UpdateRenderer retained the default renderer for reuse. A rejected
+      // crop must also retire its previous textures and shader from the actor.
+      actor.RemoveRenderer(mImpl->mRenderer);
+      RemoveRenderer(actor, true);
+      return;
+    }
     mImpl->mRenderer.SetTextures(textureSet);
     mImpl->mRenderer.SetProperty(mHasMultipleTextColorsIndex, static_cast<float>(hasMultipleTextColors));
     mImpl->mRenderer.SetProperty(Renderer::Property::BLEND_MODE, BlendMode::ON);
@@ -3674,6 +3750,213 @@ void TextVisual::RefreshRevealBlurImages(Ui::Integration::Visual::Base visual)
   }
 }
 
+namespace
+{
+void QueueCutoutRendererUpdate(VisualRenderer renderer)
+{
+  // Rebind after background property changes have settled in the event loop.
+  // Reapplying the same shader immediately does not refresh partial update.
+  if(!Dali::Adaptor::IsAvailable())
+  {
+    return;
+  }
+  WeakHandle<VisualRenderer> weakRenderer(renderer);
+  auto                       shader   = renderer.GetShader();
+  auto                       callback = Callback<void()>::New([weakRenderer, shader]() mutable
+  {
+    if(!Dali::Adaptor::IsAvailable())
+    {
+      return;
+    }
+    auto target = weakRenderer.GetHandle();
+    if(target && target.GetShader() == shader)
+    {
+      target.RemoveShader();
+      target.SetShader(shader);
+    }
+  });
+  Dali::Adaptor::Get().AddIdle(callback.Release(), false);
+}
+
+// The notification belongs to this binding, including while an async result
+// retains it. Observing its destruction avoids adding state to TextVisual.
+class CutoutBackgroundObserver : public BaseObjectObserver, public ConnectionTracker
+{
+public:
+  CutoutBackgroundObserver(Constraint binding, Handle source, Property::Index index, VisualRenderer renderer)
+  : BaseObjectObserver(binding),
+    mBinding(binding),
+    mSource(source),
+    mRenderer(renderer),
+    // Notify only when alpha reaches zero; positive-alpha animation stays on
+    // the existing constraint path. LessThanCondition excludes equality.
+    mNotification(source.AddPropertyNotification(index, 3, LessThanCondition(std::numeric_limits<float>::min())))
+  {
+    mNotification.NotifySignal().Connect(this, &CutoutBackgroundObserver::OnTransparent);
+    StartObservingDestruction();
+  }
+
+  ~CutoutBackgroundObserver() override
+  {
+    if(auto source = mSource.GetHandle())
+    {
+      source.RemovePropertyNotification(mNotification);
+    }
+  }
+
+  void ObjectDestroyed() override
+  {
+    delete this;
+  }
+
+private:
+  void OnTransparent(PropertyNotification)
+  {
+    auto binding = mBinding.GetHandle();
+    if(!binding)
+    {
+      return;
+    }
+    const auto state = binding.GetState();
+    if(state != Constraint::APPLIED && state != Constraint::APPLIED_OBJECT_OFF_SCENE)
+    {
+      return;
+    }
+    if(auto renderer = mRenderer.GetHandle())
+    {
+      QueueCutoutRendererUpdate(renderer);
+    }
+  }
+
+  WeakHandle<Constraint>     mBinding;
+  WeakHandle<Handle>         mSource;
+  WeakHandle<VisualRenderer> mRenderer;
+  PropertyNotification       mNotification;
+};
+
+void CutoutBackgroundConstraint(Vector4& current, const PropertyInputContainer& inputs)
+{
+  current = inputs[0]->GetVector4();
+  current.r *= current.a;
+  current.g *= current.a;
+  current.b *= current.a;
+}
+} //namespace
+
+void TextVisual::SetCutoutBackground(Ui::Integration::Visual::Base visual, Ui::Integration::Visual::Base background)
+{
+  auto&           self     = GetVisualObject(visual);
+  auto            renderer = self.mImpl->mRenderer;
+  Handle          sourceObject;
+  Property::Index sourceIndex = Property::INVALID_INDEX;
+  if((self.mController->IsTextCutout() || self.mIsCutoutRenderer) && background &&
+     Ui::GetImplementation(background).GetType() == Ui::Integration::InternalVisualType::COLOR)
+  {
+    auto source  = background.GetPropertyObject(Ui::Integration::Visual::Property::MIX_COLOR);
+    sourceObject = source.object;
+    sourceIndex  = source.propertyIndex;
+  }
+  const bool hasSource  = sourceObject && sourceIndex != Property::INVALID_INDEX;
+  auto       constraint = self.GetCutoutBackgroundConstraint();
+  if(constraint && hasSource && constraint.GetSourceCount() == 1u)
+  {
+    const auto bound = constraint.GetSourceAt(0u);
+    const auto state = constraint.GetState();
+    if(bound.object == sourceObject && bound.propertyIndex == sourceIndex &&
+       (state == Constraint::APPLIED || state == Constraint::APPLIED_OBJECT_OFF_SCENE))
+    {
+      return;
+    }
+  }
+  if(constraint)
+  {
+    // The source may already have been destroyed by ClearBackground. Remove
+    // through the live target so its constraint ownership is also released.
+    Dali::Integration::HandleRemoveConstraints(renderer, CUTOUT_BACKGROUND_CONSTRAINT_TAG);
+    if(!hasSource)
+    {
+      // Release the cutout-only slot and spare capacity without retaining it
+      // on labels that return to ordinary text.
+      ConstraintContainer colors(self.mColorConstraintList.begin() + 1, self.mColorConstraintList.end());
+      self.mColorConstraintList.swap(colors);
+    }
+  }
+  else if(!hasSource)
+  {
+    return;
+  }
+  auto index = renderer.GetPropertyIndex("uCutoutBackground");
+  if(index == Property::INVALID_INDEX)
+  {
+    index = renderer.RegisterProperty("uCutoutBackground", Vector4::ZERO);
+  }
+  renderer.SetProperty(index, Vector4::ZERO);
+  if(hasSource)
+  {
+    auto binding = Constraint::New<Vector4>(renderer, index, CutoutBackgroundConstraint);
+    binding.AddSource(Source(sourceObject, sourceIndex));
+    binding.SetRemoveAction(Constraint::DISCARD);
+    Dali::Integration::ConstraintSetInternalTag(binding, CUTOUT_BACKGROUND_CONSTRAINT_TAG);
+    binding.Apply();
+    new CutoutBackgroundObserver(binding, sourceObject, sourceIndex, renderer);
+    if(constraint)
+    {
+      self.mColorConstraintList.front() = binding;
+    }
+    else
+    {
+      self.mColorConstraintList.insert(self.mColorConstraintList.begin(), binding);
+    }
+  }
+  if(self.mIsCutoutRenderer)
+  {
+    QueueCutoutRendererUpdate(renderer);
+  }
+}
+
+bool TextVisual::HasTextRenderer(Ui::Integration::Visual::Base visual)
+{
+  return !GetVisualObject(visual).mRendererList.empty();
+}
+bool TextVisual::HasCutoutRenderer(Ui::Integration::Visual::Base visual)
+{
+  return GetVisualObject(visual).mIsCutoutRenderer;
+}
+
+bool TextVisual::CanUpdateCutoutTextColor(Ui::Integration::Visual::Base visual)
+{
+  auto& self = GetVisualObject(visual);
+  return self.mIsCutoutRenderer && !self.mIsTextLoadingTaskRunning && self.mController->IsTextCutout() && !self.mController->IsMarqueeEnabled() &&
+         !self.mTextShaderFeatureCache.IsEnabledEmoji() && !self.mTextShaderFeatureCache.IsEnabledMultiColor() &&
+         !self.mTextShaderFeatureCache.IsEnabledOverlay() &&
+         !self.mController->GetRenderTextModel()->GetGradientSpanModelData();
+}
+
+TextureSet TextVisual::GetCutoutTexture(const Ui::Text::CutoutRenderData& data)
+{
+  auto sampler = Sampler::New();
+  sampler.SetFilterMode(FilterMode::LINEAR, FilterMode::LINEAR);
+  sampler.SetWrapMode(WrapMode::CLAMP_TO_EDGE, WrapMode::CLAMP_TO_EDGE);
+  auto textures = TextureSet::New();
+  auto coverage = data.coverage;
+  auto style    = data.style;
+  AddTexture(textures, coverage, sampler, 0u);
+  AddTexture(textures, style, sampler, 1u);
+  if(data.overlay)
+  {
+    auto overlay = data.overlay;
+    AddTexture(textures, overlay, sampler, 2u);
+  }
+  auto shader = mTextVisualShaderFactory.GetCutoutShader(mFactoryCache,
+                                                         data.coverage.GetPixelFormat() == Pixel::RGBA8888,
+                                                         static_cast<bool>(data.overlay));
+  mImpl->mRenderer.SetShader(shader);
+  mImpl->mRenderer.RegisterProperty("uCutoutRect", data.rect);
+  mImpl->mRenderer.RegisterProperty("uCutoutControlSize", data.controlSize);
+  mIsCutoutRenderer = true;
+  return textures;
+}
+
 TextureSet TextVisual::GetTextTexture(const Vector2& size, const Text::GradientRasterContext* gradientContext)
 {
   const bool cutoutEnabled = mController->IsTextCutout();
@@ -3683,6 +3966,32 @@ TextureSet TextVisual::GetTextTexture(const Vector2& size, const Text::GradientR
   sampler.SetFilterMode(FilterMode::LINEAR, FilterMode::LINEAR);
 
   TextureSet textureSet = TextureSet::New();
+
+  if(cutoutEnabled && !mController->IsMarqueeEnabled())
+  {
+    Ui::Text::CutoutRenderData planes;
+    const auto                 format = mTextShaderFeatureCache.IsEnabledEmoji() || mTextShaderFeatureCache.IsEnabledMultiColor()
+                                          ? Pixel::RGBA8888
+                                          : Pixel::L8;
+    if(mTypesetter->RenderCutoutPlanes(size, planes, format, Dali::GetMaxTextureSize()))
+    {
+      return GetCutoutTexture(planes);
+    }
+    const auto* gradientSpans = mController->GetRenderTextModel()->GetGradientSpanModelData();
+    if(mController->GetRenderTextModel()->IsCutoutEnabled() &&
+       (!gradientSpans || gradientSpans->glyphPaintIndices.Empty()))
+    {
+      DALI_LOG_ERROR("Cutout raster bounds exceed the texture limit or are invalid\n");
+      return textureSet;
+    }
+  }
+
+  // Remaining legacy paint/scroll combinations require a full raster texture.
+  if(cutoutEnabled && (size.width > Dali::GetMaxTextureSize() || size.height > Dali::GetMaxTextureSize()))
+  {
+    DALI_LOG_ERROR("Legacy cutout combination exceeds the texture limit\n");
+    return textureSet;
+  }
 
   // Create RGBA texture if the text contains emojis or multiple text colors, otherwise L8 texture
   Pixel::Format textPixelFormat =

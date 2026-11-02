@@ -1307,6 +1307,12 @@ private: // Implementation
    */
   void OnBackgroundPropertyChanged();
 
+  /** @brief Restores the existing background after a failed cutout without a retained result. */
+  void OnCutoutResourcesReady(Property::Index index);
+
+  /** @brief Applies background ownership after rendering, outside resource signal emission. */
+  void UpdateCutoutBackgroundVisibility();
+
   /**
    * @brief Updates dependent rendering state for cutout rendering.
    *
@@ -1437,25 +1443,25 @@ private:
 
   int  mAsyncLineCount;
   int  mTextColorAnimatedCount;
-  bool mRendererUpdateNeeded : 1;     // Whether the text renderer needs to be updated.
-  bool mMeasureInvalidated : 1;       // whether measurement has been invalidated.
-  bool mIsAsyncRenderRequested : 1;   // whether an async render has been requested.
-  bool mIsContentLayoutDirty : 1;     // Whether content size or padding has changed.
-  bool mSuppressAutoMarquee : 1;      // whether automatic marquee evaluation is suppressed.
-  bool mLastMarqueeEnabled : 1;       // whether manual marquee was enabled in the previous state.
-  bool mRestartMarquee : 1;           // whether sync marquee needs one-shot restart after measure-affecting changes.
-  bool mHasLastMeasureMetrics : 1;    // whether the last OnMeasure inputs have been captured.
-  bool mHasStyledTextSource : 1;      // whether current text source was set by SetStyledText().
-  bool mHasVariationProperties : 1;   // whether font variation custom properties have been registered.
-  bool mHasAnchors : 1;               // whether the text has anchors.
-  bool mHasAsyncAnchorHitRegions : 1; // whether active async anchor hit regions are cached.
-  bool mAsyncAnchorGeometryDirty : 1; // whether cached async anchor geometry may no longer match the content layout.
-  bool mHasA11yAnchors : 1;           // whether accessibility TextAnchor actors are attached.
-  bool mIsVisible : 1;                // cached result of IsOnSceneVisible().
-  bool mIsVisibleInitialized : 1;     // whether mIsVisible has been initialized.
-  bool mIsViewBackgroundEnabled : 1;  // whether the view background is enabled.
-  bool mIsManualRenderInProgress : 1; // True while an async manual render request is in progress. Reset to false when completed.
-  bool mIsManualRenderFinished : 1;   // True when an async manual render has completed. Reset to false on the next relayout.
+  bool mRendererUpdateNeeded : 1;         // Whether the text renderer needs to be updated.
+  bool mMeasureInvalidated : 1;           // whether measurement has been invalidated.
+  bool mIsAsyncRenderRequested : 1;       // whether an async render has been requested.
+  bool mIsContentLayoutDirty : 1;         // Whether content size or padding has changed.
+  bool mSuppressAutoMarquee : 1;          // whether automatic marquee evaluation is suppressed.
+  bool mLastMarqueeEnabled : 1;           // whether manual marquee was enabled in the previous state.
+  bool mRestartMarquee : 1;               // whether sync marquee needs one-shot restart after measure-affecting changes.
+  bool mHasLastMeasureMetrics : 1;        // whether the last OnMeasure inputs have been captured.
+  bool mHasStyledTextSource : 1;          // whether current text source was set by SetStyledText().
+  bool mHasVariationProperties : 1;       // whether font variation custom properties have been registered.
+  bool mHasAnchors : 1;                   // whether the text has anchors.
+  bool mHasAsyncAnchorHitRegions : 1;     // whether active async anchor hit regions are cached.
+  bool mAsyncAnchorGeometryDirty : 1;     // whether cached async anchor geometry may no longer match the content layout.
+  bool mHasA11yAnchors : 1;               // whether accessibility TextAnchor actors are attached.
+  bool mIsVisible : 1;                    // cached result of IsOnSceneVisible().
+  bool mIsVisibleInitialized : 1;         // whether mIsVisible has been initialized.
+  bool mIsManualRenderInProgress : 1;     // True while an async manual render request is in progress. Reset to false when completed.
+  bool mIsManualRenderFinished : 1;       // True when an async manual render has completed. Reset to false on the next relayout.
+  bool mCutoutResourceReadyConnected : 1; // Whether cutout owns a resource-ready connection.
 
 protected:
   struct PropertyHandler;

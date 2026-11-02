@@ -35,6 +35,7 @@
 #include <dali-ui-foundation/internal/text/marquee/marquee-start-geometry.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/character-spacing-helper-functions.h>
 #include <dali-ui-foundation/internal/text/rendering/styles/underline-helper-functions.h>
+#include <dali-ui-foundation/internal/text/rendering/text-cutout-render-data.h>
 #include <dali-ui-foundation/internal/text/rendering/text-typesetter.h>
 #include <dali-ui-foundation/internal/text/rendering/view-model.h>
 #include <dali-ui-foundation/public-api/text/styled-text/background-color-span.h>
@@ -428,8 +429,9 @@ int UtcDaliAsyncTextLoaderCutoutReuseP(void)
   firstCutout.padding                       = Insets(3.0f, 5.0f, 7.0f, 11.0f);
   const Text::AsyncTextRenderInfo firstInfo = reusedLoader.RenderText(firstCutout, false, Size::ZERO);
   DALI_TEST_CHECK(firstInfo.isCutoutEnabled);
-  DALI_TEST_CHECK(firstInfo.textPixelData);
-  DALI_TEST_CHECK(firstInfo.stylePixelData);
+  DALI_TEST_CHECK(firstInfo.cutout);
+  DALI_TEST_CHECK(firstInfo.cutout->coverage);
+  DALI_TEST_CHECK(firstInfo.cutout->style);
 
   Text::AsyncTextParameters ordinary                     = MakeAsyncEndParameters("Ordinary request after cutout", 240.0f, 64.0f);
   ordinary.ellipsis                                      = false;
@@ -460,8 +462,10 @@ int UtcDaliAsyncTextLoaderCutoutReuseP(void)
   DALI_TEST_CHECK(reusedSecondCutout.isCutoutEnabled);
   DALI_TEST_CHECK(freshSecondCutout.isCutoutEnabled);
   DALI_TEST_EQUALS(reusedSecondCutout.size, freshSecondCutout.size, TEST_LOCATION);
-  DALI_TEST_CHECK(HaveSamePixels(reusedSecondCutout.textPixelData, freshSecondCutout.textPixelData));
-  DALI_TEST_CHECK(HaveSamePixels(reusedSecondCutout.stylePixelData, freshSecondCutout.stylePixelData));
+  DALI_TEST_CHECK(reusedSecondCutout.cutout && freshSecondCutout.cutout);
+  DALI_TEST_EQUALS(reusedSecondCutout.cutout->rect, freshSecondCutout.cutout->rect, TEST_LOCATION);
+  DALI_TEST_CHECK(HaveSamePixels(reusedSecondCutout.cutout->coverage, freshSecondCutout.cutout->coverage));
+  DALI_TEST_CHECK(HaveSamePixels(reusedSecondCutout.cutout->style, freshSecondCutout.cutout->style));
 
   END_TEST;
 }

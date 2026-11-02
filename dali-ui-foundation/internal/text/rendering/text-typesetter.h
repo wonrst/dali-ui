@@ -43,6 +43,7 @@ namespace Text
 class ModelInterface;
 class ViewModel;
 class Typesetter;
+struct CutoutRenderData;
 struct FinalElisionResult;
 struct MarqueeStartAnchor;
 struct MarqueeTextureAnchor;
@@ -256,7 +257,8 @@ public:
   /**
    * @brief Renders the text, return as PixelBuffer.
    *
-   * This function is used to obtain the PixelBuffer required for cutout.
+   * The optional raster origin permits cutout styles to share a cropped canvas.
+   * Set includeCutoutBackground to false for shader composition inputs.
    *
    * @param[in] size The renderer size.
    * @param[in] textDirection The direction of the text.
@@ -278,7 +280,20 @@ public:
                                     bool                         ignoreHorizontalAlignment = false,
                                     Pixel::Format                pixelFormat               = Pixel::RGBA8888,
                                     const Vector2&               originSize                = Size::ZERO,
-                                    const GradientRasterContext* gradientContext           = nullptr);
+                                    const GradientRasterContext* gradientContext           = nullptr,
+                                    const Vector2&               rasterOrigin              = Vector2::ZERO,
+                                    bool                         includeCutoutBackground   = true);
+
+  /**
+   * @brief Rasterizes cropped cutout inputs without composing the control background.
+   * @param[in] size Full control raster size, including padding.
+   * @param[out] planes Glyphs, styles, overlay and crop from this layout.
+   * @param[in] glyphFormat L8 for single color; RGBA8888 to preserve glyph colors.
+   * @param[in] maxTextureSize Device limit, or zero for CPU-only callers.
+   * @return False for invalid/unsupported bounds; no partial payload is published.
+   */
+  bool RenderCutoutPlanes(const Vector2& size, CutoutRenderData& planes,
+                          Pixel::Format glyphFormat = Pixel::L8, uint32_t maxTextureSize = 0u);
 
   /**
    * @brief Projects source reveal semantics onto the current final glyph sequence.
