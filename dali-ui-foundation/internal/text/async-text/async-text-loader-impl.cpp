@@ -1764,7 +1764,8 @@ AsyncTextRenderInfo AsyncTextLoader::Render(AsyncTextParameters& parameters)
     renderInfo.textGradientPreservedPixelData =
       mTypesetter->RenderTextGradientPreserved(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::RGBA8888, originSize, context);
     renderInfo.textGradientMaskPixelData =
-      mTypesetter->RenderTextGradientMask(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::L8, originSize);
+      mTypesetter->RenderTextGradientMask(layoutSize, textDirection, ignoreHorizontalAlignment, Pixel::L8, originSize,
+                                          parameters.isMarqueeEnabled ? parameters.textColor.a : 1.0f);
   }
 
   const bool marqueeStylePayload =

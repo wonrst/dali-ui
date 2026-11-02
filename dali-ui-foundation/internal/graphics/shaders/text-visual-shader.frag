@@ -175,12 +175,11 @@ mediump vec4 ApplyTextGradientOverlay(mediump vec4 baseFill, highp vec2 texCoord
   const highp float TEXT_GRADIENT_OVERLAY_MODE_SCREEN = 1.0;
   if(abs(uTextGradientOverlayMode - TEXT_GRADIENT_OVERLAY_MODE_SCREEN) < 0.5)
   {
-    mediump vec3 screen = vec3(1.0) - (vec3(1.0) - baseRgb) * (vec3(1.0) - overlayColor.rgb);
-    blendedRgb = mix(baseRgb, screen, overlayColor.a);
+    blendedRgb = baseRgb + overlayColor.rgb * (vec3(1.0) - baseRgb);
   }
   else
   {
-    blendedRgb = overlayColor.rgb * overlayColor.a + baseRgb * (1.0 - overlayColor.a);
+    blendedRgb = overlayColor.rgb + baseRgb * (1.0 - overlayColor.a);
   }
   return vec4(blendedRgb * glyphAlpha, glyphAlpha);
 }
@@ -240,8 +239,7 @@ void main()
     (vTexCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
-  mediump vec4 gradientFill = vec4(gradientColor.rgb * textTexture,
-                                   gradientColor.a * textTexture * uTextColorAnimatable.a);
+  mediump vec4 gradientFill = gradientColor * textTexture * uTextColorAnimatable.a;
   textColor = gradientFill + preservedColor * (1.0 - gradientFill.a);
 #elif defined(IS_REQUIRED_TEXT_GRADIENT)
   mediump float textTexture = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord)).r;
@@ -250,7 +248,7 @@ void main()
     (vTexCoord - gradientBounds.xy) / max(gradientBounds.zw, vec2(0.000001));
   highp float gradientPosition = EvaluateTextGradientPosition(textGradientCoord);
   mediump vec4 gradientColor = TEXTURE(sGradientLookup, vec2(gradientPosition + uTextGradientStartOffset, 0.5));
-  textColor = vec4(gradientColor.rgb * textTexture, gradientColor.a * textTexture * uTextColorAnimatable.a);
+  textColor = gradientColor * textTexture * uTextColorAnimatable.a;
 #elif defined(IS_REQUIRED_MULTI_COLOR) || defined(IS_REQUIRED_EMOJI)
   // Multiple color or use emoji.
   textColor = TEXTURE(sTexture, TEXT_SOURCE_UV(vTexCoord));

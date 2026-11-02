@@ -647,7 +647,8 @@ PixelData TextVisual::RenderMarqueeTextGradientMask(Ui::Integration::Visual::Bas
   TextVisual& visualObject = GetVisualObject(visual);
   visualObject.mTypesetter->SetModel(visualObject.mController->GetRenderTextModel());
   visualObject.mTypesetter->SetFinalElisionResult(visualObject.mController->GetFinalElisionResult());
-  return visualObject.mTypesetter->RenderTextGradientMask(size, textDirection, ignoreHorizontalAlignment, pixelFormat, originSize);
+  return visualObject.mTypesetter->RenderTextGradientMask(size, textDirection, ignoreHorizontalAlignment, pixelFormat, originSize,
+                                                          visualObject.mController->GetDefaultColor().a);
 }
 
 void TextVisual::OnSetTransform()

@@ -18,6 +18,7 @@
 #include <dali.h>
 #include <dali/devel-api/adaptor-framework/image-loading-devel.h>
 #include <dali/devel-api/animation/animation-devel.h>
+#include <dali/integration-api/pixel-data-integ.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,6 +42,9 @@
 #include <dali-ui-foundation/public-api/focus-manager/focus-manager.h>
 #include <dali-ui-foundation/public-api/gradient/linear-gradient.h>
 #include <dali-ui-foundation/public-api/text/label-properties.h>
+#include <dali-ui-foundation/public-api/text/styled-text/foreground-color-span.h>
+#include <dali-ui-foundation/public-api/text/styled-text/gradient-span.h>
+#include <dali-ui-foundation/public-api/text/styled-text/styled-text-builder.h>
 #include <dali-ui-foundation/public-api/views/text-controls/label.h>
 #include <dali-ui-test-suite-utils.h>
 #include <dali-ui/ui-async-task-manager.h>
@@ -4373,5 +4377,96 @@ int UtcDaliMarqueeLifecycleCutoutPaddingTextureSizeP(void)
     DALI_TEST_CHECK(test.Take().empty());
     DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
   }
+  END_TEST;
+}
+
+int UtcDaliMixedMarqueeInitialAlphaP(void)
+{
+  UiTestApplication application;
+  Test::AsyncTaskManager::SetTaskCaptureEnabled(true);
+  for(bool vertical : {false, true})
+  {
+    for(float alpha : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f})
+    {
+      ConnectionTracker tracker;
+      unsigned          completed = 0u;
+      Ui::Label         label     = Ui::Label::New();
+      label.SetRequestedWidth(180.0f);
+      label.SetRequestedHeight(48.0f);
+      label.SetFontSize(20.0f);
+      label.SetMultiLine(vertical);
+      label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, alpha)));
+      label.SetAsyncRendering(true);
+      label.SetMarqueeOrientation(vertical ? Text::MarqueeOrientation::VERTICAL : Text::MarqueeOrientation::HORIZONTAL);
+      label.SetMarqueeTriggerPolicy(Text::MarqueeTriggerPolicy::ON_OVERFLOW);
+      label.SetMarqueeLoopDelay(0.0f);
+      Ui::Gradient::Linear global(Vector2::ZERO, Vector2::ONE);
+      global.SetStopNodes({{0.0f, Ui::UiColor(Color::BLUE)}, {1.0f, Ui::UiColor(Color::BLUE)}});
+      label.SetTextGradient(global);
+      Ui::Gradient::Linear span(Vector2::ZERO, Vector2::ONE);
+      span.SetStopNodes({{0.0f, Ui::UiColor(Color::RED)}, {1.0f, Ui::UiColor(Color::RED)}});
+      auto builder = Text::StyledTextBuilder::New(vertical ? VERTICAL_TEXT : LONG_TEXT);
+      DALI_TEST_CHECK(builder.SetSpan(Text::GradientSpan::New(span), 0u, 3u));
+      DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(Ui::UiColor(Vector4(0.0f, 1.0f, 0.0f, 0.75f))), 4u, 7u));
+      label.SetStyledText(builder.Build());
+      label.AsyncRenderFinishedSignal().Connect(&tracker, [&](Ui::View, float, float)
+      {
+        ++completed;
+      });
+      application.GetScene().Add(label);
+      application.SendNotification();
+      application.Render();
+      application.SendNotification();
+      auto tasks = Test::AsyncTaskManager::TakeCapturedTasks();
+      DALI_TEST_EQUALS(tasks.size(), 1u, TEST_LOCATION);
+      auto task = Task(static_cast<Ui::Internal::TextLoadingTask*>(tasks.front().Get()));
+      task->Process();
+      const auto mask      = task->mRenderInfo.textGradientMaskPixelData;
+      const auto preserved = task->mRenderInfo.textGradientPreservedPixelData;
+      DALI_TEST_CHECK(mask && preserved);
+      DALI_TEST_EQUALS(mask.GetPixelFormat(), Pixel::L8, TEST_LOCATION);
+      const auto maskBytes = Integration::GetPixelDataBuffer(mask);
+      const auto rgbBytes  = Integration::GetPixelDataBuffer(preserved);
+      const auto maximum   = *std::max_element(maskBytes.buffer, maskBytes.buffer + maskBytes.bufferSize);
+      DALI_TEST_EQUALS(static_cast<unsigned>(maximum), static_cast<unsigned>(255.0f * alpha), TEST_LOCATION);
+      unsigned red   = 0u;
+      unsigned green = 0u;
+      for(uint32_t index = 0u; index < rgbBytes.bufferSize; index += 4u)
+      {
+        red   = std::max(red, static_cast<unsigned>(rgbBytes.buffer[index]));
+        green = std::max(green, static_cast<unsigned>(rgbBytes.buffer[index + 1u]));
+        for(uint32_t channel = 0u; channel < 3u; ++channel)
+        {
+          DALI_TEST_CHECK(rgbBytes.buffer[index + channel] <= rgbBytes.buffer[index + 3u]);
+        }
+      }
+      // GradientSpan inherits the default foreground alpha. The explicit
+      // ColorSpan retains its own alpha regardless of that default.
+      DALI_TEST_EQUALS(red, static_cast<unsigned>(255.0f * alpha), TEST_LOCATION);
+      DALI_TEST_EQUALS(green, 191u, TEST_LOCATION);
+      auto manager = Text::AsyncTextManager::Get();
+      Text::GetImplementation(manager).LoadComplete(task);
+      application.SendNotification();
+      application.Render();
+      application.SendNotification();
+      DALI_TEST_EQUALS(completed, 1u, TEST_LOCATION);
+      DALI_TEST_CHECK(label.IsMarqueeRunning());
+      DALI_TEST_EQUALS(label.GetRendererCount(), 1u, TEST_LOCATION);
+      auto textures = label.GetRendererAt(0u).GetTextures();
+      DALI_TEST_EQUALS(textures.GetTextureCount(), 3u, TEST_LOCATION);
+      DALI_TEST_EQUALS(textures.GetTexture(1u).GetWidth(), mask.GetWidth(), TEST_LOCATION);
+      DALI_TEST_EQUALS(textures.GetTexture(1u).GetHeight(), mask.GetHeight(), TEST_LOCATION);
+      application.Render(100u);
+      application.SendNotification();
+      DALI_TEST_CHECK(Test::AsyncTaskManager::TakeCapturedTasks().empty());
+      DALI_TEST_EQUALS(completed, 1u, TEST_LOCATION);
+      tracker.DisconnectAll();
+      label.Unparent();
+      label.Reset();
+      application.SendNotification();
+      application.Render();
+    }
+  }
+  Test::AsyncTaskManager::SetTaskCaptureEnabled(false);
   END_TEST;
 }

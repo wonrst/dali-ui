@@ -515,6 +515,25 @@ int UtcDaliTextGradientTypesetterMaskDefaultGlyphProducesMaskP(void)
   END_TEST;
 }
 
+int UtcDaliTextGradientTypesetterMaskDefaultAlphaP(void)
+{
+  UiTestApplication application;
+  MaskModel         model(6u);
+  const PixelData   reference = RenderTextGradientMask(model);
+  const auto        expected  = Integration::GetPixelDataBuffer(reference);
+  for(float alpha : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f})
+  {
+    model.SetDefaultColor(Vector4(0.25f, 0.5f, 0.75f, alpha));
+    const PixelData mask   = RenderTextGradientMask(model);
+    const auto      actual = Integration::GetPixelDataBuffer(mask);
+    DALI_TEST_EQUALS(actual.bufferSize, expected.bufferSize, TEST_LOCATION);
+    // Ordinary TextVisual still receives coverage only and applies its text
+    // alpha in the shader. The marquee-specific opacity must not leak here.
+    DALI_TEST_CHECK(std::memcmp(actual.buffer, expected.buffer, actual.bufferSize) == 0);
+  }
+  END_TEST;
+}
+
 int UtcDaliTextGradientTypesetterMaskExplicitColorExcludedP(void)
 {
   UiTestApplication application;

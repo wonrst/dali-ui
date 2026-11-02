@@ -149,12 +149,11 @@ mediump vec4 ApplyTextGradientOverlay(mediump vec4 baseFill)
   const highp float TEXT_GRADIENT_OVERLAY_MODE_SCREEN = 1.0;
   if(abs(uTextGradientOverlayMode - TEXT_GRADIENT_OVERLAY_MODE_SCREEN) < 0.5)
   {
-    mediump vec3 screen = vec3(1.0) - (vec3(1.0) - baseRgb) * (vec3(1.0) - overlayColor.rgb);
-    blendedRgb = mix(baseRgb, screen, overlayColor.a);
+    blendedRgb = baseRgb + overlayColor.rgb * (vec3(1.0) - baseRgb);
   }
   else
   {
-    blendedRgb = overlayColor.rgb * overlayColor.a + baseRgb * (1.0 - overlayColor.a);
+    blendedRgb = overlayColor.rgb + baseRgb * (1.0 - overlayColor.a);
   }
   return vec4(blendedRgb * glyphAlpha, glyphAlpha);
 }

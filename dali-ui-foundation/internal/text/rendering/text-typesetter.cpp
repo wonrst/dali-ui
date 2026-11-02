@@ -296,7 +296,7 @@ MarqueeTextureAnchor Typesetter::ResolveMarqueeTextureAnchor(const MarqueeStartA
 
 PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction textDirection,
                                              bool ignoreHorizontalAlignment, Pixel::Format pixelFormat,
-                                             const Vector2& originSize)
+                                             const Vector2& originSize, float opacity)
 {
   uint32_t bufferWidth, bufferHeight;
   if(!ResolveRasterSize(size, bufferWidth, bufferHeight, Pixel::GetBytesPerPixel(pixelFormat)))
@@ -375,6 +375,19 @@ PixelData Typesetter::RenderTextGradientMask(const Vector2& size, Direction text
   PixelBuffer result =
     mImpl->CreateTextGradientMaskImageBuffer(bufferWidth, bufferHeight, ignoreHorizontalAlignment, pixelFormat, penX,
                                              penY, 0u, endIndexOfGlyphs);
+
+  // Marquee consumes this mask without a text-color uniform. Match the alpha
+  // baked into its ordinary RGBA fill, leaving preserved styled colors alone.
+  if(result && opacity != 1.0f)
+  {
+    const uint8_t alpha      = static_cast<uint8_t>(Clamp(opacity, 0.0f, 1.0f) * 255.0f);
+    uint8_t*      buffer     = result.GetBuffer();
+    const size_t  bufferSize = static_cast<size_t>(bufferWidth) * bufferHeight * Pixel::GetBytesPerPixel(pixelFormat);
+    for(size_t index = 0u; index < bufferSize; ++index)
+    {
+      buffer[index] = buffer[index] == 255u ? alpha : MultiplyAndNormalizeColor(buffer[index], alpha);
+    }
+  }
 
   return result ? PixelBuffer::Convert(result) : PixelData{};
 }

@@ -199,12 +199,13 @@ public:
    * @param[in] pixelFormat The format of the mask. The initial implementation uses Pixel::L8.
    * @param[in] originSize The origin size for calculating vertical alignment. (default) If zero, the control and
    * renderer sizes are used.
+   * @param[in] opacity The opacity to bake into the coverage when the consumer does not apply text alpha.
    *
    * @return A pixel data containing glyph coverage for TextGradient target glyphs only.
    */
   PixelData RenderTextGradientMask(const Vector2& size, Direction textDirection,
                                    bool ignoreHorizontalAlignment = false, Pixel::Format pixelFormat = Pixel::L8,
-                                   const Vector2& originSize = Size::ZERO);
+                                   const Vector2& originSize = Size::ZERO, float opacity = 1.0f);
 
   /**
    * @brief Renders non-gradient glyphs for mixed TextGradient composition.
