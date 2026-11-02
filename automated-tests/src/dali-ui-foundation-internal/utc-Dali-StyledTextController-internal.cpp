@@ -1352,7 +1352,7 @@ int UtcDaliStyledTextControllerGradientSpanReachesRenderersP(void)
       continue;
     }
     Renderer renderer = child.GetRendererAt(0u);
-    if(renderer.GetPropertyIndex("uTextGradientType") != Property::INVALID_INDEX)
+    if(renderer.GetPropertyIndex("uTextGradientEvaluationMode") != Property::INVALID_INDEX)
     {
       ++gradientRendererCount;
       DALI_TEST_CHECK(renderer.GetTextures().GetTexture(1u));
@@ -1492,7 +1492,7 @@ int UtcDaliStyledTextControllerGradientSpanUserSpaceRenderingP(void)
       continue;
     }
     Renderer renderer = child.GetRendererAt(0u);
-    const Property::Index typeIndex = renderer.GetPropertyIndex("uTextGradientType");
+    const Property::Index typeIndex = renderer.GetPropertyIndex("uTextGradientEvaluationMode");
     if(typeIndex == Property::INVALID_INDEX ||
        std::fabs(renderer.GetProperty<float>(typeIndex) - static_cast<float>(Dali::Ui::Gradient::Type::LINEAR)) > 0.1f)
     {
@@ -1563,7 +1563,7 @@ int UtcDaliStyledTextControllerGradientSpanUserSpaceRenderingP(void)
       continue;
     }
     Renderer renderer = child.GetRendererAt(0u);
-    const Property::Index typeIndex = renderer.GetPropertyIndex("uTextGradientType");
+    const Property::Index typeIndex = renderer.GetPropertyIndex("uTextGradientEvaluationMode");
     if(typeIndex == Property::INVALID_INDEX)
     {
       continue;
@@ -1578,7 +1578,7 @@ int UtcDaliStyledTextControllerGradientSpanUserSpaceRenderingP(void)
                        Vector2(24.0f / boundsPixelSize.x, 16.0f / boundsPixelSize.y),
                        Math::MACHINE_EPSILON_1000,
                        TEST_LOCATION);
-      DALI_TEST_EQUALS(renderer.GetProperty<Vector2>(renderer.GetPropertyIndex("uTextGradientRadialScale")),
+      DALI_TEST_EQUALS(renderer.GetProperty<Vector2>(renderer.GetPropertyIndex("uTextGradientEvaluationScale")),
                        boundsPixelSize / 32.0f,
                        Math::MACHINE_EPSILON_1000,
                        TEST_LOCATION);
@@ -1651,7 +1651,7 @@ int UtcDaliStyledTextControllerGradientSpanAtlasScalingP(void)
     {
       Actor child = atlasActor.GetChildAt(childIndex);
       if(child.GetRendererCount() > 0u &&
-         child.GetRendererAt(0u).GetPropertyIndex("uTextGradientType") != Property::INVALID_INDEX)
+         child.GetRendererAt(0u).GetPropertyIndex("uTextGradientEvaluationMode") != Property::INVALID_INDEX)
       {
         ++gradientRendererCount;
         DALI_TEST_EQUALS(child.GetRendererAt(0u).GetTextures().GetTextureCount(), 2u, TEST_LOCATION);

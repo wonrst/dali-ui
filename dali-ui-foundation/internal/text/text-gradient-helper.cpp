@@ -201,10 +201,11 @@ RenderData ResolveRenderData(const Style&   style,
     return data;
   }
 
-  data.enabled     = true;
-  data.type        = style.type;
-  data.startOffset = style.startOffset;
-  data.bounds      = bounds;
+  data.enabled        = true;
+  data.type           = style.type;
+  data.evaluationMode = EvaluationMode::LINEAR_NORMALIZED;
+  data.startOffset    = style.startOffset;
+  data.bounds         = bounds;
 
   data.startPosition =
     Text::Internal::ResolveGradientPosition(style.units, style.linearStart, bounds, coordinateSize);
@@ -213,6 +214,7 @@ RenderData ResolveRenderData(const Style&   style,
 
   if(style.type == Dali::Ui::Gradient::Type::RADIAL)
   {
+    data.evaluationMode = EvaluationMode::RADIAL;
     data.radialCenter =
       Text::Internal::ResolveGradientPosition(style.units, style.radialCenter, bounds, coordinateSize);
     data.radialScale =
@@ -220,6 +222,7 @@ RenderData ResolveRenderData(const Style&   style,
   }
   else if(style.type == Dali::Ui::Gradient::Type::CONIC)
   {
+    data.evaluationMode = EvaluationMode::CONIC;
     data.conicCenter =
       Text::Internal::ResolveGradientPosition(style.units, style.conicCenter, bounds, coordinateSize);
     data.conicScale =
@@ -245,6 +248,34 @@ RenderData ResolveRenderData(const Style&   style,
       DALI_LOG_ERROR("Text gradient geometry is not finite\n");
       return RenderData();
     }
+  }
+  if(style.type == Dali::Ui::Gradient::Type::LINEAR &&
+     style.units == Dali::Ui::Gradient::Units::USER_SPACE)
+  {
+    // Sampling uses selected-bounds coordinates c = (P - origin) / B.
+    // Store k = B * (E - S) / |E - S|^2 so dot(c - S/B, k)
+    // projects in authored coordinates instead of the anisotropic UV metric.
+    const Vector2 boundsSize = Text::Internal::GetGradientBoundsPixelSize(bounds, coordinateSize);
+    const Vector2 vector     = data.endPosition - data.startPosition;
+    // Preserve the original rounding where normalized projection already has
+    // the right metric. Short segments still need to bypass the UV clamp.
+    if((style.linearStart.x == style.linearEnd.x || style.linearStart.y == style.linearEnd.y ||
+        boundsSize.x == boundsSize.y) &&
+       vector.LengthSquared() >= 0.000001f)
+    {
+      return data;
+    }
+    const double dx       = static_cast<double>(style.linearEnd.x) - style.linearStart.x;
+    const double dy       = static_cast<double>(style.linearEnd.y) - style.linearStart.y;
+    const double length   = dx * dx + dy * dy;
+    data.linearProjection = Vector2(static_cast<float>(boundsSize.x * dx / length),
+                                    static_cast<float>(boundsSize.y * dy / length));
+    if(!std::isfinite(data.linearProjection.x) || !std::isfinite(data.linearProjection.y))
+    {
+      DALI_LOG_ERROR("Text gradient projection is not finite\n");
+      return RenderData();
+    }
+    data.evaluationMode = EvaluationMode::LINEAR_USER_SPACE;
   }
   return data;
 }
