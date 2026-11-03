@@ -1256,6 +1256,15 @@ void TextVisual::LoadComplete(bool loadingSuccess, const TextInformation& textIn
 
   if(loadingSuccess)
   {
+    if(isRenderRequest && parameters.isMarqueeEnabled && parameters.textColor != mController->GetDefaultColor() &&
+       !Text::IsManualAsyncRenderInProgress(mControl.GetHandle()))
+    {
+      // Initial ON_OVERFLOW requests resolve marquee on the worker. Retry a
+      // stale baked color before publishing, without rerasterizing static text.
+      mController->RequestAsyncRender();
+      mController->RequestRelayout();
+      return;
+    }
     resourceStatus = Ui::Visual::ResourceStatus::READY;
 
     Text::AsyncTextRenderInfo renderInfo = textInformation.renderInfo;

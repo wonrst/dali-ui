@@ -4470,3 +4470,344 @@ int UtcDaliMixedMarqueeInitialAlphaP(void)
   Test::AsyncTaskManager::SetTaskCaptureEnabled(false);
   END_TEST;
 }
+
+namespace
+{
+/**
+ * @brief Sets the gradient styles used by the marquee color update tests.
+ * @param[in] label The label to style
+ * @param[in] mixed Whether to include gradient and explicit color spans
+ * @param[in] vertical Whether the text uses multiple lines
+ */
+void SetMarqueeColorTestStyles(Ui::Label label, bool mixed, bool vertical)
+{
+  Ui::Gradient::Linear global(Vector2::ZERO, Vector2::ONE);
+  global.SetStopNodes({{0.0f, Ui::UiColor(Color::BLUE)}, {1.0f, Ui::UiColor(Color::BLUE)}});
+  label.SetTextGradient(global);
+  if(mixed)
+  {
+    Ui::Gradient::Linear span(Vector2::ZERO, Vector2::ONE);
+    span.SetStopNodes({{0.0f, Ui::UiColor(Color::RED)}, {1.0f, Ui::UiColor(Color::RED)}});
+    auto builder = Text::StyledTextBuilder::New(vertical ? VERTICAL_TEXT : LONG_TEXT);
+    DALI_TEST_CHECK(builder.SetSpan(Text::GradientSpan::New(span), 0u, 3u));
+    DALI_TEST_CHECK(builder.SetSpan(Text::ForegroundColorSpan::New(Ui::UiColor(Vector4(0.0f, 1.0f, 0.0f, 0.75f))), 4u, 7u));
+    label.SetStyledText(builder.Build());
+  }
+}
+
+/**
+ * @brief Finds the maximum value of one channel in actual raster output.
+ * @param[in] pixels The raster output
+ * @param[in] channel The channel index
+ * @return The maximum channel value
+ */
+unsigned MaximumMarqueeColorChannel(PixelData pixels, unsigned channel)
+{
+  DALI_TEST_CHECK(pixels);
+  if(!pixels)
+  {
+    return 0u;
+  }
+  const auto bytes  = Integration::GetPixelDataBuffer(pixels);
+  const auto stride = Pixel::GetBytesPerPixel(pixels.GetPixelFormat());
+  unsigned   value  = 0u;
+  for(unsigned index = channel; index < bytes.bufferSize; index += stride)
+  {
+    value = std::max(value, static_cast<unsigned>(bytes.buffer[index]));
+  }
+  return value;
+}
+} // namespace
+
+int UtcDaliAsyncMarqueeColorStaticNoRasterP(void)
+{
+  UiTestApplication application;
+  for(unsigned kind : {0u, 1u, 2u})
+  {
+    for(bool automatic : {false, true})
+    {
+      Lifecycle test(application);
+      if(kind)
+      {
+        SetMarqueeColorTestStyles(test.label, kind == 2u, false);
+      }
+      if(automatic)
+      {
+        test.label.SetRequestedWidth(4096.0f);
+        test.label.SetMarqueeTriggerPolicy(Text::MarqueeTriggerPolicy::ON_OVERFLOW);
+      }
+      test.Drain();
+      DALI_TEST_CHECK(!test.label.IsMarqueeRunning());
+      const unsigned completed = test.completed;
+      auto           texture   = test.label.GetRendererAt(0u).GetTextures().GetTexture(0u);
+      for(const auto& color : {Vector4(0.2f, 0.6f, 0.8f, 1.0f), Vector4(0.2f, 0.6f, 0.8f, 0.5f)})
+      {
+        test.label.SetTextColor(Ui::UiColor(color));
+        test.Frame();
+        DALI_TEST_CHECK(test.Take().empty());
+        DALI_TEST_EQUALS(test.completed, completed, TEST_LOCATION);
+        DALI_TEST_CHECK(test.label.GetRendererAt(0u).GetTextures().GetTexture(0u) == texture);
+      }
+    }
+  }
+  END_TEST;
+}
+
+int UtcDaliAsyncMarqueeColorRunningPixelsP(void)
+{
+  UiTestApplication application;
+  for(bool vertical : {false, true})
+  {
+    for(unsigned kind : {0u, 1u, 2u})
+    {
+      Lifecycle test(application, true, vertical, true);
+      if(kind)
+      {
+        SetMarqueeColorTestStyles(test.label, kind == 2u, vertical);
+        test.Drain();
+      }
+      const unsigned completed  = test.completed;
+      const unsigned animations = test.animationsCreated;
+      auto           texture    = test.label.GetRendererAt(0u).GetTextures().GetTexture(0u);
+      test.label.SetTextColor(Ui::UiColor(Vector4(0.2f, 0.6f, 0.8f, 0.5f)));
+      auto task = test.Dispatch();
+      task->Process();
+      DALI_TEST_CHECK(task->mParameters.isMarqueeEnabled);
+      if(kind == 0u)
+      {
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.marqueePixelData, 0u), 25u, TEST_LOCATION);
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.marqueePixelData, 1u), 76u, TEST_LOCATION);
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.marqueePixelData, 2u), 102u, TEST_LOCATION);
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.marqueePixelData, 3u), 127u, TEST_LOCATION);
+      }
+      else if(kind == 2u)
+      {
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.textGradientMaskPixelData, 0u), 127u, TEST_LOCATION);
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.textGradientPreservedPixelData, 0u), 127u, TEST_LOCATION);
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.textGradientPreservedPixelData, 1u), 191u, TEST_LOCATION);
+      }
+      else
+      {
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(task->mRenderInfo.marqueePixelData, 3u), 127u, TEST_LOCATION);
+      }
+      DALI_TEST_CHECK(test.label.GetRendererAt(0u).GetTextures().GetTexture(0u) == texture);
+      test.Deliver(task);
+      test.Frame();
+      DALI_TEST_CHECK(test.Take().empty());
+      DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
+      DALI_TEST_EQUALS(test.animationsCreated, animations + 1u, TEST_LOCATION);
+      DALI_TEST_CHECK(test.label.GetRendererAt(0u).GetTextures().GetTexture(0u) != texture);
+      DALI_TEST_CHECK(test.label.IsMarqueeRunning());
+      test.CheckTexture();
+      test.Advance(100u);
+      DALI_TEST_CHECK(test.Current().GetCurrentProgress() > 0.0f);
+      test.label.SetTextColor(Ui::UiColor(Vector4(0.2f, 0.6f, 0.8f, 0.5f)));
+      test.Frame();
+      DALI_TEST_CHECK(test.Take().empty());
+      DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
+    }
+  }
+  END_TEST;
+}
+
+int UtcDaliAsyncMarqueeColorInitialRequestP(void)
+{
+  UiTestApplication application;
+  for(bool vertical : {false, true})
+  {
+    for(bool automatic : {false, true})
+    {
+      for(bool changeAfterWork : {false, true})
+      {
+        Lifecycle test(application, true, vertical);
+        SetMarqueeColorTestStyles(test.label, true, vertical);
+        test.Drain();
+        const unsigned completed = test.completed;
+        if(automatic)
+        {
+          test.label.SetMarqueeTriggerPolicy(Text::MarqueeTriggerPolicy::ON_OVERFLOW);
+        }
+        else
+        {
+          test.label.StartMarquee();
+        }
+        auto first = test.Dispatch();
+        if(changeAfterWork)
+        {
+          first->Process();
+        }
+        test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, 0.5f)));
+        test.Frame();
+        DALI_TEST_CHECK(test.Take().empty());
+        if(!changeAfterWork)
+        {
+          first->Process();
+        }
+        DALI_TEST_CHECK(first->mParameters.isMarqueeEnabled);
+        test.Deliver(first);
+        DALI_TEST_EQUALS(test.completed, completed, TEST_LOCATION);
+        DALI_TEST_CHECK(!test.label.IsMarqueeRunning());
+        auto latest = test.Dispatch();
+        latest->Process();
+        DALI_TEST_EQUALS(MaximumMarqueeColorChannel(latest->mRenderInfo.textGradientMaskPixelData, 0u), 127u, TEST_LOCATION);
+        test.Deliver(latest);
+        test.Frame();
+        DALI_TEST_CHECK(test.Take().empty());
+        DALI_TEST_CHECK(test.label.IsMarqueeRunning());
+        DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
+      }
+    }
+  }
+  END_TEST;
+}
+
+int UtcDaliAsyncMarqueeColorCompletionOrderP(void)
+{
+  UiTestApplication application;
+  for(bool latestFirst : {false, true})
+  {
+    Lifecycle      test(application, true, false, true);
+    const unsigned completed = test.completed;
+    test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, 0.75f)));
+    auto first = test.Dispatch();
+    first->Process();
+    for(unsigned index = 1u; index <= 10u; ++index)
+    {
+      test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, index * 0.05f)));
+    }
+    auto latest = test.Dispatch();
+    latest->Process();
+    DALI_TEST_EQUALS(MaximumMarqueeColorChannel(latest->mRenderInfo.marqueePixelData, 3u), 127u, TEST_LOCATION);
+    test.Deliver(latestFirst ? latest : first);
+    test.Deliver(latestFirst ? first : latest);
+    test.Frame();
+    DALI_TEST_CHECK(test.Take().empty());
+    DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
+    DALI_TEST_CHECK(test.label.IsMarqueeRunning());
+    test.CheckTexture();
+  }
+  END_TEST;
+}
+
+int UtcDaliAsyncMarqueeColorStopRestartP(void)
+{
+  UiTestApplication application;
+  for(bool automatic : {false, true})
+  {
+    Lifecycle test(application, true, false, automatic);
+    if(!automatic)
+    {
+      test.Start();
+    }
+    test.label.StopMarquee();
+    test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, 0.75f)));
+    test.Frame();
+    DALI_TEST_CHECK(test.Take().empty());
+    test.Advance(test.DurationMs() + 20u);
+    test.Drain();
+    DALI_TEST_CHECK(!test.label.IsMarqueeRunning());
+    const unsigned completed = test.completed;
+    test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, 0.5f)));
+    test.Frame();
+    DALI_TEST_CHECK(test.Take().empty());
+    test.label.StartMarquee();
+    auto latest = test.Dispatch();
+    latest->Process();
+    DALI_TEST_EQUALS(MaximumMarqueeColorChannel(latest->mRenderInfo.marqueePixelData, 3u), 127u, TEST_LOCATION);
+    test.Deliver(latest);
+    test.Frame();
+    DALI_TEST_CHECK(test.Take().empty());
+    DALI_TEST_EQUALS(test.completed, completed + 1u, TEST_LOCATION);
+    DALI_TEST_CHECK(test.label.IsMarqueeRunning());
+    test.label.SetAsyncRendering(false);
+    test.label.SetTextColor(Ui::UiColor(Color::RED));
+    test.Drain();
+    DALI_TEST_CHECK(test.Take().empty());
+    test.label.SetAsyncRendering(true);
+    test.Drain();
+    DALI_TEST_EQUALS(test.completed, completed + 2u, TEST_LOCATION);
+    test.CheckTexture();
+  }
+  END_TEST;
+}
+
+int UtcDaliMarqueeManualColorSnapshotDimensionsP(void)
+{
+  UiTestApplication application;
+  using Request            = void (Ui::Integration::LabelImpl::*)(float, float);
+  const Request requests[] = {&Ui::Integration::LabelImpl::RequestAsyncRenderWithFixedSize,
+                              &Ui::Integration::LabelImpl::RequestAsyncRenderWithFixedWidth,
+                              &Ui::Integration::LabelImpl::RequestAsyncRenderWithFixedHeight,
+                              &Ui::Integration::LabelImpl::RequestAsyncRenderWithConstraints};
+  for(bool vertical : {false, true})
+  {
+    for(bool running : {false, true})
+    {
+      for(float scale : {1.0f, 2.0f})
+      {
+        for(bool fit : {false, true})
+        {
+          for(auto request : requests)
+          {
+            Lifecycle test(application, true, vertical, false);
+            test.label.SetPadding(4.0f);
+            test.label.SetRenderScale(scale);
+            if(fit)
+            {
+              test.label.SetTextFit(Text::Fit::Range(18.0f, 22.0f, 2.0f));
+            }
+            SetMarqueeColorTestStyles(test.label, true, vertical);
+            test.Drain();
+            if(running)
+            {
+              test.Start();
+            }
+            test.label.SetMarqueeTriggerPolicy(Text::MarqueeTriggerPolicy::ON_OVERFLOW);
+            auto& impl = static_cast<Ui::Integration::LabelImpl&>(test.label.GetImplementation());
+            (impl.*request)(120.0f, 40.0f);
+            auto tasks = test.Take();
+            DALI_TEST_EQUALS(tasks.size(), 1u, TEST_LOCATION);
+            if(tasks.size() != 1u)
+            {
+              return 1;
+            }
+            auto first = tasks.front();
+            first->Process();
+            DALI_TEST_CHECK(first->mParameters.isMarqueeEnabled);
+            const auto size = first->mRenderInfo.controlSize;
+            const auto done = test.completed;
+            Vector2    published;
+            test.label.AsyncRenderFinishedSignal().Connect(&test.tracker, [&](Ui::View, float width, float height)
+            {
+              published = Vector2(width, height);
+            });
+            test.label.SetTextColor(Ui::UiColor(Vector4(1.0f, 1.0f, 1.0f, 0.5f)));
+            test.Frame();
+            DALI_TEST_CHECK(test.Take().empty());
+            // Manual requests keep the dispatched snapshot and complete once.
+            DALI_TEST_EQUALS(first->mParameters.textColor.a, 1.0f, TEST_LOCATION);
+            test.Deliver(first);
+            DALI_TEST_CHECK(test.Take().empty());
+            DALI_TEST_EQUALS(test.completed, done + 1u, TEST_LOCATION);
+            DALI_TEST_EQUALS(published, size + Vector2(8.0f, 8.0f), 0.001f, TEST_LOCATION);
+            test.Drain();
+            DALI_TEST_EQUALS(test.completed, done + 1u, TEST_LOCATION);
+            (impl.*request)(132.0f, 44.0f);
+            tasks = test.Take();
+            DALI_TEST_EQUALS(tasks.size(), 1u, TEST_LOCATION);
+            if(tasks.size() == 1u)
+            {
+              DALI_TEST_EQUALS(tasks.front()->mParameters.textColor.a, 0.5f, TEST_LOCATION);
+              test.Complete(tasks.front());
+            }
+            DALI_TEST_EQUALS(test.completed, done + 2u, TEST_LOCATION);
+            test.label.SetText("A later automatic text request still completes");
+            test.Drain();
+            DALI_TEST_EQUALS(test.completed, done + 3u, TEST_LOCATION);
+          }
+        }
+      }
+    }
+  }
+  END_TEST;
+}
