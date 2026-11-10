@@ -337,10 +337,18 @@ void Controller::SetTextCutout(bool cutout)
 {
   if(cutout != mImpl->mTextCutout)
   {
-    mImpl->mModel->mVisualModel->SetCutoutEnabled(cutout);
     mImpl->mTextCutout = cutout;
     RequestRelayout();
     RequestAsyncRender();
+  }
+}
+
+void Controller::SetCutoutRenderingEnabled(bool enabled)
+{
+  mImpl->mModel->mVisualModel->SetCutoutEnabled(enabled);
+  if(!enabled)
+  {
+    mImpl->mModel->mVisualModel->SetOffsetWithCutout(Vector2::ZERO);
   }
 }
 
@@ -1153,6 +1161,12 @@ void Controller::SetPlaceholderTextFontSize(float fontSize, FontSizeType type)
 float Controller::GetPlaceholderTextFontSize(FontSizeType type) const
 {
   return PlaceholderHandler::GetPlaceholderTextFontSize(*this, type);
+}
+
+void Controller::SetCutoutTextColor(const Vector4& color)
+{
+  mImpl->mTextColor = color;
+  mImpl->mModel->mVisualModel->SetTextColor(color);
 }
 
 void Controller::SetDefaultColor(const Vector4& color)
@@ -2196,29 +2210,6 @@ void Controller::SetLayoutOffsetWithPadding(Vector2 offset)
 Vector2 Controller::GetLayoutOffsetWithPadding() const
 {
   return mImpl->mModel->mLayoutOffsetWithPadding;
-}
-
-void Controller::SetBackgroundWithCutoutEnabled(bool cutout)
-{
-  mImpl->mModel->mVisualModel->SetBackgroundWithCutoutEnabled(cutout);
-  RequestRelayout();
-  RequestAsyncRender();
-}
-
-bool Controller::IsBackgroundWithCutoutEnabled() const
-{
-  return mImpl->mModel->mVisualModel->IsBackgroundWithCutoutEnabled();
-}
-
-void Controller::SetBackgroundColorWithCutout(const Vector4& color)
-{
-  mImpl->mModel->mVisualModel->SetBackgroundColorWithCutout(color);
-  RequestRelayout();
-}
-
-const Vector4 Controller::GetBackgroundColorWithCutout() const
-{
-  return mImpl->mModel->mVisualModel->GetBackgroundColorWithCutout();
 }
 
 void Controller::SetOffsetWithCutout(const Vector2& offset)

@@ -93,6 +93,15 @@ public:
   void RemoveIdle(CallbackBase* callback);
   void RunIdles();
 
+  /**
+   * @brief Counts pending idle callbacks to detect unintended deferred work in tests.
+   * @return The number of registered callbacks of either return type.
+   */
+  uint32_t GetIdleCallbackCount() const
+  {
+    return mCallbacks.Count() + mReturnCallbacks.Count();
+  }
+
   void RequestUpdateOnce();
   void RequestProcessEventsOnIdle();
   void RequestProcessEventsAndUpdate();

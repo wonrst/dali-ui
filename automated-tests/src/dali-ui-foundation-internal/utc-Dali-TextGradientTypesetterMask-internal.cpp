@@ -1113,7 +1113,6 @@ int UtcDaliTypesetterEmptyBufferP(void)
     }
     DALI_TEST_CHECK(typesetter->RenderTextGradientMask(size, UiText::Direction::LEFT_TO_RIGHT));
     DALI_TEST_CHECK(typesetter->RenderTextGradientPreserved(size, UiText::Direction::LEFT_TO_RIGHT));
-    DALI_TEST_CHECK(typesetter->CreateFullBackgroundBuffer(uint32_t(size.width), uint32_t(size.height), Color::BLUE));
     const auto plan = UiText::Internal::Reveal::BuildCharacterPlan(model, UiText::Reveal::AUTO_FADE_DURATION_RATIO);
     float fadeDuration = 0.0f;
     DALI_TEST_CHECK(typesetter->RenderTextRevealMetadata(size, UiText::Direction::LEFT_TO_RIGHT, plan, fadeDuration));

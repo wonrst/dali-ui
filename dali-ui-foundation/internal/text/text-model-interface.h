@@ -521,16 +521,16 @@ public:
   virtual bool IsCutoutEnabled() const = 0;
 
   /**
-   * @brief Retrieves the background with cutout is enabled or not.
+   * @brief Retains the legacy background query for model interface compatibility.
    *
-   * @return boolean if it is enabled.
+   * @return False; CPU cutout background composition is no longer supported.
    */
   virtual const bool IsBackgroundWithCutoutEnabled() const = 0;
 
   /**
-   * @brief Retrieves the color of the background with cutout.
+   * @brief Retains the legacy background color query without a stored snapshot.
    *
-   * @return The color of the background with cutout.
+   * @return Transparent; the owner background belongs to the shader uniform.
    */
   virtual const Vector4& GetBackgroundColorWithCutout() const = 0;
 

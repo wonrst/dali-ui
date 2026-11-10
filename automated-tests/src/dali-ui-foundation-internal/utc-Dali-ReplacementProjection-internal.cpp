@@ -1125,7 +1125,6 @@ int UtcDaliReplacementCutoutFallsBackWithoutMutatingLogicalModelP(void)
   Text::ModelPtr originalModel        = Text::Model::New();
   originalModel->mLogicalModel->mText = Utf32("AiconB");
   originalModel->mVisualModel->SetCutoutEnabled(true);
-  originalModel->mVisualModel->SetBackgroundWithCutoutEnabled(true);
 
   Text::ReplacementSourceSnapshot source;
   source.runs.PushBack(Candidate(1u, 4u, 24.0f, 18.0f, 312u));
@@ -1142,7 +1141,7 @@ int UtcDaliReplacementCutoutFallsBackWithoutMutatingLogicalModelP(void)
   DALI_TEST_CHECK(Text::LayoutReplacementSourceForTest(*originalModel, source, services, options, result));
   DALI_TEST_CHECK(result.processingModel);
   DALI_TEST_CHECK(originalModel->IsCutoutEnabled());
-  DALI_TEST_CHECK(originalModel->IsBackgroundWithCutoutEnabled());
+  DALI_TEST_CHECK(!originalModel->IsBackgroundWithCutoutEnabled());
   DALI_TEST_CHECK(!result.processingModel->IsCutoutEnabled());
   DALI_TEST_CHECK(!result.processingModel->IsBackgroundWithCutoutEnabled());
 

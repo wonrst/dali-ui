@@ -402,6 +402,39 @@ public:
   static Vector2 GetGradientViewCoordinateSize(Ui::Integration::Visual::Base visual);
 
   /**
+   * @brief Binds the solid background to the current renderer's cutout uniform.
+   *
+   * The binding retains its source until removal and bakes evaluated colors so
+   * partial update detects transitions to transparent. Repeated calls for the
+   * same source reuse the binding, including during pending async publication.
+   *
+   * @param[in] visual The text visual whose current renderer receives the color.
+   * @param[in] background The background visual, or an empty handle to clear it.
+   */
+  static void SetCutoutBackground(Ui::Integration::Visual::Base visual, Ui::Integration::Visual::Base background);
+
+  /**
+   * @brief Checks whether the published renderer uses shader cutout.
+   * @param[in] visual The text visual to inspect.
+   * @return True if the current renderer consumes cropped cutout planes.
+   */
+  static bool HasCutoutRenderer(Ui::Integration::Visual::Base visual);
+
+  /**
+   * @brief Resolves the requested cutout mode for the current features and owner background.
+   * @param[in] visual The text visual to inspect.
+   * @return True if the next render can use shader cutout; independent of the published result.
+   */
+  static bool IsCutoutRenderingEnabled(Ui::Integration::Visual::Base visual);
+
+  /**
+   * @brief Checks whether cutout text color can change without rasterization.
+   * @param[in] visual The text visual to inspect.
+   * @return True if the current payload can be reused and no render task is pending.
+   */
+  static bool CanUpdateCutoutTextColor(Ui::Integration::Visual::Base visual);
+
+  /**
    * @brief Render marquee text PixelData with the TextVisual-owned Typesetter.
    *
    * This is for Label's sync marquee preparation only. It reuses TextVisual's
@@ -819,13 +852,13 @@ private:
   void RemoveRenderer(Actor& actor, bool removeDefaultRenderer);
 
   /**
-   * @brief Create a texture in textureSet and add it.
-   * @param[in] textureSet The textureSet to which the texture will be added.
-   * @param[in] data The PixelData to be uploaded to texture.
+   * @brief Uploads pixel data to a new texture and adds it to the texture set.
+   * @param[in,out] textureSet The texture set to receive the texture.
+   * @param[in] data The pixel data to upload, retained by the caller.
    * @param[in] sampler The sampler.
    * @param[in] textureSetIndex The Index of TextureSet.
    */
-  void AddTexture(TextureSet& textureSet, PixelData& data, Sampler& sampler, unsigned int textureSetIndex);
+  void AddTexture(TextureSet& textureSet, const PixelData& data, Sampler& sampler, unsigned int textureSetIndex);
 
   /**
    * @brief Create a texture in textureSet and add it.
@@ -950,10 +983,23 @@ private:
   bool ApplyGradientTiling(const Ui::Text::Internal::Gradient::RenderData& renderData, bool overlay);
 
   /**
-   * @brief Gets text textures using the cached shader features.
-   * @param[in] size The texture size.
+   * @brief Uploads a validated cutout snapshot for the already selected shader.
+   * @param[in] data Cropped planes and their full-control raster coordinates.
+   * @return The textures for the current renderer; no additional renderer is created.
+   */
+  TextureSet GetCutoutTexture(const Ui::Text::CutoutRenderData& data);
+
+  /**
+   * @brief Resolves the requested cutout mode for the current features and owner background.
+   * @return True if the next render can use shader cutout; independent of the published result.
+   */
+  bool IsCutoutRenderingEnabled() const;
+
+  /**
+   * @brief Rasterizes text using the cached shader features.
+   * @param[in] size The full raster size, including cutout padding.
    * @param[in] gradientContext Borrowed USER_SPACE raster coordinates, or nullptr.
-   * @return The textures prepared for the text renderer.
+   * @return Cropped cutout textures, or ordinary text textures.
    */
   TextureSet GetTextTexture(const Vector2& size, const Ui::Text::GradientRasterContext* gradientContext);
 
@@ -1004,6 +1050,16 @@ private:
   typedef std::vector<VisualRenderer> RendererContainer;
   typedef std::vector<Constraint>     ConstraintContainer;
 
+  /**
+   * @brief Returns the optional background binding in the first slot.
+   *
+   * The default color handle is the common fast path. A color source set after
+   * scene attachment can create tiled colors without that default, so identify
+   * other first entries by tag rather than assuming they are the background.
+   * @return The background constraint, or an empty handle when no binding exists.
+   */
+  Constraint GetCutoutBackgroundConstraint() const;
+
 private:
   Ui::Text::ControllerPtr                    mController;         ///< The text's controller.
   Ui::Text::TypesetterPtr                    mTypesetter;         ///< The text's typesetter.
@@ -1023,7 +1079,7 @@ private:
   Property::Index     mTextColorAnimatableIndex;         ///< The index of uTextColorAnimatable property.
   Property::Index     mTextRequireRenderPropertyIndex;   ///< The index of requireRender property.
   RendererContainer   mRendererList;
-  ConstraintContainer mColorConstraintList;
+  ConstraintContainer mColorConstraintList; ///< Color constraints, preceded by an optional cutout background binding.
   ConstraintContainer mOpacityConstraintList;
 
   float                    mLineHeight;
@@ -1035,6 +1091,7 @@ private:
   uint64_t                 mTextLoadingMaximumLinesRevision;      ///< MaximumLines revision owned by the latest render task.
   uint64_t                 mNaturalSizeMaximumLinesRevision;      ///< MaximumLines revision owned by the latest natural-size task.
   uint64_t                 mHeightForWidthMaximumLinesRevision;   ///< MaximumLines revision owned by the latest HFW task.
+  bool                     mIsCutoutRenderer : 1;                 ///< Current renderer consumes cropped cutout inputs.
   bool                     mRendererUpdateNeeded : 1;             ///< The flag to indicate whether the renderer needs to be updated.
   bool                     mApplyingFittingMode : 1;              ///< Whether renderer update is running from OnApplyFittingMode().
   bool                     mTextRequireRender : 1;                ///< The flag to indicate whether the text needs to be rendered.

@@ -327,9 +327,9 @@ LabelImpl::LabelImpl()
   mHasA11yAnchors(false),
   mIsVisible(false),
   mIsVisibleInitialized(false),
-  mIsViewBackgroundEnabled(true),
   mIsManualRenderInProgress(false),
-  mIsManualRenderFinished(false)
+  mIsManualRenderFinished(false),
+  mCutoutResourceReadyConnected(false)
 {
   Dali::Ui::Integration::ViewAccessibility::SetAccessibleObjectCreator(
     *this,
@@ -504,7 +504,7 @@ void LabelImpl::UpdateInlineReplacementData(const InlineReplacementUpdateData& u
   const Internal::Text::TextRevealData* revealData           = Internal::Text::GetTextRevealData(mTextRevealData);
   const bool                            pixelRevealRequested = revealData && revealData->enabled &&
                                     revealData->unit == Ui::Text::Reveal::Unit::PIXEL &&
-                                    !mController->IsTextCutout();
+                                    !Internal::TextVisual::IsCutoutRenderingEnabled(mVisual);
   data->manager.Update(data->host,
                        updateData.source,
                        updateData.placements,
@@ -850,7 +850,7 @@ void LabelImpl::SetTextReveal(const Ui::Text::Reveal& reveal)
       replacementData->manager.ClearReveal();
     }
     else if(mController && mController->IsAsyncRendering() &&
-            !mController->IsMarqueeEnabled() && !mController->IsTextCutout())
+            !mController->IsMarqueeEnabled() && !Internal::TextVisual::HasCutoutRenderer(mVisual))
     {
       // Full fade needs no per-unit metadata. Bind the current image result
       // immediately so starting an async exit does not remove it first.
@@ -2257,6 +2257,10 @@ void LabelImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
 
   if(mController->IsAsyncRendering())
   {
+    if(mController->IsTextCutout() || Internal::TextVisual::HasCutoutRenderer(mVisual))
+    {
+      UpdateCutoutBackgroundVisibility();
+    }
     UpdateA11yAnchors(contentLayoutDirty);
 
     if(mTextScroller && mTextScroller->IsScrolling() && !(mRendererUpdateNeeded || contentLayoutDirty || mIsAsyncRenderRequested))
@@ -2371,7 +2375,7 @@ void LabelImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
         : (contentSize.y - layoutSize.y) * VERTICAL_ALIGNMENT_TABLE[static_cast<int>(mController->GetVerticalAlignment())];
 
     const int maxTextureSize = Dali::GetMaxTextureSize();
-    if(layoutSize.width > maxTextureSize)
+    if(layoutSize.width > maxTextureSize && !Internal::TextVisual::IsCutoutRenderingEnabled(mVisual))
     {
       DALI_LOG_INFO(gLogFilter, Debug::General, "[%p] Layout width %.2f exceeds max texture size %d, clamped to %d\n", mController.Get(), layoutSize.width, maxTextureSize, maxTextureSize);
       layoutSize.width = static_cast<float>(maxTextureSize);
@@ -2429,6 +2433,10 @@ void LabelImpl::OnRelayout(const Vector2& size, RelayoutContainer& container)
     mController->SetTextFitChanged(false);
     EmitTextFitChanged();
   }
+  if(mCutoutResourceReadyConnected || Internal::TextVisual::HasCutoutRenderer(mVisual))
+  {
+    UpdateCutoutBackgroundVisibility();
+  }
 }
 
 Vector3 LabelImpl::GetNaturalSize()
@@ -2450,6 +2458,11 @@ float LabelImpl::GetHeightForWidth(float width)
 
 MeasuredSize LabelImpl::OnMeasure(float widthConstraint, float heightConstraint)
 {
+  if(mController->IsTextCutout() ||
+     (mController->IsAsyncRendering() && Internal::TextVisual::HasCutoutRenderer(mVisual)))
+  {
+    OnBackgroundPropertyChanged();
+  }
   const bool measureInvalidated = mMeasureInvalidated;
   mMeasureInvalidated           = false;
 
@@ -2583,6 +2596,10 @@ MeasuredSize LabelImpl::OnMeasure(float widthConstraint, float heightConstraint)
 
 LayoutRect LabelImpl::OnArrange(const LayoutRect& bounds)
 {
+  if(mCutoutResourceReadyConnected)
+  {
+    UpdateCutoutBackgroundVisibility();
+  }
   return bounds;
 }
 
@@ -2843,9 +2860,7 @@ void LabelImpl::AsyncInitializeMarquee(const Ui::Text::AsyncTextRenderInfo& rend
   const bool needsMarqueeComposition = hasGradientFeature || renderInfo.isOverlayStyle;
   if(needsMarqueeComposition)
   {
-    const bool cutoutEnabled = renderInfo.isCutoutEnabled ||
-                               mController->IsTextCutout() ||
-                               mController->GetRenderTextModel()->IsBackgroundWithCutoutEnabled();
+    const bool                            cutoutEnabled = static_cast<bool>(renderInfo.cutout);
     Ui::Text::MarqueeBuilder::FeatureInfo featureInfo;
     if(hasGradientFeature)
     {
@@ -3010,7 +3025,7 @@ void LabelImpl::AsyncRenderFinished(Ui::Text::AsyncTextRenderInfo&& renderInfo)
 
   // LoadComplete retains textures only for a verified texture-limit rejection.
   // Other pixel-less results remove them; ordinary empty completions have zero size.
-  if(renderInfo.textPixelData || renderInfo.size == Size::ZERO ||
+  if(renderInfo.textPixelData || renderInfo.cutout || renderInfo.size == Size::ZERO ||
      !static_cast<Internal::Visual::Base&>(GetImplementation(mVisual)).GetRenderer().GetTextures())
   {
     // A committed static result replaces the marquee renderer. Retire the old
@@ -3027,8 +3042,7 @@ void LabelImpl::AsyncRenderFinished(Ui::Text::AsyncTextRenderInfo&& renderInfo)
     }
 
     // To avoid flickering issues, enable/disable the background visual when async load is completed.
-    SetViewBackgroundEnabled(!mController->IsTextCutout());
-
+    UpdateCutoutBackgroundVisibility();
     mAsyncLineCount = renderInfo.lineCount;
     if(renderInfo.isMarqueeStartAnchorResolved)
     {
@@ -3674,7 +3688,7 @@ void LabelImpl::InitializeMarquee(const Size& contentSize, const Size& originSiz
     {
       featureInfo =
         Ui::Text::MarqueeBuilder::CollectGradientFeatureInfo(*textModel,
-                                                             mController->IsTextCutout());
+                                                             false);
     }
     else
     {
@@ -4234,16 +4248,11 @@ void LabelImpl::SetCutoutEnabledInternal(bool enabled)
 void LabelImpl::SetViewBackgroundEnabled(bool enabled)
 {
   Ui::View view = Ui::View::DownCast(Self());
-  // Avoid unnecessary updates when no background visual exists.
-  if(!Internal::ViewDataImpl::Get(GetImpl(view)).GetVisual(Ui::Integration::View::Property::BACKGROUND))
+  auto&    data = Internal::ViewDataImpl::Get(GetImpl(view));
+  if(data.GetVisual(Ui::Integration::View::Property::BACKGROUND) &&
+     data.IsVisualEnabled(Ui::Integration::View::Property::BACKGROUND) != enabled)
   {
-    return;
-  }
-
-  if(mIsViewBackgroundEnabled != enabled)
-  {
-    mIsViewBackgroundEnabled = enabled;
-    Internal::ViewDataImpl::Get(GetImpl(view)).EnableVisual(Ui::Integration::View::Property::BACKGROUND, enabled);
+    data.EnableVisual(Ui::Integration::View::Property::BACKGROUND, enabled);
   }
 }
 
@@ -4271,44 +4280,72 @@ bool LabelImpl::GetViewBackgroundColor(Vector4& backgroundColor) const
   return false;
 }
 
-void LabelImpl::OnBackgroundPropertyChanged()
+void LabelImpl::OnCutoutResourcesReady(Property::Index index)
 {
-  if(!mController->IsTextCutout())
+  if(index != Ui::Text::LabelPropertyIndex::TEXT)
   {
     return;
   }
-
-  Vector4 backgroundColor = Vector4::ZERO;
-  if(GetViewBackgroundColor(backgroundColor))
+  auto&      data              = Internal::ViewDataImpl::Get(*this);
+  const bool backgroundEnabled = data.IsVisualEnabled(Ui::Integration::View::Property::BACKGROUND);
+  const bool ownsBackground    = Internal::TextVisual::HasCutoutRenderer(mVisual);
+  if(data.GetVisual(Ui::Integration::View::Property::BACKGROUND) && backgroundEnabled == ownsBackground)
   {
-    mController->SetBackgroundColorWithCutout(backgroundColor);
-    mController->SetBackgroundWithCutoutEnabled(true);
+    // Enabling a visual emits resource signals itself. Repair after this callback.
+    Ui::View::DownCast(Self()).InvalidateArrange();
+  }
+}
 
-    if(!mController->IsAsyncRendering())
+void LabelImpl::UpdateCutoutBackgroundVisibility()
+{
+  auto&      data           = Internal::ViewDataImpl::Get(*this);
+  const bool ownsBackground = Internal::TextVisual::HasCutoutRenderer(mVisual);
+  Internal::TextVisual::SetCutoutBackground(mVisual, ownsBackground ? data.GetVisual(Ui::Integration::View::Property::BACKGROUND)
+                                                                    : Ui::Integration::Visual::Base());
+  SetViewBackgroundEnabled(!ownsBackground);
+  if(!mController->IsTextCutout() && !ownsBackground && mCutoutResourceReadyConnected)
+  {
+    data.VisualResourceReadySignal().Disconnect(this, &LabelImpl::OnCutoutResourcesReady);
+    mCutoutResourceReadyConnected = false;
+  }
+}
+
+void LabelImpl::OnBackgroundPropertyChanged()
+{
+  if(!mController->IsTextCutout() && !Internal::TextVisual::HasCutoutRenderer(mVisual))
+  {
+    return;
+  }
+  const bool effectiveCutout = Internal::TextVisual::IsCutoutRenderingEnabled(mVisual);
+  if(effectiveCutout != mController->GetLogicalTextModel()->IsCutoutEnabled())
+  {
+    mController->SetCutoutRenderingEnabled(effectiveCutout);
+    RequestRendererUpdate();
+    RequestTextRelayout();
+    if(mController->IsAsyncRendering() && !mIsManualRenderInProgress)
     {
-      SetViewBackgroundEnabled(false);
+      RequestAsyncRender();
     }
   }
+  UpdateCutoutBackgroundVisibility();
 }
 
 void LabelImpl::UpdateCutoutState(bool enabled)
 {
-  mController->SetBackgroundWithCutoutEnabled(enabled);
-
-  if(enabled)
+  auto& data = Internal::ViewDataImpl::Get(*this);
+  if(enabled && !mCutoutResourceReadyConnected)
   {
-    Vector4 backgroundColor = Vector4::ZERO;
-    if(GetViewBackgroundColor(backgroundColor))
-    {
-      mController->SetBackgroundColorWithCutout(backgroundColor);
-    }
+    data.VisualResourceReadySignal().Connect(this, &LabelImpl::OnCutoutResourcesReady);
+    mCutoutResourceReadyConnected = true;
   }
-
-  if(!mController->IsAsyncRendering())
+  else if(!enabled && !Internal::TextVisual::HasCutoutRenderer(mVisual) && mCutoutResourceReadyConnected)
   {
-    SetViewBackgroundEnabled(!enabled);
-    Internal::TextVisual::SetRequireRender(mVisual, enabled);
+    data.VisualResourceReadySignal().Disconnect(this, &LabelImpl::OnCutoutResourcesReady);
+    mCutoutResourceReadyConnected = false;
   }
+  RequestRendererUpdate();
+  RequestTextRelayout();
+  UpdateCutoutBackgroundVisibility();
 }
 
 void LabelImpl::ApplyLocalizedText(BaseHandle target, const Dali::String& text)
@@ -4415,14 +4452,11 @@ Ui::Text::AsyncTextParameters LabelImpl::GetAsyncTextParameters(const Text::Asyn
       parameters.marqueeStartAnchor = mMarqueeStartAnchor;
     }
   }
-  parameters.isCutoutEnabled               = mController->IsTextCutout();
-  parameters.isBackgroundWithCutoutEnabled = mController->IsBackgroundWithCutoutEnabled();
-  parameters.backgroundColorWithCutout     = mController->GetBackgroundColorWithCutout();
-  const auto* revealData                   = Internal::Text::GetTextRevealData(mTextRevealData);
-  parameters.textRevealRevision            = revealData ? revealData->revision : 0u;
-  parameters.isTextRevealEnabled           = revealData && revealData->enabled &&
-                                   !parameters.isMarqueeEnabled &&
-                                   !parameters.isCutoutEnabled;
+  parameters.isCutoutEnabled = Internal::TextVisual::IsCutoutRenderingEnabled(mVisual);
+  mController->SetCutoutRenderingEnabled(parameters.isCutoutEnabled);
+  const auto* revealData         = Internal::Text::GetTextRevealData(mTextRevealData);
+  parameters.textRevealRevision  = revealData ? revealData->revision : 0u;
+  parameters.isTextRevealEnabled = revealData && revealData->enabled && !parameters.isMarqueeEnabled;
   if(parameters.isTextRevealEnabled)
   {
     parameters.textRevealUnit                 = Ui::Text::Internal::Reveal::ToInternalUnit(revealData->unit);
@@ -4511,8 +4545,20 @@ void LabelImpl::SetTextColorInternal(const Vector4& color)
   {
     const bool alphaChanged = mController->GetDefaultColor().a != color.a;
     Self().SetProperty(Ui::Text::LabelPropertyIndex::TEXT_COLOR, color);
-    mController->SetDefaultColor(color);
-    RequestRendererUpdate();
+    if(mController->IsTextCutout() && (!mController->IsAsyncRendering() || !mIsAsyncRenderRequested) &&
+       Internal::TextVisual::CanUpdateCutoutTextColor(mVisual))
+    {
+      mController->SetCutoutTextColor(color);
+    }
+    else
+    {
+      mController->SetDefaultColor(color);
+      RequestRendererUpdate();
+      if(mController->IsAsyncRendering() && Internal::TextVisual::IsCutoutRenderingEnabled(mVisual) && !mIsManualRenderInProgress)
+      {
+        RequestAsyncRender();
+      }
+    }
 
     if(mController->IsAsyncRendering() && !mIsManualRenderInProgress && mTextScroller && mTextScroller->IsScrolling() &&
        Internal::TextVisual::UsesDefaultMarqueeTextColor(mVisual, alphaChanged))
