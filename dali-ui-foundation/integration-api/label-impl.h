@@ -138,6 +138,22 @@ public:
   Ui::Text::StyledText GetStyledText() const;
 
   /**
+   * @brief Sets the text shaping language for this control.
+   *
+   * @param[in] language A BCP 47 language tag, or empty to remove the override.
+   * @return True on success, false if the input is invalid. Invalid input preserves the previous setting.
+   * @see Dali::Ui::Integration::Text::SetTextLanguage(Ui::Label, const Dali::String&)
+   */
+  bool SetTextLanguage(const Dali::String& language);
+
+  /**
+   * @brief Gets the authored text shaping language.
+   *
+   * @return The lowercase language tag, or empty if no override is set.
+   */
+  Dali::String GetTextLanguage() const;
+
+  /**
    * @copydoc Dali::Ui::Label::SetFontFamily
    */
   void SetFontFamily(const Dali::String& fontFamily);

@@ -840,6 +840,11 @@ public:
   void RequestAsyncRender();
 
   /**
+   * @copydoc Dali::Ui::Text::Controller::GetResolvedTextLanguage()
+   */
+  std::string GetResolvedTextLanguage() const;
+
+  /**
    * @brief Request a relayout using the Ui::Integration::Text::ControlInterface.
    */
   void QueueModifyEvent(ModifyEvent::Type type)
@@ -1624,6 +1629,8 @@ public:
   View                        mView;             ///< The view interface to the rendering back-end.
   Layout::Engine              mLayoutEngine;     ///< The layout engine.
   Shader                      mShaderBackground; ///< The shader for text background.
+
+  std::string mTextLanguage; ///< Empty follows the legacy system shaping language.
 
   // Containers / complex values
   Vector<ModifyEvent>                 mModifyEvents;      ///< Temporary stores the text set until the next relayout.

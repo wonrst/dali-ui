@@ -6,6 +6,7 @@ This sample demonstrates DALi UI text features.
 
 - Basic Label text rendering
 - Layout direction
+- Per-control shaping language (integration API)
 - Markup text
 - Marquee
 - Text style, bevel, and cutout mask
@@ -28,6 +29,7 @@ This sample demonstrates DALi UI text features.
 | --- | --- |
 | `text.example` | Basic text sample |
 | `text-layout-direction.example` | Text layout direction sample |
+| `text-language.example` | Shaping language, Cyrillic glyphs, sync/async and input controls |
 | `text-markup.example` | Markup text sample |
 | `text-marquee.example` | Marquee text sample |
 | `text-style.example` | Text style sample |
@@ -51,6 +53,60 @@ This sample demonstrates DALi UI text features.
 | `text-localization-custom-component.example` | Custom component localization sample |
 | `text-gradient-localization.example` | Localized markup ranges with TextGradient |
 | `text-image-span.example` | Sync/async inline image layout playground |
+
+## Text shaping language
+
+`text-language.example` uses `Dali::Ui::Integration::Text::SetTextLanguage`
+for `Label`, `InputField`, and `InputEditor`. Include
+`<dali-ui-foundation/integration-api/text/text-language.h>`.
+
+```cpp
+auto label = Dali::Ui::Label::New("бгдпт");
+Dali::Ui::Integration::Text::SetTextLanguage(label, "sr-Cyrl-RS");
+```
+
+The argument is one well-formed ASCII BCP 47 language tag (up to 255 bytes).
+Tags are case-insensitive; the getter returns the lowercase authored tag.
+Invalid input returns `false` and leaves the previous setting intact.
+`""` removes the local override (currently follows the system language);
+`"und"` explicitly selects undetermined language. POSIX locale names such as
+`sr_RS.UTF-8`, language lists and whitespace are rejected. This API affects
+shaping of the whole control, including placeholders. It does not select
+fallback fonts, change direction, translate content or propagate to children.
+
+The sample compares `ru`, `uk`, `bg`, `sr`, `mk`, and `und` across 521 Cyrillic
+and related code points from Unicode 17.0.0. Bundled Noto Sans 2.015 fonts cover
+456 of those; unsupported characters are expected. Font hashes, sources,
+coverage and the OFL license are in `res/text-language`. The upright font has
+an alternative `б` for Serbian/Macedonian; italic also localizes `г д п т ѓ`.
+Identical text need not look different for every language.
+
+After rebuilding/installing the adaptor and UI, build this sample:
+
+```bash
+cmake -S samples/text -B build/text-language -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/text-language --target text-language.example -j4
+samples/text/run-text-language.sh
+```
+
+The Ubuntu launcher uses a private Fontconfig configuration so the bundled
+fonts are selected even if another Noto Sans version is installed. It requires
+Python 3. The executable also registers the font directory on startup.
+To try other fonts, specify their directory and actual family name:
+
+```bash
+TEXT_LANGUAGE_FONT_DIR=/absolute/path/to/test-fonts \
+TEXT_LANGUAGE_FONT_FAMILY="Test Font Family" \
+  samples/text/run-text-language.sh
+```
+
+Keys: `N`/`P` or arrows change pages, `I` toggles italic, `B` toggles bold label
+rows, `A` toggles async labels, `L` swaps `ru`/`sr` on existing labels and input
+controls, and Escape exits. The heading shows the current input languages.
+`TEXT_LANGUAGE_ITALIC=1` and `TEXT_LANGUAGE_ASYNC=1` select startup modes.
+
+For real-font cache, language transition and screenshot regression tests, see
+[the native audit instructions](../../automated-tests/text-language/README.txt).
 
 ## Localization resources
 

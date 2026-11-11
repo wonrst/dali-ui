@@ -413,7 +413,8 @@ bool ControllerImplModelUpdater::Update(Controller::Impl&           impl,
                                  updateInfo.mStartGlyphIndex,
                                  requestedNumberOfCharacters,
                                  *targetModel.mVisualModel,
-                                 newParagraphGlyphs);
+                                 newParagraphGlyphs,
+                                 impl.GetResolvedTextLanguage());
 
     // Create the 'number of glyphs' per character and the glyph to character conversion tables.
     targetModel.mVisualModel->CreateGlyphsPerCharacterTable(startIndex, updateInfo.mStartGlyphIndex,

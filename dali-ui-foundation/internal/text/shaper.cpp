@@ -38,7 +38,7 @@ void ShapeText(TextAbstraction::Shaping& shaping, TextAbstraction::FontClient& f
                const Vector<ScriptRun>& scripts, const Vector<FontRun>& fonts, CharacterIndex startCharacterIndex,
                GlyphIndex startGlyphIndex, Length numberOfCharacters, Vector<GlyphInfo>& glyphs,
                Vector<CharacterIndex>& glyphToCharacterMap, Vector<Length>& charactersPerGlyph,
-               Vector<GlyphIndex>& newParagraphGlyphs)
+               Vector<GlyphIndex>& newParagraphGlyphs, const std::string& language)
 {
   if(0u == numberOfCharacters)
   {
@@ -164,7 +164,7 @@ void ShapeText(TextAbstraction::Shaping& shaping, TextAbstraction::FontClient& f
     // Shape the text for the current chunk.
     const Length numberOfGlyphs = shaping.Shape(fontClient, textBuffer + previousIndex,
                                                 (currentIndex - previousIndex), // The number of characters to shape.
-                                                currentFontId, currentScript);
+                                                currentFontId, currentScript, language);
 
     // Retrieve the glyphs and the glyph to character conversion map.
     Vector<GlyphInfo>      tmpGlyphs;

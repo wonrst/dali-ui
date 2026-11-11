@@ -1158,5 +1158,10 @@ Length Shaping::Shape(TextAbstraction::FontClient& fontClient, unsigned int cons
   return GetImplementation(*this).Shape(fontClient, text, numChars, fontId, script);
 }
 
+Length Shaping::Shape(TextAbstraction::FontClient& fontClient, const Character* text, Length count, FontId fontId, Script script, const std::string& /* language */)
+{
+  return GetImplementation(*this).Shape(fontClient, text, count, fontId, script);
+}
+
 } // namespace TextAbstraction
 } // namespace Dali

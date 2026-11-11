@@ -381,6 +381,16 @@ void InputEditorImpl::SetStyledText(const Ui::Text::StyledText& styledText)
   }
 }
 
+bool InputEditorImpl::SetTextLanguage(const Dali::String& language)
+{
+  return mController->SetTextLanguage(ToStdString(language));
+}
+
+Dali::String InputEditorImpl::GetTextLanguage() const
+{
+  return ToDaliString(mController->GetTextLanguage());
+}
+
 void InputEditorImpl::SetFontFamily(const Dali::String& fontFamily)
 {
   mController->SetDefaultFontFamily(ToStdString(fontFamily));

@@ -1,0 +1,32 @@
+[
+  {
+    "file": "NotoSans.ttf",
+    "source": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf",
+    "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+  },
+  {
+    "file": "NotoSans-Italic.ttf",
+    "source": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosans/NotoSans-Italic%5Bwdth,wght%5D.ttf",
+    "sha256": "58e6e0ebd1931b29a365aa2d3e2ee9a9e831a3af7cf3ad1462d4e72154f0b291"
+  },
+  {
+    "file": "OFL.txt",
+    "source": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosans/OFL.txt",
+    "sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a"
+  },
+  {
+    "file": "Scripts.txt",
+    "source": "https://www.unicode.org/Public/17.0.0/ucd/Scripts.txt",
+    "sha256": "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf"
+  },
+  {
+    "file": "ScriptExtensions.txt",
+    "source": "https://www.unicode.org/Public/17.0.0/ucd/ScriptExtensions.txt",
+    "sha256": "ec2107e58825a1586acee8e0911ce18260394ac8b87e535ca325f1ccbeb06bc6"
+  },
+  {
+    "file": "UnicodeData.txt",
+    "source": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "sha256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c"
+  }
+]

@@ -949,6 +949,34 @@ public: // Default style & Input style
   void SetDefaultFontFamily(const std::string& defaultFontFamily);
 
   /**
+   * @brief Sets the text shaping language for this controller.
+   *
+   * A change invalidates shaped glyphs, layout and size measurements, and
+   * requests synchronous or asynchronous rendering as appropriate.
+   *
+   * @param[in] language A BCP 47 language tag, or empty to remove the override.
+   * @return True on success, false if the input is invalid. Invalid input preserves the previous setting.
+   */
+  bool SetTextLanguage(const std::string& language);
+
+  /**
+   * @brief Gets the authored text shaping language.
+   *
+   * @return The lowercase language tag, or empty if no override is set.
+   */
+  const std::string& GetTextLanguage() const;
+
+  /**
+   * @brief Resolves the text shaping language for a complete shaping operation.
+   *
+   * Resolves the authored override or the current system shaping language.
+   * The returned value can be copied into an asynchronous request.
+   *
+   * @return The resolved language tag, or "und" if the system language cannot be resolved.
+   */
+  std::string GetResolvedTextLanguage() const;
+
+  /**
    * @brief Retrieve the default font family.
    *
    * @return The default font family.

@@ -83,6 +83,7 @@ struct AsyncTextParameters
   /** @brief Initializes the asynchronous request with default text properties. */
   AsyncTextParameters()
   : text{},
+    textLanguage{},
     fontFamily{},
     textColor{Color::BLACK},
     anchorColor{Color::MEDIUM_BLUE},
@@ -214,8 +215,9 @@ struct AsyncTextParameters
 
   ~AsyncTextParameters() = default;
 
-  std::string text;       ///< The text to be rendered encoded in utf8.
-  std::string fontFamily; ///< The font's family.
+  std::string text;         ///< The text to be rendered encoded in utf8.
+  std::string textLanguage; ///< Effective per-request BCP 47 shaping language snapshot.
+  std::string fontFamily;   ///< The font's family.
 
   Vector4 textColor; ///< The default text's color. Default is white.
   Vector4 anchorColor;

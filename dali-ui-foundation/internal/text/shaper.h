@@ -53,13 +53,14 @@ class VisualModel;
  * to.
  * @param[out] charactersPerGlyph Vector containing the number of characters per glyph.
  * @param[out] newParagraphGlyphs Vector containing the indices to the new paragraph glyphs.
+ * @param[in] language The BCP 47 shaping language, or empty to use the system shaping language.
  */
 void ShapeText(TextAbstraction::Shaping& shaping, TextAbstraction::FontClient& fontClient,
                const Vector<Character>& text, const Vector<LineBreakInfo>& lineBreakInfo,
                const Vector<ScriptRun>& scripts, const Vector<FontRun>& fonts, CharacterIndex startCharacterIndex,
                GlyphIndex startGlyphIndex, Length numberOfCharacters, Vector<GlyphInfo>& glyphs,
                Vector<CharacterIndex>& glyphToCharacterMap, Vector<Length>& charactersPerGlyph,
-               Vector<GlyphIndex>& newParagraphGlyphs);
+               Vector<GlyphIndex>& newParagraphGlyphs, const std::string& language = {});
 
 } // namespace Text
 

@@ -1,0 +1,17 @@
+# Build with -DTEXT_LANGUAGE_AUDIT=ON when configuring samples/text.
+# These probes use the real adaptor and UI, including their glyph caches.
+IF(NOT UNIX OR NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  MESSAGE(FATAL_ERROR "Text language probes require a Unix Debug SDK (internal UI symbols)")
+ENDIF()
+FIND_PACKAGE(PkgConfig REQUIRED)
+PKG_CHECK_MODULES(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+FIND_PACKAGE(X11 REQUIRED)
+FOREACH(PROBE cache-audit ui-audit transition-audit language-semantics)
+  ADD_EXECUTABLE(text-language-${PROBE} ${PROBE}.cpp)
+  TARGET_LINK_LIBRARIES(text-language-${PROBE} PRIVATE ${DALI_UI_SAMPLE_LIBRARIES})
+  TARGET_INCLUDE_DIRECTORIES(text-language-${PROBE} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../..")
+  TARGET_COMPILE_DEFINITIONS(text-language-${PROBE} PRIVATE DEBUG_ENABLED)
+ENDFOREACH()
+TARGET_LINK_LIBRARIES(text-language-cache-audit PRIVATE PkgConfig::HARFBUZZ)
+TARGET_LINK_LIBRARIES(text-language-transition-audit PRIVATE ${X11_LIBRARIES})
+TARGET_INCLUDE_DIRECTORIES(text-language-transition-audit PRIVATE ${X11_INCLUDE_DIR})

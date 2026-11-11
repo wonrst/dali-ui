@@ -68,6 +68,7 @@ void ValidateFontsForProcessingSource(MultilanguageSupport&                   mu
  * @param[in] numberOfCharacters The number of characters to shape.
  * @param[in,out] visualModel The visual model receiving shaped glyph data.
  * @param[out] newParagraphGlyphs The glyph indices that begin new paragraphs.
+ * @param[in] language The BCP 47 shaping language for ordinary text, or empty to use the system shaping language.
  */
 void ShapeTextForProcessingSource(TextAbstraction::Shaping&    shaping,
                                   TextAbstraction::FontClient& fontClient,
@@ -80,7 +81,8 @@ void ShapeTextForProcessingSource(TextAbstraction::Shaping&    shaping,
                                   GlyphIndex                   startGlyphIndex,
                                   Length                       numberOfCharacters,
                                   VisualModel&                 visualModel,
-                                  Vector<GlyphIndex>&          newParagraphGlyphs);
+                                  Vector<GlyphIndex>&          newParagraphGlyphs,
+                                  const std::string&           language = {});
 
 /**
  * @brief Retrieves metrics for ordinary glyphs while preserving replacement metrics.

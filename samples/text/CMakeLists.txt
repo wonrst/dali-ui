@@ -12,6 +12,7 @@ ENDIF()
 DALI_ADD_SAMPLE(text.example text-example.cpp)
 DALI_ADD_SAMPLE(text-maximum-lines.example text-maximum-lines-example.cpp)
 DALI_ADD_SAMPLE(text-layout-direction.example text-layout-direction-example.cpp)
+DALI_ADD_SAMPLE(text-language.example text-language-example.cpp)
 DALI_ADD_SAMPLE(text-markup.example text-markup-example.cpp)
 DALI_ADD_SAMPLE(text-marquee.example text-marquee-example.cpp)
 DALI_ADD_SAMPLE(text-style.example text-style-example.cpp)
@@ -51,6 +52,20 @@ DALI_ADD_SAMPLE(text-windows.example text-windows-example.cpp)
 DALI_ADD_SAMPLE(text-image-span.example text-image-span-example.cpp)
 DALI_ADD_SAMPLE(text-input-image-span.example text-input-image-span-example.cpp)
 DALI_ADD_SAMPLE(text-image-span-perf.example text-image-span-perf-example.cpp)
+
+OPTION(TEXT_LANGUAGE_CAPTURE "Enable X11 captures for the text language sample" OFF)
+IF(TEXT_LANGUAGE_CAPTURE)
+  FIND_PACKAGE(X11 REQUIRED)
+  TARGET_COMPILE_DEFINITIONS(text-language.example PRIVATE TEXT_LANGUAGE_CAPTURE)
+  TARGET_INCLUDE_DIRECTORIES(text-language.example PRIVATE ${X11_INCLUDE_DIR})
+  TARGET_LINK_LIBRARIES(text-language.example PRIVATE ${X11_LIBRARIES})
+ENDIF()
+
+OPTION(TEXT_LANGUAGE_AUDIT "Build text language regression probes (Unix Debug SDK)" OFF)
+IF(TEXT_LANGUAGE_AUDIT)
+  ADD_SUBDIRECTORY("${CMAKE_CURRENT_LIST_DIR}/../../automated-tests/text-language"
+                   "text-language-audit")
+ENDIF()
 
 # Generate runtime message catalogs when gettext is available.
 IF(DEFINED ENV{DALI_MSGFMT_EXECUTABLE}

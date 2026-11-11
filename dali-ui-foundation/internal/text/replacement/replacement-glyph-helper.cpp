@@ -159,7 +159,8 @@ void ShapeTextForProcessingSource(TextAbstraction::Shaping&    shaping,
                                   GlyphIndex                   startGlyphIndex,
                                   Length                       numberOfCharacters,
                                   VisualModel&                 visualModel,
-                                  Vector<GlyphIndex>&          newParagraphGlyphs)
+                                  Vector<GlyphIndex>&          newParagraphGlyphs,
+                                  const std::string&           language)
 {
   if(!source.HasReplacements())
   {
@@ -175,7 +176,7 @@ void ShapeTextForProcessingSource(TextAbstraction::Shaping&    shaping,
               visualModel.mGlyphs,
               visualModel.mGlyphsToCharacters,
               visualModel.mCharactersPerGlyph,
-              newParagraphGlyphs);
+              newParagraphGlyphs, language);
     return;
   }
 
@@ -201,7 +202,7 @@ void ShapeTextForProcessingSource(TextAbstraction::Shaping&    shaping,
                 visualModel.mGlyphs,
                 visualModel.mGlyphsToCharacters,
                 visualModel.mCharactersPerGlyph,
-                newParagraphGlyphs);
+                newParagraphGlyphs, language);
     }
   },
                            [&](const ProjectedReplacementRun& replacement)

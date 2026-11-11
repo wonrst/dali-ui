@@ -530,6 +530,29 @@ void LabelImpl::OnInlineReplacementResourcesReady(Ui::View)
   }
 }
 
+bool LabelImpl::SetTextLanguage(const Dali::String& language)
+{
+  const auto previous = mController->GetTextLanguage();
+  if(!mController->SetTextLanguage(ToStdString(language)))
+  {
+    return false;
+  }
+  if(previous != mController->GetTextLanguage())
+  {
+    InvalidateMarqueeStartGeometry();
+    if(mVisual && mController->IsAsyncRendering())
+    {
+      Internal::TextVisual::CancelAsyncRender(mVisual);
+    }
+  }
+  return true;
+}
+
+Dali::String LabelImpl::GetTextLanguage() const
+{
+  return ToDaliString(mController->GetTextLanguage());
+}
+
 void LabelImpl::SetFontFamily(const Dali::String& fontFamily)
 {
   // InvalidateMeasure() may be called if needed.
@@ -4353,6 +4376,7 @@ Ui::Text::AsyncTextParameters LabelImpl::GetAsyncTextParameters(const Text::Asyn
   parameters.anchorColor                  = mController->GetAnchorColor();
   parameters.anchorClickedColor           = mController->GetAnchorClickedColor();
   parameters.fontFamily                   = mController->GetDefaultFontFamily();
+  parameters.textLanguage                 = mController->GetResolvedTextLanguage();
   parameters.fontWeight                   = mController->GetDefaultFontWeight();
   parameters.fontWidth                    = mController->GetDefaultFontWidth();
   parameters.fontSlant                    = mController->GetDefaultFontSlant();

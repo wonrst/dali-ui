@@ -18,6 +18,7 @@
 // EXTERNAL INCLUDES
 #include <dali/devel-api/adaptor-framework/window-devel.h>
 #include <dali/devel-api/text-abstraction/script.h>
+#include <dali/devel-api/text-abstraction/shaping.h>
 #include <dali/integration-api/adaptor-framework/adaptor.h>
 #include <dali/integration-api/adaptor-framework/clipboard-integ.h>
 #include <dali/integration-api/debug.h>
@@ -890,6 +891,59 @@ float Controller::GetDefaultFontLineHeight()
 float Controller::GetDefaultLineBoxHeight()
 {
   return mImpl->GetDefaultLineBoxHeight();
+}
+
+bool Controller::SetTextLanguage(const std::string& language)
+{
+  std::string normalized;
+  if(!TextAbstraction::NormalizeTextLanguage(language, normalized))
+  {
+    return false;
+  }
+  if(mImpl->mTextLanguage != normalized)
+  {
+    mImpl->mTextLanguage = std::move(normalized);
+    UpdateCursorPosition(mImpl->mEventData);
+    mImpl->ClearFontData();
+    RequestRelayout();
+    RequestAsyncRender();
+    InvalidateMeasure();
+  }
+  return true;
+}
+
+const std::string& Controller::GetTextLanguage() const
+{
+  return mImpl->mTextLanguage;
+}
+
+std::string Controller::GetResolvedTextLanguage() const
+{
+  return mImpl->GetResolvedTextLanguage();
+}
+
+std::string Controller::Impl::GetResolvedTextLanguage() const
+{
+  if(!mTextLanguage.empty())
+  {
+    return mTextLanguage;
+  }
+  // GetLocale() strips the POSIX territory, but can retain an encoding or
+  // modifier when there is no territory (e.g. sr.UTF-8 or sr@latin).
+  // HarfBuzz historically stops at these separators. Preserve that behavior
+  // while taking a BCP 47 snapshot for the async request.
+  std::string locale = TextAbstraction::GetLocale();
+  const auto  suffix = locale.find_first_of(".@");
+  if(suffix != std::string::npos)
+  {
+    locale.erase(suffix);
+  }
+  std::string normalized;
+  if(!TextAbstraction::NormalizeTextLanguage(locale, normalized) || normalized.empty())
+  {
+    return "und";
+  }
+  return normalized;
 }
 
 void Controller::SetDefaultFontFamily(const std::string& defaultFontFamily)
